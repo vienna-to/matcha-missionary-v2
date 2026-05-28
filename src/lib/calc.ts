@@ -56,6 +56,7 @@ export type ItemTotals = {
   menuItemId: string;
   name: string;
   category: string;
+  sortOrder: number;
   qty: number;
   paidQty: number;
   unpaidQty: number;
@@ -84,6 +85,7 @@ export function computeItemTotals(
       menuItemId: mi.id,
       name: mi.name,
       category: mi.category,
+      sortOrder: mi.sortOrder ?? Number.POSITIVE_INFINITY,
       qty: 0,
       paidQty: 0,
       unpaidQty: 0,

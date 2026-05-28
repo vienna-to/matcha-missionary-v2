@@ -337,13 +337,20 @@ const settings: Settings = {
 };
 
 export function initialSeed(): AppState {
+  // Stamp sortOrder by array position so seeded items display in the order
+  // they're declared above.
+  const menuItemsOrdered = menuItems.map((m, idx) => ({ ...m, sortOrder: idx }));
+  const snapshotOrdered = {
+    ...snapshot,
+    menuItems: snapshot.menuItems.map((m, idx) => ({ ...m, sortOrder: idx })),
+  };
   // Deep clone so external callers can't mutate the module-level constants.
   return JSON.parse(
     JSON.stringify({
       settings,
       ingredients,
-      menuItems,
-      menuSnapshots: [snapshot],
+      menuItems: menuItemsOrdered,
+      menuSnapshots: [snapshotOrdered],
       events: [event],
       orders,
     } satisfies AppState),

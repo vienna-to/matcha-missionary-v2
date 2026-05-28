@@ -11,7 +11,7 @@ export const Button = forwardRef<
   }
 >(({ className, variant = "primary", size = "md", ...props }, ref) => {
   const base =
-    "t-display inline-flex items-center justify-center gap-2 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed select-none";
+    "t-display inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed select-none";
   const variants = {
     primary: "bg-matcha-500 text-white hover:bg-matcha-600 active:bg-matcha-700",
     secondary: "bg-cream-200 text-matcha-900 hover:bg-cream-300",

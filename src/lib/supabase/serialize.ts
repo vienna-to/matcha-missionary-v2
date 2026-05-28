@@ -45,6 +45,7 @@ export type DbMenuItem = {
   default_cream_id: string | null;
   allowed_milk_ids: string[];
   allowed_cream_ids: string[];
+  sort_order: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -58,6 +59,7 @@ export type DbEvent = {
   end_time: string | null;
   target_revenue: number | null;
   is_active: boolean;
+  kind: Event["kind"];
   menu_snapshot: MenuSnapshot;
   fixed_costs: Event["fixedCosts"];
   notes: string | null;
@@ -130,6 +132,7 @@ export function fromMenuItem(r: DbMenuItem): MenuItem {
     defaultCreamId: r.default_cream_id ?? undefined,
     allowedMilkIds: r.allowed_milk_ids ?? [],
     allowedCreamIds: r.allowed_cream_ids ?? [],
+    sortOrder: r.sort_order ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -146,6 +149,7 @@ export function fromEvent(r: DbEvent): Event {
     menuSnapshotId: r.menu_snapshot?.id ?? r.id,
     fixedCosts: r.fixed_costs ?? [],
     isActive: r.is_active,
+    kind: r.kind ?? "live",
     notes: r.notes ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -239,6 +243,7 @@ export function toMenuItemInsert(workspaceId: string, m: MenuItem): Omit<DbMenuI
     default_cream_id: nul(m.defaultCreamId),
     allowed_milk_ids: m.allowedMilkIds,
     allowed_cream_ids: m.allowedCreamIds,
+    sort_order: m.sortOrder ?? null,
   };
 }
 
@@ -255,6 +260,7 @@ export function toMenuItemPatch(patch: Partial<MenuItem>): Partial<DbMenuItem> {
   if (patch.defaultCreamId !== undefined) r.default_cream_id = nul(patch.defaultCreamId);
   if (patch.allowedMilkIds !== undefined) r.allowed_milk_ids = patch.allowedMilkIds;
   if (patch.allowedCreamIds !== undefined) r.allowed_cream_ids = patch.allowedCreamIds;
+  if (patch.sortOrder !== undefined) r.sort_order = patch.sortOrder;
   return r;
 }
 
@@ -272,6 +278,7 @@ export function toEventInsert(
     end_time: evt.endTime || null,
     target_revenue: nul(evt.targetRevenue),
     is_active: evt.isActive,
+    kind: evt.kind ?? "live",
     menu_snapshot: snapshot,
     fixed_costs: evt.fixedCosts,
     notes: nul(evt.notes),

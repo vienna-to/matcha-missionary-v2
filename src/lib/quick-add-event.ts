@@ -66,6 +66,7 @@ export function buildQuickAddEvent({
     menuSnapshotId: snapshot.id,
     fixedCosts: [],
     isActive: false, // past event — don't steal active from current live event
+    kind: "past",
     notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
     createdAt: now,
     updatedAt: now,

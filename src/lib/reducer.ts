@@ -164,9 +164,14 @@ export function reducer(state: AppState, action: Action): AppState {
       };
 
     case "ADD_MENU_ITEM": {
+      const maxOrder = state.menuItems.reduce(
+        (m, x) => Math.max(m, x.sortOrder ?? -1),
+        -1,
+      );
       const item: MenuItem = {
         ...action.item,
         id: newId("mi"),
+        sortOrder: action.item.sortOrder ?? maxOrder + 1,
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };

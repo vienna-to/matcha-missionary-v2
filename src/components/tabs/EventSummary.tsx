@@ -256,7 +256,9 @@ export default function EventSummary() {
         )}
       </Card>
 
-      {/* Chart 3: Orders over time of day */}
+      {/* Chart 3: Orders over time of day — only meaningful for live events
+          where each order has a real submitted_at timestamp. */}
+      {event.kind !== "past" ? (
       <Card>
         <h2 className="t-display mb-3 text-sm">Orders over time of day</h2>
         {timeBuckets.length === 0 ? (
@@ -283,6 +285,7 @@ export default function EventSummary() {
           </ResponsiveContainer>
         )}
       </Card>
+      ) : null}
 
       {/* Per-item table with margins (fully-loaded) */}
       <Card>
@@ -300,7 +303,9 @@ export default function EventSummary() {
               </tr>
             </thead>
             <tbody>
-              {totals.byItem.map((t) => {
+              {[...totals.byItem]
+                .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+                .map((t) => {
                 const price = t.priceSnap;
                 const loaded = t.costSnapAvg + fixedShare;
                 const loadedMargin = price > 0 ? (price - loaded) / price : null;
@@ -340,11 +345,14 @@ export default function EventSummary() {
         </p>
       </Card>
 
-      {/* Payment mix */}
-      <Card>
-        <h2 className="t-display mb-3 text-sm">Payment breakdown</h2>
-        <PaymentMix totals={totals} />
-      </Card>
+      {/* Payment mix — past events synthesize a single payment method per
+          order, which would skew this card. Suppress it. */}
+      {event.kind !== "past" ? (
+        <Card>
+          <h2 className="t-display mb-3 text-sm">Payment breakdown</h2>
+          <PaymentMix totals={totals} />
+        </Card>
+      ) : null}
     </div>
   );
 }

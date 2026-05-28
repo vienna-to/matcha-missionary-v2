@@ -4,14 +4,14 @@ import { AlertTriangle } from "lucide-react";
 import { Badge, Card } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { defaultItemCost, defaultItemMargin, ingredientCostPerCanonical } from "@/lib/calc";
-import type { Ingredient } from "@/lib/types";
+import { compareMenuItems, type Ingredient } from "@/lib/types";
 import { UNIT_LABELS, UNIT_TABLE } from "@/lib/units";
 import { formatMoney, formatPct } from "@/lib/utils";
 
 export default function Finance() {
   const { state } = useStore();
   const threshold = state.settings.lowMarginThresholdPct / 100;
-  const activeItems = state.menuItems.filter((m) => m.active);
+  const activeItems = state.menuItems.filter((m) => m.active).sort(compareMenuItems);
 
   return (
     <div className="space-y-5">

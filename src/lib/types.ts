@@ -94,9 +94,20 @@ export type MenuItem = {
   defaultCreamId?: string;
   allowedMilkIds: string[];
   allowedCreamIds: string[];
+  /** Ascending sort key — controls display order in menu/order/finance views.
+   *  Missing values are treated as Infinity (sort last). */
+  sortOrder?: number;
   createdAt: string;
   updatedAt: string;
 };
+
+/** Stable comparator: sortOrder ASC, then name. */
+export function compareMenuItems(a: MenuItem, b: MenuItem): number {
+  const sa = a.sortOrder ?? Number.POSITIVE_INFINITY;
+  const sb = b.sortOrder ?? Number.POSITIVE_INFINITY;
+  if (sa !== sb) return sa - sb;
+  return a.name.localeCompare(b.name);
+}
 
 export type MenuSnapshot = {
   id: string;
@@ -114,6 +125,16 @@ export type FixedCost = {
   allocationMethod: "spread_evenly" | "event_only";
 };
 
+/**
+ * "live"  = a real event with full order tracking — every metric available.
+ * "past"  = a quick-entered retroactive event; per-order data is synthetic
+ *           so payment-mix and time-of-day charts are suppressed.
+ *
+ * Optional: rows without a value (legacy localStorage data, fresh DB inserts
+ * before the migration) are treated as "live".
+ */
+export type EventKind = "live" | "past";
+
 export type Event = {
   id: string;
   name: string;
@@ -124,6 +145,7 @@ export type Event = {
   menuSnapshotId: string;
   fixedCosts: FixedCost[];
   isActive: boolean;
+  kind?: EventKind;
   notes?: string;
   createdAt: string;
   updatedAt: string;

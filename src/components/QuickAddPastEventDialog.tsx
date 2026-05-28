@@ -40,15 +40,17 @@ export default function QuickAddPastEventDialog({
   const { state, dispatch, backend, workspaceId } = useStore();
 
   // Past events can include sales of items that have since been archived,
-  // so show every menu item — active first, archived (greyed) below.
-  const allMenu = useMemo(
-    () =>
-      [...state.menuItems].sort((a, b) => {
-        if (a.active !== b.active) return a.active ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      }),
-    [state.menuItems],
-  );
+  // so show every menu item — active first (in their Menu Manager order),
+  // archived (greyed) below.
+  const allMenu = useMemo(() => {
+    const sorted = [...state.menuItems].sort(
+      (a, b) =>
+        (a.sortOrder ?? Number.POSITIVE_INFINITY) -
+        (b.sortOrder ?? Number.POSITIVE_INFINITY) ||
+        a.name.localeCompare(b.name),
+    );
+    return sorted.sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1));
+  }, [state.menuItems]);
 
   const [name, setName] = useState("");
   const [date, setDate] = useState(todayLocal());

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Archive, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Archive, Trash2, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
 import {
   Button,
   Card,
@@ -19,6 +19,7 @@ import { useStore } from "@/lib/store";
 import {
   SIZES,
   SIZE_LABELS,
+  compareMenuItems,
   type Ingredient,
   type IngredientLine,
   type MenuItem,
@@ -64,11 +65,26 @@ function ItemsList() {
   const [editing, setEditing] = useState<MenuItem | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const active = state.menuItems.filter((m) => m.active);
-  const archived = state.menuItems.filter((m) => !m.active);
+  const sorted = [...state.menuItems].sort(compareMenuItems);
+  const active = sorted.filter((m) => m.active);
+  const archived = sorted.filter((m) => !m.active);
   const usedIds = new Set(
     state.orders.flatMap((o) => o.items.map((it) => it.menuItemId)),
   );
+
+  function move(item: MenuItem, dir: -1 | 1) {
+    // Swap with the neighbour in the *active* list (archived items keep their
+    // own ordering; we only let users sort what they can see in Live Orders).
+    const list = item.active ? active : archived;
+    const idx = list.findIndex((m) => m.id === item.id);
+    const j = idx + dir;
+    if (idx === -1 || j < 0 || j >= list.length) return;
+    const other = list[j];
+    const aOrder = item.sortOrder ?? idx;
+    const bOrder = other.sortOrder ?? j;
+    dispatch({ type: "UPDATE_MENU_ITEM", id: item.id, patch: { sortOrder: bOrder } });
+    dispatch({ type: "UPDATE_MENU_ITEM", id: other.id, patch: { sortOrder: aOrder } });
+  }
 
   return (
     <div className="space-y-4">
@@ -86,12 +102,16 @@ function ItemsList() {
               description="Add a menu item to get started."
             />
           ) : (
-            active.map((item) => (
+            active.map((item, idx) => (
               <ItemRow
                 key={item.id}
                 item={item}
                 ingredients={state.ingredients}
                 lowMarginPct={state.settings.lowMarginThresholdPct}
+                canMoveUp={idx > 0}
+                canMoveDown={idx < active.length - 1}
+                onMoveUp={() => move(item, -1)}
+                onMoveDown={() => move(item, 1)}
                 onEdit={() => setEditing(item)}
                 onArchive={() =>
                   dispatch({
@@ -119,12 +139,16 @@ function ItemsList() {
       {archived.length > 0 ? (
         <Section title={`Archived (${archived.length})`}>
           <div className="space-y-2">
-            {archived.map((item) => (
+            {archived.map((item, idx) => (
               <ItemRow
                 key={item.id}
                 item={item}
                 ingredients={state.ingredients}
                 lowMarginPct={state.settings.lowMarginThresholdPct}
+                canMoveUp={idx > 0}
+                canMoveDown={idx < archived.length - 1}
+                onMoveUp={() => move(item, -1)}
+                onMoveDown={() => move(item, 1)}
                 onEdit={() => setEditing(item)}
                 onArchive={() =>
                   dispatch({
@@ -213,6 +237,10 @@ function ItemRow({
   item,
   ingredients,
   lowMarginPct,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
   onEdit,
   onArchive,
   onDelete,
@@ -222,6 +250,10 @@ function ItemRow({
   item: MenuItem;
   ingredients: Ingredient[];
   lowMarginPct: number;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
   onEdit: () => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -256,6 +288,26 @@ function ItemRow({
           <Stat label="Margin" value={formatPct(margin)} />
         </div>
         <div className="flex gap-1.5">
+          <div className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              onClick={onMoveUp}
+              disabled={!canMoveUp}
+              title="Move up"
+              className="rounded-md border border-cream-200 bg-white px-1 py-0.5 text-matcha-900 hover:bg-cream-100 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ArrowUp className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={onMoveDown}
+              disabled={!canMoveDown}
+              title="Move down"
+              className="rounded-md border border-cream-200 bg-white px-1 py-0.5 text-matcha-900 hover:bg-cream-100 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ArrowDown className="h-3 w-3" />
+            </button>
+          </div>
           <Button size="sm" variant="outline" onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>

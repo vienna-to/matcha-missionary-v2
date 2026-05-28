@@ -30,6 +30,7 @@ import {
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   PAYMENT_STATUS_LABELS,
+  compareMenuItems,
   type CompReason,
   type Ingredient,
   type MenuItem,
@@ -82,7 +83,7 @@ export default function LiveOrders() {
   }
 
   const activeEvent_ = event;
-  const activeItems = snapshot.menuItems.filter((m) => m.active);
+  const activeItems = snapshot.menuItems.filter((m) => m.active).sort(compareMenuItems);
   const total = cart.reduce((sum, line) => {
     const mi = snapshot.menuItems.find((m) => m.id === line.menuItemId);
     return sum + (mi ? mi.price : 0) * line.quantity;

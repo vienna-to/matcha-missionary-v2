@@ -1,0 +1,342 @@
+import { computeItemCost } from "./calc";
+import { newId, nowIso } from "./id";
+import type {
+  AppState,
+  Event,
+  FixedCost,
+  Ingredient,
+  MenuItem,
+  MenuSnapshot,
+  Order,
+  OrderItem,
+  OrderItemStatus,
+  OrderStatus,
+  Settings,
+} from "./types";
+
+export type Action =
+  | { type: "REPLACE"; state: AppState }
+  | { type: "UPDATE_SETTINGS"; patch: Partial<Settings> }
+  | { type: "ADD_INGREDIENT"; ing: Omit<Ingredient, "id" | "createdAt" | "updatedAt"> }
+  | { type: "UPDATE_INGREDIENT"; id: string; patch: Partial<Ingredient> }
+  | { type: "DELETE_INGREDIENT"; id: string }
+  | {
+      type: "ADD_MENU_ITEM";
+      item: Omit<MenuItem, "id" | "createdAt" | "updatedAt">;
+    }
+  | { type: "UPDATE_MENU_ITEM"; id: string; patch: Partial<MenuItem> }
+  | { type: "DELETE_MENU_ITEM"; id: string }
+  | {
+      type: "CREATE_EVENT";
+      event: Omit<
+        Event,
+        "id" | "menuSnapshotId" | "fixedCosts" | "isActive" | "createdAt" | "updatedAt"
+      > & { initialFixedCosts?: FixedCost[] };
+    }
+  | { type: "UPDATE_EVENT"; id: string; patch: Partial<Event> }
+  | { type: "DELETE_EVENT"; id: string }
+  | { type: "SET_ACTIVE_EVENT"; id: string }
+  | {
+      type: "UPDATE_EVENT_SNAPSHOT";
+      eventId: string;
+      patch: Partial<MenuSnapshot>;
+    }
+  | {
+      type: "SUBMIT_ORDER";
+      order: Omit<Order, "id" | "orderNumber" | "items" | "submittedAt" | "updatedAt"> & {
+        items: (Omit<OrderItem, "id" | "orderId" | "priceSnap" | "costSnap" | "menuItemNameSnap" | "status"> & {
+          status?: OrderItemStatus;
+        })[];
+      };
+    }
+  | { type: "UPDATE_ORDER"; id: string; patch: Partial<Order> }
+  | {
+      type: "REPLACE_ORDER_ITEMS";
+      orderId: string;
+      items: (Omit<OrderItem, "id" | "orderId" | "priceSnap" | "costSnap" | "menuItemNameSnap" | "status"> & {
+        status?: OrderItemStatus;
+      })[];
+    }
+  | {
+      type: "SET_ORDER_ITEM_STATUS";
+      orderId: string;
+      orderItemId: string;
+      status: OrderItemStatus;
+    }
+  | { type: "DELETE_ORDER"; id: string }
+  | { type: "RESET_TO_SEED"; seed: AppState };
+
+function findSnapshot(state: AppState, id: string): MenuSnapshot | undefined {
+  return state.menuSnapshots.find((s) => s.id === id);
+}
+
+function findEvent(state: AppState, id: string): Event | undefined {
+  return state.events.find((e) => e.id === id);
+}
+
+function deriveOrderItem(
+  raw: Omit<OrderItem, "id" | "orderId" | "priceSnap" | "costSnap" | "menuItemNameSnap" | "status"> & {
+    status?: OrderItemStatus;
+  },
+  orderId: string,
+  snapshot: MenuSnapshot,
+): OrderItem {
+  const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
+  const cost = mi
+    ? computeItemCost(mi, snapshot.ingredients, {
+        milkChoiceId: raw.milkChoiceId,
+        creamChoiceId: raw.creamChoiceId,
+      })
+    : 0;
+  return {
+    id: newId("oi"),
+    orderId,
+    menuItemId: raw.menuItemId,
+    menuItemNameSnap: mi?.name ?? "Unknown item",
+    priceSnap: mi?.price ?? 0,
+    costSnap: cost,
+    quantity: raw.quantity,
+    milkChoiceId: raw.milkChoiceId,
+    creamChoiceId: raw.creamChoiceId,
+    sugarAdjustment: raw.sugarAdjustment,
+    iceAdjustment: raw.iceAdjustment,
+    specialRequests: raw.specialRequests,
+    status: raw.status ?? "pending",
+  };
+}
+
+function nextOrderNumber(state: AppState, eventId: string): number {
+  const ns = state.orders
+    .filter((o) => o.eventId === eventId)
+    .map((o) => o.orderNumber);
+  return ns.length === 0 ? 1 : Math.max(...ns) + 1;
+}
+
+function deriveOrderStatusFromItems(items: OrderItem[]): OrderStatus | null {
+  if (items.length === 0) return null;
+  if (items.every((it) => it.status === "done")) return "completed";
+  if (items.some((it) => it.status !== "pending")) return "in_progress";
+  return "pending";
+}
+
+export function reducer(state: AppState, action: Action): AppState {
+  switch (action.type) {
+    case "REPLACE":
+      return action.state;
+
+    case "UPDATE_SETTINGS":
+      return { ...state, settings: { ...state.settings, ...action.patch } };
+
+    case "ADD_INGREDIENT": {
+      const ing: Ingredient = {
+        ...action.ing,
+        id: newId("ing"),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      return { ...state, ingredients: [...state.ingredients, ing] };
+    }
+
+    case "UPDATE_INGREDIENT":
+      return {
+        ...state,
+        ingredients: state.ingredients.map((i) =>
+          i.id === action.id ? { ...i, ...action.patch, updatedAt: nowIso() } : i,
+        ),
+      };
+
+    case "DELETE_INGREDIENT":
+      return {
+        ...state,
+        ingredients: state.ingredients.filter((i) => i.id !== action.id),
+      };
+
+    case "ADD_MENU_ITEM": {
+      const item: MenuItem = {
+        ...action.item,
+        id: newId("mi"),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      return { ...state, menuItems: [...state.menuItems, item] };
+    }
+
+    case "UPDATE_MENU_ITEM":
+      return {
+        ...state,
+        menuItems: state.menuItems.map((m) =>
+          m.id === action.id ? { ...m, ...action.patch, updatedAt: nowIso() } : m,
+        ),
+      };
+
+    case "DELETE_MENU_ITEM": {
+      // Block delete if used in any order
+      const used = state.orders.some((o) =>
+        o.items.some((it) => it.menuItemId === action.id),
+      );
+      if (used) return state;
+      return {
+        ...state,
+        menuItems: state.menuItems.filter((m) => m.id !== action.id),
+      };
+    }
+
+    case "CREATE_EVENT": {
+      // Snapshot the *current master menu* (deep copy) so further edits don't
+      // mutate this event's frozen view.
+      const snapshot: MenuSnapshot = {
+        id: newId("snap"),
+        menuItems: state.menuItems
+          .filter((m) => m.active)
+          .map((m) => ({
+            ...m,
+            ingredientLines: m.ingredientLines.map((l) => ({ ...l })),
+            allowedMilkIds: [...m.allowedMilkIds],
+            allowedCreamIds: [...m.allowedCreamIds],
+          })),
+        ingredients: state.ingredients.map((i) => ({ ...i })),
+        createdAt: nowIso(),
+      };
+      const event: Event = {
+        ...action.event,
+        id: newId("evt"),
+        menuSnapshotId: snapshot.id,
+        fixedCosts: action.event.initialFixedCosts ?? [],
+        isActive: true, // newest event becomes Active (create morning-of)
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      return {
+        ...state,
+        menuSnapshots: [...state.menuSnapshots, snapshot],
+        // Deactivate any previously active events so only the new one is Active.
+        events: [...state.events.map((e) => ({ ...e, isActive: false })), event],
+      };
+    }
+
+    case "UPDATE_EVENT":
+      return {
+        ...state,
+        events: state.events.map((e) =>
+          e.id === action.id ? { ...e, ...action.patch, updatedAt: nowIso() } : e,
+        ),
+      };
+
+    case "DELETE_EVENT": {
+      const evt = findEvent(state, action.id);
+      if (!evt) return state;
+      // Also remove the snapshot if it's not shared and all related orders
+      return {
+        ...state,
+        events: state.events.filter((e) => e.id !== action.id),
+        menuSnapshots: state.menuSnapshots.filter((s) => s.id !== evt.menuSnapshotId),
+        orders: state.orders.filter((o) => o.eventId !== action.id),
+      };
+    }
+
+    case "SET_ACTIVE_EVENT":
+      return {
+        ...state,
+        events: state.events.map((e) => ({
+          ...e,
+          isActive: e.id === action.id,
+          updatedAt: e.id === action.id ? nowIso() : e.updatedAt,
+        })),
+      };
+
+    case "UPDATE_EVENT_SNAPSHOT":
+      return {
+        ...state,
+        menuSnapshots: state.menuSnapshots.map((s) => {
+          const evt = state.events.find((e) => e.id === action.eventId);
+          if (!evt || s.id !== evt.menuSnapshotId) return s;
+          return { ...s, ...action.patch };
+        }),
+      };
+
+    case "SUBMIT_ORDER": {
+      const evt = findEvent(state, action.order.eventId);
+      if (!evt) return state;
+      const snap = findSnapshot(state, evt.menuSnapshotId);
+      if (!snap) return state;
+      const orderId = newId("ord");
+      const items: OrderItem[] = action.order.items.map((raw) =>
+        deriveOrderItem(raw, orderId, snap),
+      );
+      const order: Order = {
+        ...action.order,
+        id: orderId,
+        orderNumber: nextOrderNumber(state, evt.id),
+        items,
+        submittedAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      return { ...state, orders: [...state.orders, order] };
+    }
+
+    case "UPDATE_ORDER":
+      return {
+        ...state,
+        orders: state.orders.map((o) => {
+          if (o.id !== action.id) return o;
+          const next: Order = { ...o, ...action.patch, updatedAt: nowIso() };
+          // Stamp doneAt the first time an order transitions to completed.
+          if (next.status === "completed" && !next.doneAt) {
+            next.doneAt = nowIso();
+          }
+          // Clear doneAt if reopened from completed.
+          if (next.status !== "completed" && next.doneAt) {
+            next.doneAt = undefined;
+          }
+          return next;
+        }),
+      };
+
+    case "REPLACE_ORDER_ITEMS": {
+      const order = state.orders.find((o) => o.id === action.orderId);
+      if (!order) return state;
+      const evt = findEvent(state, order.eventId);
+      if (!evt) return state;
+      const snap = findSnapshot(state, evt.menuSnapshotId);
+      if (!snap) return state;
+      const items: OrderItem[] = action.items.map((raw) =>
+        deriveOrderItem(raw, order.id, snap),
+      );
+      return {
+        ...state,
+        orders: state.orders.map((o) =>
+          o.id === order.id ? { ...o, items, updatedAt: nowIso() } : o,
+        ),
+      };
+    }
+
+    case "SET_ORDER_ITEM_STATUS":
+      return {
+        ...state,
+        orders: state.orders.map((o) => {
+          if (o.id !== action.orderId) return o;
+          const items = o.items.map((it) =>
+            it.id === action.orderItemId ? { ...it, status: action.status } : it,
+          );
+          const derived = deriveOrderStatusFromItems(items);
+          const status: OrderStatus =
+            o.status === "cancelled"
+              ? "cancelled"
+              : derived ?? o.status;
+          let doneAt = o.doneAt;
+          if (status === "completed" && !doneAt) doneAt = nowIso();
+          else if (status !== "completed" && doneAt) doneAt = undefined;
+          return { ...o, items, status, doneAt, updatedAt: nowIso() };
+        }),
+      };
+
+    case "DELETE_ORDER":
+      return { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
+
+    case "RESET_TO_SEED":
+      return action.seed;
+
+    default:
+      return state;
+  }
+}

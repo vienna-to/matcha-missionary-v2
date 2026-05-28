@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 253 251 246;
+  --fg: 47 62 37;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgb(111 143 74 / 0.6);
+  outline-offset: 2px;
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/*
+ * Type system
+ * .t-display — bold uppercase Montserrat: page titles, drink names, tab labels,
+ *              card section headers, modal titles, metric labels.
+ * .t-caption — regular lowercase Montserrat: subtitles, helper text, footnotes.
+ * Tabular numbers (prices, totals) are kept in mixed case via .tabular-nums.
+ */
+.t-display {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.t-caption {
+  font-weight: 400;
+  text-transform: lowercase;
+  letter-spacing: 0.01em;
+}
+/* Brand-only: Fraunces, used exclusively for "Matcha Missionary" at top-left. */
+.t-brand {
+  font-family: var(--font-brand), Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}

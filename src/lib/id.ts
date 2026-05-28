@@ -1,8 +1,20 @@
 import { customAlphabet, nanoid } from "nanoid";
 
+/**
+ * Generate a fresh ID for a new entity. Returns a UUID v4 — required because
+ * the Supabase schema uses `uuid` primary keys. The optional `prefix` arg is
+ * preserved for API compatibility but no longer included in the result.
+ *
+ * (Seed data still uses readable string IDs like "mi_classic" — those only
+ * live in localStorage mode; the Supabase backend never sees them.)
+ */
 export function newId(prefix?: string): string {
-  const id = nanoid(10);
-  return prefix ? `${prefix}_${id}` : id;
+  void prefix;
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback for ancient environments — produces a uuid-shaped string from nanoid.
+  return `${nanoid(8)}-${nanoid(4)}-${nanoid(4)}-${nanoid(4)}-${nanoid(12)}`;
 }
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

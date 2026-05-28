@@ -64,7 +64,19 @@ export type Action =
       status: OrderItemStatus;
     }
   | { type: "DELETE_ORDER"; id: string }
-  | { type: "RESET_TO_SEED"; seed: AppState };
+  | { type: "RESET_TO_SEED"; seed: AppState }
+  // -- Realtime echoes from Supabase (idempotent upsert/delete) --
+  | { type: "RT_UPSERT_INGREDIENT"; ing: Ingredient }
+  | { type: "RT_DELETE_INGREDIENT"; id: string }
+  | { type: "RT_UPSERT_MENU_ITEM"; item: MenuItem }
+  | { type: "RT_DELETE_MENU_ITEM"; id: string }
+  | { type: "RT_UPSERT_EVENT"; event: Event; snapshot?: MenuSnapshot }
+  | { type: "RT_DELETE_EVENT"; id: string }
+  | { type: "RT_UPSERT_ORDER"; order: Omit<Order, "items">; preserveItems?: boolean }
+  | { type: "RT_DELETE_ORDER"; id: string }
+  | { type: "RT_UPSERT_ORDER_ITEM"; item: OrderItem }
+  | { type: "RT_DELETE_ORDER_ITEM"; id: string; orderId?: string }
+  | { type: "RT_UPDATE_SETTINGS"; patch: Partial<Settings> };
 
 function findSnapshot(state: AppState, id: string): MenuSnapshot | undefined {
   return state.menuSnapshots.find((s) => s.id === id);
@@ -335,6 +347,110 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "RESET_TO_SEED":
       return action.seed;
+
+    // ---------- Realtime echoes ----------
+
+    case "RT_UPSERT_INGREDIENT": {
+      const exists = state.ingredients.some((i) => i.id === action.ing.id);
+      return {
+        ...state,
+        ingredients: exists
+          ? state.ingredients.map((i) => (i.id === action.ing.id ? action.ing : i))
+          : [...state.ingredients, action.ing],
+      };
+    }
+    case "RT_DELETE_INGREDIENT":
+      return { ...state, ingredients: state.ingredients.filter((i) => i.id !== action.id) };
+
+    case "RT_UPSERT_MENU_ITEM": {
+      const exists = state.menuItems.some((m) => m.id === action.item.id);
+      return {
+        ...state,
+        menuItems: exists
+          ? state.menuItems.map((m) => (m.id === action.item.id ? action.item : m))
+          : [...state.menuItems, action.item],
+      };
+    }
+    case "RT_DELETE_MENU_ITEM":
+      return { ...state, menuItems: state.menuItems.filter((m) => m.id !== action.id) };
+
+    case "RT_UPSERT_EVENT": {
+      const evt = action.event;
+      const existsEvent = state.events.some((e) => e.id === evt.id);
+      const snapshotsBase = action.snapshot
+        ? state.menuSnapshots.some((s) => s.id === action.snapshot!.id)
+          ? state.menuSnapshots.map((s) =>
+              s.id === action.snapshot!.id ? action.snapshot! : s,
+            )
+          : [...state.menuSnapshots, action.snapshot]
+        : state.menuSnapshots;
+      // Enforce single-active locally too (the DB trigger already does this).
+      const events = existsEvent
+        ? state.events.map((e) =>
+            e.id === evt.id
+              ? evt
+              : evt.isActive
+              ? { ...e, isActive: false }
+              : e,
+          )
+        : [...state.events.map((e) => (evt.isActive ? { ...e, isActive: false } : e)), evt];
+      return { ...state, events, menuSnapshots: snapshotsBase };
+    }
+    case "RT_DELETE_EVENT": {
+      const evt = state.events.find((e) => e.id === action.id);
+      if (!evt) return state;
+      return {
+        ...state,
+        events: state.events.filter((e) => e.id !== action.id),
+        menuSnapshots: state.menuSnapshots.filter((s) => s.id !== evt.menuSnapshotId),
+        orders: state.orders.filter((o) => o.eventId !== action.id),
+      };
+    }
+
+    case "RT_UPSERT_ORDER": {
+      const incoming = action.order;
+      const existing = state.orders.find((o) => o.id === incoming.id);
+      if (existing) {
+        // Preserve the items array; only the order-level fields changed.
+        return {
+          ...state,
+          orders: state.orders.map((o) =>
+            o.id === incoming.id ? { ...o, ...incoming, items: o.items } : o,
+          ),
+        };
+      }
+      return { ...state, orders: [...state.orders, { ...incoming, items: [] }] };
+    }
+    case "RT_DELETE_ORDER":
+      return { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
+
+    case "RT_UPSERT_ORDER_ITEM": {
+      const oi = action.item;
+      return {
+        ...state,
+        orders: state.orders.map((o) => {
+          if (o.id !== oi.orderId) return o;
+          const has = o.items.some((it) => it.id === oi.id);
+          const items = has
+            ? o.items.map((it) => (it.id === oi.id ? oi : it))
+            : [...o.items, oi];
+          return { ...o, items };
+        }),
+      };
+    }
+    case "RT_DELETE_ORDER_ITEM": {
+      return {
+        ...state,
+        orders: state.orders.map((o) => {
+          if (action.orderId && o.id !== action.orderId) return o;
+          if (!o.items.some((it) => it.id === action.id)) return o;
+          return { ...o, items: o.items.filter((it) => it.id !== action.id) };
+        }),
+      };
+    }
+
+    case "RT_UPDATE_SETTINGS":
+      return { ...state, settings: { ...state.settings, ...action.patch } };
 
     default:
       return state;

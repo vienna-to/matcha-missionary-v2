@@ -7,15 +7,26 @@ import { initialSeed } from "@/lib/seed";
 import { Button, Card, Field, Input } from "@/components/ui";
 import { formatWorkspaceCode } from "@/lib/id";
 import NewEventDialog from "@/components/NewEventDialog";
+import { getClient } from "@/lib/supabase/client";
+import {
+  clearSampleEventFromSupabase,
+  loadSampleDataIntoSupabase,
+} from "@/lib/supabase/seed-supabase";
 
 const SAMPLE_EVENT_ID = "evt_uci_spring";
+const SAMPLE_EVENT_NAME = "UCI Spring Pop-Up";
 
 export default function SettingsTab() {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, backend, workspaceId } = useStore();
   const [newEventOpen, setNewEventOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [seedBusy, setSeedBusy] = useState(false);
+  const [seedError, setSeedError] = useState<string | null>(null);
 
-  const sampleEventPresent = state.events.some((e) => e.id === SAMPLE_EVENT_ID);
+  const isSupabase = backend === "supabase";
+  const sampleEventPresent = isSupabase
+    ? state.events.some((e) => e.name === SAMPLE_EVENT_NAME)
+    : state.events.some((e) => e.id === SAMPLE_EVENT_ID);
 
   function copyCode() {
     const code = formatWorkspaceCode(state.settings.workspaceCode);
@@ -24,25 +35,20 @@ export default function SettingsTab() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  function clearSampleData() {
+  function clearSampleDataLocal() {
     if (!sampleEventPresent) return;
     if (!confirm("Remove the UCI Spring Pop-Up sample event and its orders? Your menu and ingredients are kept.")) return;
-    // Remove the sample event (and its snapshot + orders via reducer logic).
     dispatch({ type: "DELETE_EVENT", id: SAMPLE_EVENT_ID });
   }
 
-  function reloadSampleData() {
+  function reloadSampleDataLocal() {
     if (sampleEventPresent) return;
     if (!confirm("Reload the UCI Spring Pop-Up sample event (30 orders, sample menu, ingredients)?")) return;
-    // The seed includes everything; merge the sample event + its snapshot + orders
-    // back into the current state without touching user-created events.
     const seed = initialSeed();
     dispatch({
       type: "REPLACE",
       state: {
         ...state,
-        // Replace ingredients/menuItems with seed values only if they look empty
-        // (i.e. user wiped them too). Otherwise keep current ones.
         ingredients: state.ingredients.length === 0 ? seed.ingredients : state.ingredients,
         menuItems: state.menuItems.length === 0 ? seed.menuItems : state.menuItems,
         menuSnapshots: [
@@ -53,6 +59,38 @@ export default function SettingsTab() {
         orders: [...state.orders.filter((o) => o.eventId !== SAMPLE_EVENT_ID), ...seed.orders],
       },
     });
+  }
+
+  async function loadSampleDataSupabase() {
+    const supabase = getClient();
+    if (!supabase || !workspaceId) return;
+    if (!confirm("Load the UCI Spring Pop-Up sample event (9 menu items, 21 ingredients, 30 orders) into Supabase?")) return;
+    setSeedBusy(true);
+    setSeedError(null);
+    try {
+      await loadSampleDataIntoSupabase(supabase, workspaceId);
+      // Realtime subscriptions will populate local state automatically — no
+      // dispatch needed here.
+    } catch (e: unknown) {
+      setSeedError((e as Error).message ?? "load failed");
+    } finally {
+      setSeedBusy(false);
+    }
+  }
+
+  async function clearSampleDataSupabase() {
+    const supabase = getClient();
+    if (!supabase || !workspaceId) return;
+    if (!confirm("Delete the UCI Spring Pop-Up event and all its orders? Master menu/ingredients are kept.")) return;
+    setSeedBusy(true);
+    setSeedError(null);
+    try {
+      await clearSampleEventFromSupabase(supabase, workspaceId);
+    } catch (e: unknown) {
+      setSeedError((e as Error).message ?? "delete failed");
+    } finally {
+      setSeedBusy(false);
+    }
   }
 
   return (
@@ -135,26 +173,54 @@ export default function SettingsTab() {
 
       <Card className="space-y-4">
         <h2 className="t-display text-sm">Sample data</h2>
-        {sampleEventPresent ? (
+        {isSupabase ? (
+          sampleEventPresent ? (
+            <>
+              <p className="t-caption text-xs text-matcha-900/60">
+                the uci spring pop-up demo event is loaded in supabase. delete it once
+                you&apos;ve created your own events.
+              </p>
+              <Button variant="danger" size="sm" onClick={clearSampleDataSupabase} disabled={seedBusy}>
+                <Trash2 className="h-3.5 w-3.5" /> {seedBusy ? "deleting…" : "Clear sample event"}
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="t-caption text-xs text-matcha-900/60">
+                load the uci spring pop-up sample event into supabase (9 menu items, 21
+                ingredients, 30 orders). uses fresh uuids so it&apos;s safe to run alongside
+                your real data.
+              </p>
+              <Button variant="outline" size="sm" onClick={loadSampleDataSupabase} disabled={seedBusy}>
+                <RefreshCw className="h-3.5 w-3.5" /> {seedBusy ? "loading…" : "Load sample data into Supabase"}
+              </Button>
+            </>
+          )
+        ) : sampleEventPresent ? (
           <>
-            <p className="text-xs text-matcha-900/60">
-              The UCI Spring Pop-Up demo event is loaded. Clear it once you&apos;ve created your
-              own events. Your menu and ingredients are not removed.
+            <p className="t-caption text-xs text-matcha-900/60">
+              the uci spring pop-up demo event is loaded. clear it once you&apos;ve created
+              your own events. your menu and ingredients are not removed.
             </p>
-            <Button variant="danger" size="sm" onClick={clearSampleData}>
+            <Button variant="danger" size="sm" onClick={clearSampleDataLocal}>
               <Trash2 className="h-3.5 w-3.5" /> Clear sample data
             </Button>
           </>
         ) : (
           <>
-            <p className="text-xs text-matcha-900/60">
-              Reload the UCI Spring Pop-Up sample event to explore the app or demo it.
+            <p className="t-caption text-xs text-matcha-900/60">
+              reload the uci spring pop-up sample event to explore the app or demo it.
             </p>
-            <Button variant="outline" size="sm" onClick={reloadSampleData}>
+            <Button variant="outline" size="sm" onClick={reloadSampleDataLocal}>
               <RefreshCw className="h-3.5 w-3.5" /> Reload sample data
             </Button>
           </>
         )}
+        {seedError ? (
+          <div className="t-caption rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {seedError}
+          </div>
+        ) : null}
       </Card>
 
       <NewEventDialog open={newEventOpen} onClose={() => setNewEventOpen(false)} />

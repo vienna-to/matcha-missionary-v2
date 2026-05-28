@@ -76,6 +76,7 @@ export default function NewEventDialog({
               step="1"
               value={targetRevenue}
               onChange={(e) => setTargetRevenue(e.target.value)}
+              onWheel={(e) => (e.target as HTMLInputElement).blur()}
               placeholder="e.g. 500"
             />
           </Field>

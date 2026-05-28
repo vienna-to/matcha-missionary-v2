@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export const Button = forwardRef<
@@ -62,6 +62,53 @@ export function Input(
         "h-10 w-full rounded-xl border border-cream-200 bg-white px-3 text-sm placeholder:text-matcha-900/40",
         className,
       )}
+      {...rest}
+    />
+  );
+}
+
+/**
+ * Number input that lets the user fully clear the field (backspace → empty)
+ * without the zero re-appearing. Internally tracks the raw string so
+ * intermediate states like "0." or "" are allowed during typing. Parent
+ * sees the parsed number on every keystroke (0 for empty).
+ */
+export function NumberField({
+  value,
+  onChange,
+  className,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> & {
+  value: number;
+  onChange: (n: number) => void;
+}) {
+  // Local draft while the user is typing; null means "follow parent".
+  const [draft, setDraft] = useState<string | null>(null);
+  const display = draft ?? (value === 0 ? "" : String(value));
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      className={cn(
+        "h-10 w-full rounded-xl border border-cream-200 bg-white px-3 text-sm placeholder:text-matcha-900/40",
+        className,
+      )}
+      value={display}
+      onChange={(e) => {
+        const v = e.target.value;
+        setDraft(v);
+        if (v === "") {
+          onChange(0);
+        } else {
+          const n = Number(v);
+          if (!Number.isNaN(n)) onChange(n);
+        }
+      }}
+      onBlur={() => setDraft(null)}
+      // Block mouse-wheel scroll from changing the value. Blurring the input
+      // (instead of preventDefault on the wheel event) keeps page scrolling
+      // working when the cursor happens to be over the field.
+      onWheel={(e) => (e.target as HTMLInputElement).blur()}
       {...rest}
     />
   );

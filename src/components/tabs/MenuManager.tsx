@@ -8,6 +8,7 @@ import {
   Field,
   Input,
   Modal,
+  NumberField,
   Select,
   Textarea,
   Badge,
@@ -369,24 +370,12 @@ function ItemEditor({
             </Select>
           </Field>
           <Field label="Price ($)">
-            <Input
-              type="number"
+            <NumberField
               step="0.01"
               min={0}
               value={draft.price}
-              onChange={(e) => patch("price", Number(e.target.value) || 0)}
+              onChange={(n) => patch("price", n)}
             />
-          </Field>
-          <Field label="Active" className="col-span-2">
-            <label className="flex h-10 items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={draft.active}
-                onChange={(e) => patch("active", e.target.checked)}
-                className="h-4 w-4 accent-matcha-500"
-              />
-              Available for new orders
-            </label>
           </Field>
           <Field label="Description" className="col-span-2">
             <Textarea
@@ -606,12 +595,11 @@ function LineRow({
           </option>
         ))}
       </Select>
-      <Input
-        type="number"
+      <NumberField
         step="0.1"
         min={0}
         value={line.amount}
-        onChange={(e) => onChange({ ...line, amount: Number(e.target.value) || 0 })}
+        onChange={(n) => onChange({ ...line, amount: n })}
       />
       <Select
         value={line.unit}
@@ -717,23 +705,21 @@ function IngredientRow({
         />
       </td>
       <td className="py-1.5 pr-3">
-        <Input
+        <NumberField
           className="h-8"
-          type="number"
           step="0.01"
           min={0}
           value={ing.packagePrice}
-          onChange={(e) => onChange({ packagePrice: Number(e.target.value) || 0 })}
+          onChange={(n) => onChange({ packagePrice: n })}
         />
       </td>
       <td className="py-1.5 pr-3">
-        <Input
+        <NumberField
           className="h-8"
-          type="number"
           step="0.01"
           min={0}
           value={ing.packageAmount}
-          onChange={(e) => onChange({ packageAmount: Number(e.target.value) || 0 })}
+          onChange={(n) => onChange({ packageAmount: n })}
         />
       </td>
       <td className="py-1.5 pr-3">
@@ -781,21 +767,19 @@ function NewIngredientForm({
       </Field>
       <div className="grid grid-cols-3 gap-2">
         <Field label="Package $">
-          <Input
-            type="number"
+          <NumberField
             step="0.01"
             min={0}
             value={packagePrice}
-            onChange={(e) => setPackagePrice(Number(e.target.value) || 0)}
+            onChange={setPackagePrice}
           />
         </Field>
         <Field label="Amount">
-          <Input
-            type="number"
+          <NumberField
             step="0.01"
             min={0}
             value={packageAmount}
-            onChange={(e) => setPackageAmount(Number(e.target.value) || 0)}
+            onChange={setPackageAmount}
           />
         </Field>
         <Field label="Unit">

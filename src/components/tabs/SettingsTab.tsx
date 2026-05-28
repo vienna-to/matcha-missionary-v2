@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { initialSeed } from "@/lib/seed";
-import { Button, Card, Field, Input } from "@/components/ui";
+import { Button, Card, Field, Input, NumberField } from "@/components/ui";
 import { formatWorkspaceCode } from "@/lib/id";
 import NewEventDialog from "@/components/NewEventDialog";
+import QuickAddPastEventDialog from "@/components/QuickAddPastEventDialog";
 import { getClient } from "@/lib/supabase/client";
 import {
   clearSampleEventFromSupabase,
@@ -19,9 +20,11 @@ const SAMPLE_EVENT_NAME = "UCI Spring Pop-Up";
 export default function SettingsTab() {
   const { state, dispatch, backend, workspaceId } = useStore();
   const [newEventOpen, setNewEventOpen] = useState(false);
+  const [pastEventOpen, setPastEventOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [seedBusy, setSeedBusy] = useState(false);
   const [seedError, setSeedError] = useState<string | null>(null);
+  const [, startClearTransition] = useTransition();
 
   const isSupabase = backend === "supabase";
   const sampleEventPresent = isSupabase
@@ -38,26 +41,30 @@ export default function SettingsTab() {
   function clearSampleDataLocal() {
     if (!sampleEventPresent) return;
     if (!confirm("Remove the UCI Spring Pop-Up sample event and its orders? Your menu and ingredients are kept.")) return;
-    dispatch({ type: "DELETE_EVENT", id: SAMPLE_EVENT_ID });
+    startClearTransition(() => {
+      dispatch({ type: "DELETE_EVENT", id: SAMPLE_EVENT_ID });
+    });
   }
 
   function reloadSampleDataLocal() {
     if (sampleEventPresent) return;
     if (!confirm("Reload the UCI Spring Pop-Up sample event (30 orders, sample menu, ingredients)?")) return;
-    const seed = initialSeed();
-    dispatch({
-      type: "REPLACE",
-      state: {
-        ...state,
-        ingredients: state.ingredients.length === 0 ? seed.ingredients : state.ingredients,
-        menuItems: state.menuItems.length === 0 ? seed.menuItems : state.menuItems,
-        menuSnapshots: [
-          ...state.menuSnapshots.filter((s) => s.id !== "snap_uci_spring"),
-          ...seed.menuSnapshots,
-        ],
-        events: [...state.events.filter((e) => e.id !== SAMPLE_EVENT_ID), ...seed.events],
-        orders: [...state.orders.filter((o) => o.eventId !== SAMPLE_EVENT_ID), ...seed.orders],
-      },
+    startClearTransition(() => {
+      const seed = initialSeed();
+      dispatch({
+        type: "REPLACE",
+        state: {
+          ...state,
+          ingredients: state.ingredients.length === 0 ? seed.ingredients : state.ingredients,
+          menuItems: state.menuItems.length === 0 ? seed.menuItems : state.menuItems,
+          menuSnapshots: [
+            ...state.menuSnapshots.filter((s) => s.id !== "snap_uci_spring"),
+            ...seed.menuSnapshots,
+          ],
+          events: [...state.events.filter((e) => e.id !== SAMPLE_EVENT_ID), ...seed.events],
+          orders: [...state.orders.filter((o) => o.eventId !== SAMPLE_EVENT_ID), ...seed.orders],
+        },
+      });
     });
   }
 
@@ -108,9 +115,18 @@ export default function SettingsTab() {
           Create a new event each pop-up day. The current master menu is cloned into the
           new event as a frozen snapshot.
         </p>
-        <Button size="sm" onClick={() => setNewEventOpen(true)}>
-          <Plus className="h-3.5 w-3.5" /> New event
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setNewEventOpen(true)}>
+            <Plus className="h-3.5 w-3.5" /> New event
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setPastEventOpen(true)}>
+            Log past event
+          </Button>
+        </div>
+        <p className="t-caption text-[11px] text-matcha-900/50">
+          past event = quick-add for an event that already happened. enter quantities sold
+          and the app derives revenue/cost/margin from current ingredient prices.
+        </p>
       </Card>
 
       <Card className="space-y-4">
@@ -133,16 +149,15 @@ export default function SettingsTab() {
       <Card className="space-y-4">
         <h2 className="t-display text-sm">Display & alerts</h2>
         <Field label="Low-margin warning threshold (%)" hint="Items below this fully-loaded margin show a warning icon.">
-          <Input
-            type="number"
+          <NumberField
             min={0}
             max={100}
             step={1}
             value={state.settings.lowMarginThresholdPct}
-            onChange={(e) =>
+            onChange={(n) =>
               dispatch({
                 type: "UPDATE_SETTINGS",
-                patch: { lowMarginThresholdPct: Number(e.target.value) || 0 },
+                patch: { lowMarginThresholdPct: n },
               })
             }
             className="max-w-32"
@@ -224,6 +239,10 @@ export default function SettingsTab() {
       </Card>
 
       <NewEventDialog open={newEventOpen} onClose={() => setNewEventOpen(false)} />
+      <QuickAddPastEventDialog
+        open={pastEventOpen}
+        onClose={() => setPastEventOpen(false)}
+      />
     </div>
   );
 }

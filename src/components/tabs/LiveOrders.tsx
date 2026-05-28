@@ -29,6 +29,7 @@ import {
   COMP_REASON_LABELS,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
+  PAYMENT_STATUS_LABELS,
   type CompReason,
   type Ingredient,
   type MenuItem,
@@ -404,7 +405,7 @@ function CartPanel({
                 active={paymentStatus === s}
                 onClick={() => setPaymentStatus(s)}
               >
-                {s}
+                {PAYMENT_STATUS_LABELS[s]}
               </Chip>
             ))}
           </div>
@@ -427,7 +428,7 @@ function CartPanel({
         ) : null}
 
         {paymentStatus === "comped" ? (
-          <Field label="comp reason">
+          <Field label="free reason">
             <div className="flex flex-wrap gap-1.5">
               {COMP_REASONS.map((r) => (
                 <Chip
@@ -467,7 +468,7 @@ function CartPanel({
           <div className="t-caption mt-2 text-[11px] text-amber-700">
             {errors.name && "name required. "}
             {errors.method && "payment method required. "}
-            {errors.comp && "comp reason required."}
+            {errors.comp && "free reason required."}
           </div>
         ) : null}
       </div>

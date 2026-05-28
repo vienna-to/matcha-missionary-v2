@@ -21,6 +21,7 @@ import Finance from "./tabs/Finance";
 import EventSummary from "./tabs/EventSummary";
 import SettingsTab from "./tabs/SettingsTab";
 import NewEventDialog from "./NewEventDialog";
+import QuickAddPastEventDialog from "./QuickAddPastEventDialog";
 
 export type TabId = "orders" | "queue" | "menu" | "finance" | "summary" | "settings";
 
@@ -35,6 +36,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 export default function AppShell() {
   const [tab, setTab] = useState<TabId>("orders");
   const [newEventOpen, setNewEventOpen] = useState(false);
+  const [pastEventOpen, setPastEventOpen] = useState(false);
   const activeEvent = useActiveEvent();
   const { state } = useStore();
 
@@ -76,6 +78,12 @@ export default function AppShell() {
             className="t-caption mt-2 flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-matcha-300 px-3 py-2 text-xs text-matcha-700 hover:bg-cream-100"
           >
             <Plus className="h-3.5 w-3.5" /> new event
+          </button>
+          <button
+            onClick={() => setPastEventOpen(true)}
+            className="t-caption mt-1 flex w-full items-center justify-center gap-1 rounded-xl px-3 py-1.5 text-[11px] text-matcha-900/60 hover:bg-cream-100"
+          >
+            log past event
           </button>
         </div>
         <nav className="flex-1 space-y-1 px-3 py-3">
@@ -167,6 +175,11 @@ export default function AppShell() {
       </main>
 
       <NewEventDialog open={newEventOpen} onClose={() => setNewEventOpen(false)} />
+      <QuickAddPastEventDialog
+        open={pastEventOpen}
+        onClose={() => setPastEventOpen(false)}
+        onCreated={() => setTab("summary")}
+      />
 
       {/* Bottom tabs (mobile) */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-5 border-t border-cream-200 bg-white md:hidden">

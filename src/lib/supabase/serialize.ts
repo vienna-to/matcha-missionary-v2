@@ -146,6 +146,7 @@ export function fromEvent(r: DbEvent): Event {
     menuSnapshotId: r.menu_snapshot?.id ?? r.id,
     fixedCosts: r.fixed_costs ?? [],
     isActive: r.is_active,
+    notes: r.notes ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -273,7 +274,7 @@ export function toEventInsert(
     is_active: evt.isActive,
     menu_snapshot: snapshot,
     fixed_costs: evt.fixedCosts,
-    notes: null,
+    notes: nul(evt.notes),
   };
 }
 
@@ -286,6 +287,7 @@ export function toEventPatch(patch: Partial<Event>): Partial<DbEvent> {
   if (patch.targetRevenue !== undefined) r.target_revenue = nul(patch.targetRevenue);
   if (patch.fixedCosts !== undefined) r.fixed_costs = patch.fixedCosts;
   if (patch.isActive !== undefined) r.is_active = patch.isActive;
+  if (patch.notes !== undefined) r.notes = nul(patch.notes);
   return r;
 }
 

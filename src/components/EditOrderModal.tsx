@@ -18,6 +18,7 @@ import {
   COMP_REASON_LABELS,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
+  PAYMENT_STATUS_LABELS,
   type CompReason,
   type Ingredient,
   type MenuItem,
@@ -177,7 +178,7 @@ export default function EditOrderModal({
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {(["paid", "unpaid", "comped"] as PaymentStatus[]).map((s) => (
               <Chip key={s} active={paymentStatus === s} onClick={() => setPaymentStatus(s)}>
-                {s[0].toUpperCase() + s.slice(1)}
+                {PAYMENT_STATUS_LABELS[s]}
               </Chip>
             ))}
           </div>
@@ -196,7 +197,7 @@ export default function EditOrderModal({
         ) : null}
 
         {paymentStatus === "comped" ? (
-          <Field label="Comp reason">
+          <Field label="free reason">
             <div className="flex flex-wrap gap-1.5">
               {COMP_REASONS.map((r) => (
                 <Chip key={r} active={compReason === r} onClick={() => setCompReason(r)}>

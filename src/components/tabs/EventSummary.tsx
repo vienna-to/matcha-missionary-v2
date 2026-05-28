@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   Bar,
   BarChart,
@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, Download, Target } from "lucide-react";
+import { AlertTriangle, Download, Target, Trash2 } from "lucide-react";
 import { Badge, Button, Card, EmptyState, Select } from "@/components/ui";
 import { useActiveEvent, useStore } from "@/lib/store";
 import { computeEventTotals } from "@/lib/calc";
@@ -22,8 +22,9 @@ import type { Event, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
 
 export default function EventSummary() {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const activeEvent = useActiveEvent();
+  const [deleting, startDelete] = useTransition();
 
   // Default to active event; otherwise the most-recent event.
   const sortedEvents = useMemo(
@@ -85,6 +86,27 @@ export default function EventSummary() {
     downloadCsv(csv, `${event.name.replace(/\s+/g, "-")}_${event.date}.csv`);
   };
 
+  const handleDelete = () => {
+    if (!event) return;
+    if (
+      !confirm(
+        `Delete "${event.name}" and all ${orders.length} of its orders? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    const idToDelete = event.id;
+    // Switch view away from the doomed event before the dispatch so we don't
+    // try to render charts against a vanishing dataset.
+    const remaining = sortedEvents.filter((e) => e.id !== idToDelete);
+    if (remaining.length > 0) setSelectedEventId(remaining[0].id);
+    // Mark the dispatch + cascading re-renders as a low-priority transition so
+    // the button doesn't block the UI thread.
+    startDelete(() => {
+      dispatch({ type: "DELETE_EVENT", id: idToDelete });
+    });
+  };
+
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -111,8 +133,17 @@ export default function EventSummary() {
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>
+          <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting}>
+            <Trash2 className="h-3.5 w-3.5" /> {deleting ? "deleting…" : "Delete event"}
+          </Button>
         </div>
       </header>
+
+      {event.notes ? (
+        <div className="t-caption rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {event.notes}
+        </div>
+      ) : null}
 
       {/* Metrics */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -378,7 +409,7 @@ function PaymentMix({ totals }: { totals: ReturnType<typeof computeEventTotals> 
         );
       })}
       <p className="pt-1 text-xs text-matcha-900/60">
-        Counts cups across paid orders only. Unpaid: {totals.unpaidOrders} orders ({formatMoney(totals.revenueOwed)} owed). Comped: {totals.compedOrders}. Cancelled: {totals.cancelledOrders}.
+        Counts cups across paid orders only. Unpaid: {totals.unpaidOrders} orders ({formatMoney(totals.revenueOwed)} owed). Free: {totals.compedOrders}. Cancelled: {totals.cancelledOrders}.
       </p>
     </div>
   );

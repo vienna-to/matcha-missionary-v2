@@ -360,6 +360,7 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "RT_DELETE_INGREDIENT":
+      if (!state.ingredients.some((i) => i.id === action.id)) return state;
       return { ...state, ingredients: state.ingredients.filter((i) => i.id !== action.id) };
 
     case "RT_UPSERT_MENU_ITEM": {
@@ -372,6 +373,7 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "RT_DELETE_MENU_ITEM":
+      if (!state.menuItems.some((m) => m.id === action.id)) return state;
       return { ...state, menuItems: state.menuItems.filter((m) => m.id !== action.id) };
 
     case "RT_UPSERT_EVENT": {
@@ -398,11 +400,14 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "RT_DELETE_EVENT": {
       const evt = state.events.find((e) => e.id === action.id);
-      if (!evt) return state;
+      const hasOrphanOrders = state.orders.some((o) => o.eventId === action.id);
+      if (!evt && !hasOrphanOrders) return state;
       return {
         ...state,
-        events: state.events.filter((e) => e.id !== action.id),
-        menuSnapshots: state.menuSnapshots.filter((s) => s.id !== evt.menuSnapshotId),
+        events: evt ? state.events.filter((e) => e.id !== action.id) : state.events,
+        menuSnapshots: evt
+          ? state.menuSnapshots.filter((s) => s.id !== evt.menuSnapshotId)
+          : state.menuSnapshots,
         orders: state.orders.filter((o) => o.eventId !== action.id),
       };
     }
@@ -422,6 +427,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, orders: [...state.orders, { ...incoming, items: [] }] };
     }
     case "RT_DELETE_ORDER":
+      if (!state.orders.some((o) => o.id === action.id)) return state;
       return { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
 
     case "RT_UPSERT_ORDER_ITEM": {
@@ -439,6 +445,13 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "RT_DELETE_ORDER_ITEM": {
+      // Bail out entirely if no order in state still contains this item id —
+      // very common after a cascade delete where the parent order was already
+      // optimistically removed locally.
+      const present = state.orders.some(
+        (o) => (!action.orderId || o.id === action.orderId) && o.items.some((it) => it.id === action.id),
+      );
+      if (!present) return state;
       return {
         ...state,
         orders: state.orders.map((o) => {

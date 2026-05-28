@@ -124,13 +124,20 @@ export type Event = {
   menuSnapshotId: string;
   fixedCosts: FixedCost[];
   isActive: boolean;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 };
 
 export type OrderStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type OrderItemStatus = "pending" | "in_progress" | "done";
+// The literal value remains "comped" for DB compatibility; UI calls it "free".
 export type PaymentStatus = "paid" | "unpaid" | "comped";
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  paid: "paid",
+  unpaid: "unpaid",
+  comped: "free",
+};
 export type PaymentMethod = "cash" | "venmo" | "zelle" | "card" | "other";
 export type CompReason = "friend" | "sample" | "mistake" | "staff" | "other";
 

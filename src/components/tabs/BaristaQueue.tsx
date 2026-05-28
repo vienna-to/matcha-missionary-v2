@@ -423,6 +423,6 @@ function PaymentBadge({ order }: { order: Order }) {
         : "Paid"
       : order.paymentStatus === "unpaid"
       ? "Unpaid"
-      : `Comped${order.compReason ? ` · ${order.compReason}` : ""}`;
+      : `Free${order.compReason ? ` · ${order.compReason}` : ""}`;
   return <Badge variant={order.paymentStatus}>{label}</Badge>;
 }

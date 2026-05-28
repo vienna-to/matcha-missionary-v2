@@ -1,7 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Archive, Trash2, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Pencil, Archive, Trash2, AlertTriangle, GripVertical } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Button,
   Card,
@@ -72,18 +90,35 @@ function ItemsList() {
     state.orders.flatMap((o) => o.items.map((it) => it.menuItemId)),
   );
 
-  function move(item: MenuItem, dir: -1 | 1) {
-    // Swap with the neighbour in the *active* list (archived items keep their
-    // own ordering; we only let users sort what they can see in Live Orders).
-    const list = item.active ? active : archived;
-    const idx = list.findIndex((m) => m.id === item.id);
-    const j = idx + dir;
-    if (idx === -1 || j < 0 || j >= list.length) return;
-    const other = list[j];
-    const aOrder = item.sortOrder ?? idx;
-    const bOrder = other.sortOrder ?? j;
-    dispatch({ type: "UPDATE_MENU_ITEM", id: item.id, patch: { sortOrder: bOrder } });
-    dispatch({ type: "UPDATE_MENU_ITEM", id: other.id, patch: { sortOrder: aOrder } });
+  // Sensors: mouse, touch, and keyboard. PointerSensor with activationConstraint
+  // means a small drag distance is required before a drag starts — keeps button
+  // clicks from being interpreted as drags.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function reorderList(list: MenuItem[], fromId: string, toId: string) {
+    const from = list.findIndex((m) => m.id === fromId);
+    const to = list.findIndex((m) => m.id === toId);
+    if (from === -1 || to === -1 || from === to) return;
+    const next = arrayMove(list, from, to);
+    // Only write rows whose sortOrder actually changed.
+    next.forEach((item, idx) => {
+      if (item.sortOrder !== idx) {
+        dispatch({ type: "UPDATE_MENU_ITEM", id: item.id, patch: { sortOrder: idx } });
+      }
+    });
+  }
+
+  function handleActiveDragEnd(e: DragEndEvent) {
+    if (!e.over) return;
+    reorderList(active, String(e.active.id), String(e.over.id));
+  }
+  function handleArchivedDragEnd(e: DragEndEvent) {
+    if (!e.over) return;
+    reorderList(archived, String(e.active.id), String(e.over.id));
   }
 
   return (
@@ -102,75 +137,75 @@ function ItemsList() {
               description="Add a menu item to get started."
             />
           ) : (
-            active.map((item, idx) => (
-              <ItemRow
-                key={item.id}
-                item={item}
-                ingredients={state.ingredients}
-                lowMarginPct={state.settings.lowMarginThresholdPct}
-                canMoveUp={idx > 0}
-                canMoveDown={idx < active.length - 1}
-                onMoveUp={() => move(item, -1)}
-                onMoveDown={() => move(item, 1)}
-                onEdit={() => setEditing(item)}
-                onArchive={() =>
-                  dispatch({
-                    type: "UPDATE_MENU_ITEM",
-                    id: item.id,
-                    patch: { active: false },
-                  })
-                }
-                onDelete={() => {
-                  if (usedIds.has(item.id)) {
-                    alert("This item is used in existing orders. Archive it instead.");
-                    return;
-                  }
-                  if (confirm(`Delete "${item.name}"?`)) {
-                    dispatch({ type: "DELETE_MENU_ITEM", id: item.id });
-                  }
-                }}
-                usedInOrders={usedIds.has(item.id)}
-              />
-            ))
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleActiveDragEnd}>
+              <SortableContext items={active.map((m) => m.id)} strategy={verticalListSortingStrategy}>
+                {active.map((item) => (
+                  <SortableItemRow
+                    key={item.id}
+                    item={item}
+                    ingredients={state.ingredients}
+                    lowMarginPct={state.settings.lowMarginThresholdPct}
+                    onEdit={() => setEditing(item)}
+                    onArchive={() =>
+                      dispatch({
+                        type: "UPDATE_MENU_ITEM",
+                        id: item.id,
+                        patch: { active: false },
+                      })
+                    }
+                    onDelete={() => {
+                      if (usedIds.has(item.id)) {
+                        alert("This item is used in existing orders. Archive it instead.");
+                        return;
+                      }
+                      if (confirm(`Delete "${item.name}"?`)) {
+                        dispatch({ type: "DELETE_MENU_ITEM", id: item.id });
+                      }
+                    }}
+                    usedInOrders={usedIds.has(item.id)}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
           )}
         </div>
       </Section>
 
       {archived.length > 0 ? (
         <Section title={`Archived (${archived.length})`}>
-          <div className="space-y-2">
-            {archived.map((item, idx) => (
-              <ItemRow
-                key={item.id}
-                item={item}
-                ingredients={state.ingredients}
-                lowMarginPct={state.settings.lowMarginThresholdPct}
-                canMoveUp={idx > 0}
-                canMoveDown={idx < archived.length - 1}
-                onMoveUp={() => move(item, -1)}
-                onMoveDown={() => move(item, 1)}
-                onEdit={() => setEditing(item)}
-                onArchive={() =>
-                  dispatch({
-                    type: "UPDATE_MENU_ITEM",
-                    id: item.id,
-                    patch: { active: true },
-                  })
-                }
-                onDelete={() => {
-                  if (usedIds.has(item.id)) {
-                    alert("This item is used in existing orders. Cannot delete.");
-                    return;
-                  }
-                  if (confirm(`Delete "${item.name}" permanently?`)) {
-                    dispatch({ type: "DELETE_MENU_ITEM", id: item.id });
-                  }
-                }}
-                usedInOrders={usedIds.has(item.id)}
-                isArchived
-              />
-            ))}
-          </div>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleArchivedDragEnd}>
+            <SortableContext items={archived.map((m) => m.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2">
+                {archived.map((item) => (
+                  <SortableItemRow
+                    key={item.id}
+                    item={item}
+                    ingredients={state.ingredients}
+                    lowMarginPct={state.settings.lowMarginThresholdPct}
+                    onEdit={() => setEditing(item)}
+                    onArchive={() =>
+                      dispatch({
+                        type: "UPDATE_MENU_ITEM",
+                        id: item.id,
+                        patch: { active: true },
+                      })
+                    }
+                    onDelete={() => {
+                      if (usedIds.has(item.id)) {
+                        alert("This item is used in existing orders. Cannot delete.");
+                        return;
+                      }
+                      if (confirm(`Delete "${item.name}" permanently?`)) {
+                        dispatch({ type: "DELETE_MENU_ITEM", id: item.id });
+                      }
+                    }}
+                    usedInOrders={usedIds.has(item.id)}
+                    isArchived
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         </Section>
       ) : null}
 
@@ -233,33 +268,59 @@ function Section({
   );
 }
 
-function ItemRow({
-  item,
-  ingredients,
-  lowMarginPct,
-  canMoveUp,
-  canMoveDown,
-  onMoveUp,
-  onMoveDown,
-  onEdit,
-  onArchive,
-  onDelete,
-  usedInOrders,
-  isArchived,
-}: {
+type ItemRowProps = {
   item: MenuItem;
   ingredients: Ingredient[];
   lowMarginPct: number;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
   onEdit: () => void;
   onArchive: () => void;
   onDelete: () => void;
   usedInOrders: boolean;
   isArchived?: boolean;
-}) {
+};
+
+/** Wraps ItemRow with dnd-kit sortable behaviour. */
+function SortableItemRow(props: ItemRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: props.item.id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 20 : "auto",
+    position: "relative",
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <ItemRow
+        {...props}
+        dragHandle={
+          <button
+            type="button"
+            {...listeners}
+            aria-label="Drag to reorder"
+            title="Drag to reorder"
+            className="flex h-8 w-6 cursor-grab touch-none items-center justify-center rounded-md text-matcha-900/40 hover:bg-cream-100 hover:text-matcha-900 active:cursor-grabbing"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        }
+      />
+    </div>
+  );
+}
+
+function ItemRow({
+  item,
+  ingredients,
+  lowMarginPct,
+  onEdit,
+  onArchive,
+  onDelete,
+  usedInOrders,
+  isArchived,
+  dragHandle,
+}: ItemRowProps & { dragHandle?: React.ReactNode }) {
   const cost = defaultItemCost(item, ingredients);
   const margin = defaultItemMargin(item, ingredients);
   const lowMargin =
@@ -268,6 +329,7 @@ function ItemRow({
   return (
     <Card className={isArchived ? "opacity-70" : undefined}>
       <div className="flex flex-wrap items-center gap-3">
+        {dragHandle}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <div className="t-display text-sm">{item.name}</div>
@@ -288,26 +350,6 @@ function ItemRow({
           <Stat label="Margin" value={formatPct(margin)} />
         </div>
         <div className="flex gap-1.5">
-          <div className="flex flex-col gap-0.5">
-            <button
-              type="button"
-              onClick={onMoveUp}
-              disabled={!canMoveUp}
-              title="Move up"
-              className="rounded-md border border-cream-200 bg-white px-1 py-0.5 text-matcha-900 hover:bg-cream-100 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              <ArrowUp className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              onClick={onMoveDown}
-              disabled={!canMoveDown}
-              title="Move down"
-              className="rounded-md border border-cream-200 bg-white px-1 py-0.5 text-matcha-900 hover:bg-cream-100 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              <ArrowDown className="h-3 w-3" />
-            </button>
-          </div>
           <Button size="sm" variant="outline" onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>

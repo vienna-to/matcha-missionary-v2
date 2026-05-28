@@ -21,6 +21,8 @@ import { computeEventTotals } from "@/lib/calc";
 import type { Event, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
 
+const ALL_EVENTS = "__all__";
+
 export default function EventSummary() {
   const { state, dispatch } = useStore();
   const activeEvent = useActiveEvent();
@@ -35,7 +37,9 @@ export default function EventSummary() {
     activeEvent?.id ?? sortedEvents[0]?.id ?? "",
   );
 
-  const event = state.events.find((e) => e.id === selectedEventId);
+  const isAllEvents = selectedEventId === ALL_EVENTS;
+
+  const event = isAllEvents ? undefined : state.events.find((e) => e.id === selectedEventId);
   const snapshot = event
     ? state.menuSnapshots.find((s) => s.id === event.menuSnapshotId)
     : undefined;
@@ -56,11 +60,43 @@ export default function EventSummary() {
     [event, orders],
   );
 
-  if (!event || !snapshot || !totals) {
+  // Aggregate across every event for the "All events" view.
+  const aggregate = useMemo(
+    () => (isAllEvents ? buildAllEventsAggregate(state) : null),
+    [isAllEvents, state],
+  );
+
+  // Show empty state only if we have no events at all.
+  if (state.events.length === 0) {
     return (
       <EmptyState
         title="No events yet"
         description="Create an event in Live Orders to see a summary here."
+      />
+    );
+  }
+
+  if (isAllEvents && aggregate) {
+    return (
+      <AllEventsView
+        aggregate={aggregate}
+        sortedEvents={sortedEvents}
+        selectedEventId={selectedEventId}
+        onSelectEvent={setSelectedEventId}
+        threshold={state.settings.lowMarginThresholdPct / 100}
+      />
+    );
+  }
+
+  if (!event || !snapshot || !totals) {
+    // Fallback: previously-selected event was deleted. Auto-jump to all-events.
+    return (
+      <AllEventsView
+        aggregate={buildAllEventsAggregate(state)}
+        sortedEvents={sortedEvents}
+        selectedEventId={ALL_EVENTS}
+        onSelectEvent={setSelectedEventId}
+        threshold={state.settings.lowMarginThresholdPct / 100}
       />
     );
   }
@@ -117,19 +153,18 @@ export default function EventSummary() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {sortedEvents.length > 1 ? (
-            <Select
-              value={selectedEventId}
-              onChange={(e) => setSelectedEventId(e.target.value)}
-              className="text-sm"
-            >
-              {sortedEvents.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name} · {ev.date}
-                </option>
-              ))}
-            </Select>
-          ) : null}
+          <Select
+            value={selectedEventId}
+            onChange={(e) => setSelectedEventId(e.target.value)}
+            className="text-sm"
+          >
+            <option value={ALL_EVENTS}>All events ({state.events.length})</option>
+            {sortedEvents.map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {ev.name} · {ev.date}
+              </option>
+            ))}
+          </Select>
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>
@@ -218,9 +253,10 @@ export default function EventSummary() {
             <BarChart data={itemsSorted} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis type="number" stroke="#6B7280" fontSize={11} />
-              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} />
+              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} tickFormatter={(v: string) => v.toLowerCase()} />
               <Tooltip
                 formatter={(v: number) => [`${v} cups`, "Quantity"]}
+                labelFormatter={(label) => String(label).toLowerCase()}
                 contentStyle={tooltipStyle}
               />
               <Bar dataKey="qty" fill="#7A9C5E" radius={[0, 6, 6, 0]}>
@@ -243,9 +279,10 @@ export default function EventSummary() {
             <BarChart data={itemsSorted} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis type="number" stroke="#6B7280" fontSize={11} tickFormatter={(v: number) => `$${v}`} />
-              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} />
+              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} tickFormatter={(v: string) => v.toLowerCase()} />
               <Tooltip
                 formatter={(v: number, name: string) => [formatMoney(v as number), name]}
+                labelFormatter={(label) => String(label).toLowerCase()}
                 contentStyle={tooltipStyle}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -312,7 +349,7 @@ export default function EventSummary() {
                 const low = loadedMargin !== null && loadedMargin < threshold;
                 return (
                   <tr key={t.menuItemId} className="border-t border-cream-100">
-                    <td className="py-2 pr-4 font-medium">{t.name}</td>
+                    <td className="py-2 pr-4 font-medium lowercase">{t.name}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{t.qty}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(t.revenuePaid)}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(t.totalCost)}</td>
@@ -581,4 +618,299 @@ function downloadCsv(csv: string, filename: string) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// All-events aggregate
+// ============================================================
+
+type PerEventTotal = {
+  id: string;
+  name: string;
+  date: string;
+  shortLabel: string;
+  revenue: number;
+  cost: number;
+  profit: number;
+  cups: number;
+};
+
+type AggregatedItem = {
+  name: string;
+  qty: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  margin: number | null;
+};
+
+type AllEventsAggregate = {
+  eventCount: number;
+  totalCups: number;
+  totalRevenue: number;
+  totalCost: number;
+  totalProfit: number;
+  overallMargin: number | null;
+  byItem: AggregatedItem[];
+  bestSeller: AggregatedItem | null;
+  mostProfitable: AggregatedItem | null;
+  perEvent: PerEventTotal[];
+};
+
+function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEventsAggregate {
+  const events = [...state.events].sort((a, b) => a.date.localeCompare(b.date));
+
+  let totalCups = 0;
+  let totalRevenue = 0;
+  let totalCost = 0;
+  let totalProfit = 0;
+
+  // Combine per-item across all events, keyed by display name (snapshot IDs
+  // differ across events so name is the stable joiner).
+  const byName = new Map<string, AggregatedItem>();
+  const perEvent: PerEventTotal[] = [];
+
+  for (const evt of events) {
+    const snap = state.menuSnapshots.find((s) => s.id === evt.menuSnapshotId);
+    if (!snap) continue;
+    const eventOrders = state.orders.filter((o) => o.eventId === evt.id);
+    const t = computeEventTotals(snap, evt.fixedCosts, eventOrders);
+
+    totalCups += t.totalCups;
+    totalRevenue += t.revenuePaid;
+    totalCost += t.totalCost;
+    totalProfit += t.profit;
+
+    for (const it of t.byItem) {
+      if (it.qty === 0) continue;
+      const existing = byName.get(it.name) ?? {
+        name: it.name,
+        qty: 0,
+        revenue: 0,
+        cost: 0,
+        profit: 0,
+        margin: null,
+      };
+      existing.qty += it.qty;
+      existing.revenue += it.revenuePaid;
+      existing.cost += it.totalCost;
+      existing.profit += it.profit;
+      byName.set(it.name, existing);
+    }
+
+    perEvent.push({
+      id: evt.id,
+      name: evt.name,
+      date: evt.date,
+      shortLabel:
+        evt.name.length > 16 ? `${evt.name.slice(0, 14)}…` : evt.name,
+      revenue: t.revenuePaid,
+      cost: t.totalCost,
+      profit: t.profit,
+      cups: t.totalCups,
+    });
+  }
+
+  const byItem = Array.from(byName.values()).map((it) => ({
+    ...it,
+    margin: it.revenue > 0 ? (it.revenue - it.cost) / it.revenue : null,
+  }));
+
+  const bestSeller =
+    byItem.length > 0
+      ? [...byItem].sort((a, b) => b.qty - a.qty)[0]
+      : null;
+  const mostProfitable =
+    byItem.length > 0
+      ? [...byItem].filter((i) => i.profit > 0).sort((a, b) => b.profit - a.profit)[0] ?? null
+      : null;
+
+  return {
+    eventCount: events.length,
+    totalCups,
+    totalRevenue,
+    totalCost,
+    totalProfit,
+    overallMargin: totalRevenue > 0 ? totalProfit / totalRevenue : null,
+    byItem,
+    bestSeller,
+    mostProfitable,
+    perEvent,
+  };
+}
+
+function AllEventsView({
+  aggregate,
+  sortedEvents,
+  selectedEventId,
+  onSelectEvent,
+  threshold,
+}: {
+  aggregate: AllEventsAggregate;
+  sortedEvents: import("@/lib/types").Event[];
+  selectedEventId: string;
+  onSelectEvent: (id: string) => void;
+  threshold: number;
+}) {
+  const itemsByQty = [...aggregate.byItem].sort((a, b) => b.qty - a.qty);
+
+  return (
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="t-display text-xl">All Events</h1>
+          <p className="t-caption mt-0.5 text-sm text-matcha-900/60">
+            combined across {aggregate.eventCount} event{aggregate.eventCount === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select
+            value={selectedEventId}
+            onChange={(e) => onSelectEvent(e.target.value)}
+            className="text-sm"
+          >
+            <option value={ALL_EVENTS}>All events ({aggregate.eventCount})</option>
+            {sortedEvents.map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {ev.name} · {ev.date}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Metric label="Cups poured" value={aggregate.totalCups.toString()} subtext={`${aggregate.eventCount} events`} />
+        <Metric label="Total revenue" value={formatMoney(aggregate.totalRevenue)} />
+        <Metric label="Total spending" value={formatMoney(aggregate.totalCost)} subtext="ingredients + fixed costs" />
+        <Metric
+          label="Total profit"
+          value={formatMoney(aggregate.totalProfit)}
+          subtext={
+            aggregate.overallMargin !== null
+              ? `${formatPct(aggregate.overallMargin)} overall margin`
+              : undefined
+          }
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {aggregate.bestSeller ? (
+          <Card>
+            <div className="t-display text-xs text-matcha-900/60">Best seller overall</div>
+            <div className="t-display mt-1 text-lg">{aggregate.bestSeller.name}</div>
+            <div className="t-caption mt-0.5 text-sm text-matcha-900/70">
+              {aggregate.bestSeller.qty} cups · {formatMoney(aggregate.bestSeller.revenue)} revenue
+            </div>
+          </Card>
+        ) : null}
+        {aggregate.mostProfitable ? (
+          <Card>
+            <div className="t-display text-xs text-matcha-900/60">Most profitable overall</div>
+            <div className="t-display mt-1 text-lg">{aggregate.mostProfitable.name}</div>
+            <div className="t-caption mt-0.5 text-sm text-matcha-900/70">
+              {formatMoney(aggregate.mostProfitable.profit)} profit · {formatPct(aggregate.mostProfitable.margin)}
+            </div>
+          </Card>
+        ) : null}
+      </div>
+
+      <Card>
+        <h2 className="t-display mb-3 text-sm">Revenue & profit per event</h2>
+        {aggregate.perEvent.length === 0 ? (
+          <p className="t-caption text-sm text-matcha-900/60">no sales recorded yet.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(240, aggregate.perEvent.length * 50)}>
+            <BarChart
+              data={aggregate.perEvent}
+              layout="vertical"
+              margin={{ left: 24, right: 16, top: 8, bottom: 8 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
+              <XAxis
+                type="number"
+                stroke="#6B7280"
+                fontSize={11}
+                tickFormatter={(v: number) => `$${v}`}
+              />
+              <YAxis
+                type="category"
+                dataKey="shortLabel"
+                stroke="#374151"
+                fontSize={11}
+                width={130}
+              />
+              <Tooltip
+                formatter={(v: number, name: string) => [formatMoney(v as number), name]}
+                labelFormatter={(label, payload) => {
+                  const row = (payload && payload[0]?.payload) as PerEventTotal | undefined;
+                  return row ? `${row.name} · ${row.date}` : String(label);
+                }}
+                contentStyle={tooltipStyle}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="revenue" name="Revenue" fill="#7A9C5E" radius={[0, 6, 6, 0]} />
+              <Bar dataKey="profit" name="Profit" fill="#C7A86B" radius={[0, 6, 6, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      <Card>
+        <h2 className="t-display mb-3 text-sm">Per-item breakdown (all events)</h2>
+        {itemsByQty.length === 0 ? (
+          <p className="t-caption text-sm text-matcha-900/60">no sales recorded yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="t-display text-left text-xs text-matcha-900/60">
+                  <th className="py-2 pr-4">Item</th>
+                  <th className="py-2 pr-4 text-right">Qty</th>
+                  <th className="py-2 pr-4 text-right">Revenue</th>
+                  <th className="py-2 pr-4 text-right">Cost</th>
+                  <th className="py-2 pr-4 text-right">Profit</th>
+                  <th className="py-2 pr-4 text-right">Margin</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {itemsByQty.map((t) => {
+                  const low = t.margin !== null && t.margin < threshold;
+                  return (
+                    <tr key={t.name} className="border-t border-cream-100">
+                      <td className="py-2 pr-4 font-medium lowercase">{t.name}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{t.qty}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(t.revenue)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(t.cost)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(t.profit)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{formatPct(t.margin)}</td>
+                      <td className="py-2 pr-4">
+                        {low && t.qty > 0 ? (
+                          <Badge variant="warning">
+                            <AlertTriangle className="mr-1 h-3 w-3" /> Low
+                          </Badge>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-cream-200">
+                  <td className="py-2 pr-4 font-semibold">Totals</td>
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">{aggregate.totalCups}</td>
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(aggregate.totalRevenue)}</td>
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(aggregate.totalCost)}</td>
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(aggregate.totalProfit)}</td>
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatPct(aggregate.overallMargin)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
 }

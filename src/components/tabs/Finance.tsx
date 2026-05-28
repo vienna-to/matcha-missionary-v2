@@ -44,7 +44,7 @@ export default function Finance() {
                 const low = margin !== null && margin < threshold;
                 return (
                   <tr key={item.id} className="border-t border-cream-100">
-                    <td className="py-2 pr-4 font-medium">{item.name}</td>
+                    <td className="py-2 pr-4 font-medium lowercase">{item.name}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">
                       {formatMoney(item.price)}
                     </td>
@@ -94,7 +94,7 @@ export default function Finance() {
                 const canonical = UNIT_TABLE[ing.unit].canonical;
                 return (
                   <tr key={ing.id} className="border-t border-cream-100">
-                    <td className="py-2 pr-4 font-medium">{ing.name}</td>
+                    <td className="py-2 pr-4 font-medium lowercase">{ing.name}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">
                       {formatMoney(ing.packagePrice)}
                     </td>

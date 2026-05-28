@@ -71,7 +71,6 @@ export type ItemTotals = {
   cashPaidQty: number;
   venmoPaidQty: number;
   zellePaidQty: number;
-  cardPaidQty: number;
   otherPaidQty: number;
 };
 
@@ -100,7 +99,6 @@ export function computeItemTotals(
       cashPaidQty: 0,
       venmoPaidQty: 0,
       zellePaidQty: 0,
-      cardPaidQty: 0,
       otherPaidQty: 0,
     });
   }
@@ -128,9 +126,8 @@ export function computeItemTotals(
           case "zelle":
             t.zellePaidQty += oi.quantity;
             break;
+          // Legacy "card" rolls into "other" so we don't lose the cup count.
           case "card":
-            t.cardPaidQty += oi.quantity;
-            break;
           case "other":
             t.otherPaidQty += oi.quantity;
             break;

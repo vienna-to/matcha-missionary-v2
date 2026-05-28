@@ -418,17 +418,15 @@ function PaymentMix({ totals }: { totals: ReturnType<typeof computeEventTotals> 
       acc.cash += t.cashPaidQty;
       acc.venmo += t.venmoPaidQty;
       acc.zelle += t.zellePaidQty;
-      acc.card += t.cardPaidQty;
       acc.other += t.otherPaidQty;
       return acc;
     },
-    { cash: 0, venmo: 0, zelle: 0, card: 0, other: 0 },
+    { cash: 0, venmo: 0, zelle: 0, other: 0 },
   );
   const rows = [
-    { label: "Cash", count: sums.cash },
-    { label: "Venmo", count: sums.venmo },
     { label: "Zelle", count: sums.zelle },
-    { label: "Card", count: sums.card },
+    { label: "Venmo", count: sums.venmo },
+    { label: "Cash", count: sums.cash },
     { label: "Other", count: sums.other },
   ].filter((r) => r.count > 0);
   if (rows.length === 0) {
@@ -580,16 +578,14 @@ function buildCsv(
       cash: a.cash + t.cashPaidQty,
       venmo: a.venmo + t.venmoPaidQty,
       zelle: a.zelle + t.zellePaidQty,
-      card: a.card + t.cardPaidQty,
       other: a.other + t.otherPaidQty,
     }),
-    { cash: 0, venmo: 0, zelle: 0, card: 0, other: 0 },
+    { cash: 0, venmo: 0, zelle: 0, other: 0 },
   );
   rows.push(["Payment Mix (cups)"]);
-  rows.push(["Cash", String(pm.cash)]);
-  rows.push(["Venmo", String(pm.venmo)]);
   rows.push(["Zelle", String(pm.zelle)]);
-  rows.push(["Card", String(pm.card)]);
+  rows.push(["Venmo", String(pm.venmo)]);
+  rows.push(["Cash", String(pm.cash)]);
   rows.push(["Other", String(pm.other)]);
 
   return rows.map(toCsvRow).join("\r\n");

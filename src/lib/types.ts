@@ -160,22 +160,25 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   unpaid: "unpaid",
   comped: "free",
 };
+// "card" stays in the union so legacy rows in localStorage / Supabase still
+// type-check after we dropped card from the UI. New orders can only pick
+// from PAYMENT_METHODS.
 export type PaymentMethod = "cash" | "venmo" | "zelle" | "card" | "other";
 export type CompReason = "friend" | "sample" | "mistake" | "staff" | "other";
 
 export const PAYMENT_METHODS: PaymentMethod[] = [
-  "cash",
-  "venmo",
   "zelle",
-  "card",
+  "venmo",
+  "cash",
   "other",
 ];
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  cash: "Cash",
-  venmo: "Venmo",
   zelle: "Zelle",
-  card: "Card",
+  venmo: "Venmo",
+  cash: "Cash",
   other: "Other",
+  // Kept solely so legacy "card" data renders something rather than undefined.
+  card: "Card",
 };
 
 export const COMP_REASONS: CompReason[] = ["friend", "sample", "mistake", "staff", "other"];

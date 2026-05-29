@@ -1,18 +1,19 @@
 import { computeItemCost } from "./calc";
 import { newId, nowIso } from "./id";
-import type {
-  AppState,
-  Event,
-  FixedCost,
-  Ingredient,
-  InventoryPurchase,
-  MenuItem,
-  MenuSnapshot,
-  Order,
-  OrderItem,
-  OrderItemStatus,
-  OrderStatus,
-  Settings,
+import {
+  COMBO_PRICE,
+  type AppState,
+  type Event,
+  type FixedCost,
+  type Ingredient,
+  type InventoryPurchase,
+  type MenuItem,
+  type MenuSnapshot,
+  type Order,
+  type OrderItem,
+  type OrderItemStatus,
+  type OrderStatus,
+  type Settings,
 } from "./types";
 
 export type Action =
@@ -103,19 +104,46 @@ function deriveOrderItem(
   snapshot: MenuSnapshot,
 ): OrderItem {
   const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
-  const cost = mi
+  const drinkCost = mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
         creamChoiceId: raw.creamChoiceId,
       })
     : 0;
+
+  // Combo deal: bundle drink + pastry at the fixed bundle price. costSnap is
+  // the *total* cost (drink + pastry) so margin math stays accurate.
+  if (raw.isCombo && raw.comboPastryId) {
+    const pastry = snapshot.menuItems.find((m) => m.id === raw.comboPastryId);
+    const pastryCost = pastry ? computeItemCost(pastry, snapshot.ingredients, {}) : 0;
+    return {
+      id: newId("oi"),
+      orderId,
+      menuItemId: raw.menuItemId,
+      menuItemNameSnap: mi?.name ?? "Unknown drink",
+      priceSnap: COMBO_PRICE,
+      costSnap: drinkCost + pastryCost,
+      quantity: raw.quantity,
+      milkChoiceId: raw.milkChoiceId,
+      creamChoiceId: raw.creamChoiceId,
+      sugarAdjustment: raw.sugarAdjustment,
+      iceAdjustment: raw.iceAdjustment,
+      specialRequests: raw.specialRequests,
+      status: raw.status ?? "pending",
+      isCombo: true,
+      comboPastryId: raw.comboPastryId,
+      comboPastryNameSnap: pastry?.name ?? "Unknown pastry",
+      comboPastryCostSnap: pastryCost,
+    };
+  }
+
   return {
     id: newId("oi"),
     orderId,
     menuItemId: raw.menuItemId,
     menuItemNameSnap: mi?.name ?? "Unknown item",
     priceSnap: mi?.price ?? 0,
-    costSnap: cost,
+    costSnap: drinkCost,
     quantity: raw.quantity,
     milkChoiceId: raw.milkChoiceId,
     creamChoiceId: raw.creamChoiceId,

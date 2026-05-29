@@ -18,7 +18,6 @@ import {
   COMP_REASON_LABELS,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
-  PAYMENT_STATUS_LABELS,
   type CompReason,
   type Ingredient,
   type MenuItem,
@@ -44,6 +43,10 @@ type DraftItem = {
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
   status: "pending" | "in_progress" | "done";
+  // Combo passthrough — preserve when re-saving so existing combos aren't
+  // accidentally broken into singletons by an unrelated edit.
+  isCombo?: boolean;
+  comboPastryId?: string;
 };
 
 export default function EditOrderModal({
@@ -76,6 +79,8 @@ export default function EditOrderModal({
       iceAdjustment: it.iceAdjustment,
       specialRequests: it.specialRequests,
       status: it.status,
+      isCombo: it.isCombo,
+      comboPastryId: it.comboPastryId,
     })),
   );
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -141,6 +146,8 @@ export default function EditOrderModal({
         iceAdjustment: it.iceAdjustment,
         specialRequests: it.specialRequests,
         status: it.status,
+        isCombo: it.isCombo,
+        comboPastryId: it.comboPastryId,
       })),
     });
     onClose();
@@ -175,12 +182,24 @@ export default function EditOrderModal({
 
         <div>
           <Label>Payment</Label>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {(["paid", "unpaid", "comped"] as PaymentStatus[]).map((s) => (
-              <Chip key={s} active={paymentStatus === s} onClick={() => setPaymentStatus(s)}>
-                {PAYMENT_STATUS_LABELS[s]}
-              </Chip>
-            ))}
+          <div className="mt-1.5 flex items-center gap-3">
+            <label className="t-caption flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={paymentStatus === "paid"}
+                onChange={(e) => setPaymentStatus(e.target.checked ? "paid" : "unpaid")}
+                className="h-4 w-4 accent-matcha-500"
+              />
+              paid
+            </label>
+            <Chip
+              active={paymentStatus === "comped"}
+              onClick={() =>
+                setPaymentStatus(paymentStatus === "comped" ? "unpaid" : "comped")
+              }
+            >
+              free
+            </Chip>
           </div>
         </div>
 
@@ -317,10 +336,17 @@ function DraftItemRow({
   if (item.iceAdjustment && item.iceAdjustment !== "normal") summary.push(`${item.iceAdjustment} ice`);
   if (item.specialRequests) summary.push(`"${item.specialRequests}"`);
 
+  const pastry = item.isCombo && item.comboPastryId
+    ? snapshot.menuItems.find((m) => m.id === item.comboPastryId)
+    : undefined;
+  const displayName = item.isCombo
+    ? `Combo: ${mi.name} + ${pastry?.name ?? "?"}`
+    : mi.name;
+
   return (
     <div className="flex items-center gap-2 rounded-xl border border-cream-200 bg-cream-50/50 p-2.5">
       <button onClick={onEdit} className="min-w-0 flex-1 text-left">
-        <div className="text-sm font-medium">{mi.name}</div>
+        <div className="text-sm font-medium">{displayName}</div>
         {summary.length > 0 ? (
           <div className="mt-0.5 text-xs text-matcha-900/60">{summary.join(" · ")}</div>
         ) : null}

@@ -345,7 +345,9 @@ function OrderItemRow({
       </button>
       <div className="min-w-0 flex-1">
         <div className={cn("t-display", compact ? "text-sm" : "text-base")}>
-          {item.quantity}× {item.menuItemNameSnap}
+          {item.quantity}× {item.isCombo
+            ? `Combo: ${item.menuItemNameSnap} + ${item.comboPastryNameSnap ?? "?"}`
+            : item.menuItemNameSnap}
         </div>
         <ItemModifiers item={item} ingredients={snapshot.ingredients} />
       </div>

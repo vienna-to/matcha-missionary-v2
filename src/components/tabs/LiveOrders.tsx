@@ -25,11 +25,11 @@ import {
 } from "@/components/ui";
 import { useActiveEvent, useStore } from "@/lib/store";
 import {
+  COMBO_PRICE,
   COMP_REASONS,
   COMP_REASON_LABELS,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
-  PAYMENT_STATUS_LABELS,
   compareMenuItems,
   type CompReason,
   type Ingredient,
@@ -53,6 +53,9 @@ type CartLine = {
   sugarAdjustment?: SugarAdjustment;
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
+  /** Combo deal: priced at COMBO_PRICE, bundles drink (menuItemId) + pastry. */
+  isCombo?: boolean;
+  comboPastryId?: string;
 };
 
 export default function LiveOrders() {
@@ -66,12 +69,14 @@ export default function LiveOrders() {
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("paid");
+  // Default: unpaid (Paid checkbox unchecked). The user explicitly opts in.
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("unpaid");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
   const [compReason, setCompReason] = useState<CompReason | "">("");
   const [notes, setNotes] = useState("");
   const [editingCid, setEditingCid] = useState<string | null>(null);
   const [cartOpenMobile, setCartOpenMobile] = useState(false);
+  const [comboPickerOpen, setComboPickerOpen] = useState(false);
 
   if (!event || !snapshot) {
     return (
@@ -85,6 +90,7 @@ export default function LiveOrders() {
   const activeEvent_ = event;
   const activeItems = snapshot.menuItems.filter((m) => m.active).sort(compareMenuItems);
   const total = cart.reduce((sum, line) => {
+    if (line.isCombo) return sum + COMBO_PRICE * line.quantity;
     const mi = snapshot.menuItems.find((m) => m.id === line.menuItemId);
     return sum + (mi ? mi.price : 0) * line.quantity;
   }, 0);
@@ -100,6 +106,20 @@ export default function LiveOrders() {
     ]);
   }
 
+  function addCombo(drinkId: string, pastryId: string) {
+    setCart((c) => [
+      ...c,
+      {
+        cid: newId("cart"),
+        menuItemId: drinkId,
+        quantity: 1,
+        isCombo: true,
+        comboPastryId: pastryId,
+      },
+    ]);
+    setComboPickerOpen(false);
+  }
+
   function updateLine(cid: string, patch: Partial<CartLine>) {
     setCart((c) => c.map((l) => (l.cid === cid ? { ...l, ...patch } : l)));
   }
@@ -110,7 +130,7 @@ export default function LiveOrders() {
   function reset() {
     setCart([]);
     setCustomerName("");
-    setPaymentStatus("paid");
+    setPaymentStatus("unpaid");
     setPaymentMethod("");
     setCompReason("");
     setNotes("");
@@ -143,6 +163,8 @@ export default function LiveOrders() {
           sugarAdjustment: l.sugarAdjustment,
           iceAdjustment: l.iceAdjustment,
           specialRequests: l.specialRequests,
+          isCombo: l.isCombo,
+          comboPastryId: l.comboPastryId,
         })),
       },
     });
@@ -157,11 +179,16 @@ export default function LiveOrders() {
   return (
     <div className="lg:grid lg:grid-cols-[1fr_360px] lg:gap-6">
       <div>
-        <header className="mb-4">
-          <h1 className="t-display text-xl">Live Orders</h1>
-          <p className="t-caption mt-0.5 text-sm text-matcha-900/60">
-            tap a card to add. use the slider icon to customize.
-          </p>
+        <header className="mb-4 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h1 className="t-display text-xl">Live Orders</h1>
+            <p className="t-caption mt-0.5 text-sm text-matcha-900/60">
+              tap a card to add. use the slider icon to customize.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setComboPickerOpen(true)}>
+            + Combo deal · {formatMoney(COMBO_PRICE)}
+          </Button>
         </header>
         <ItemGrid items={activeItems} onAdd={addLine} />
       </div>
@@ -272,7 +299,93 @@ export default function LiveOrders() {
           }}
         />
       ) : null}
+
+      {comboPickerOpen ? (
+        <ComboPickerModal
+          items={activeItems}
+          onClose={() => setComboPickerOpen(false)}
+          onPick={addCombo}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function ComboPickerModal({
+  items,
+  onClose,
+  onPick,
+}: {
+  items: MenuItem[];
+  onClose: () => void;
+  onPick: (drinkId: string, pastryId: string) => void;
+}) {
+  // Any active item can be either side of the combo — let the user decide
+  // since "pastry" isn't strictly modelled anymore. We do put items tagged
+  // category="pastry" at the top of the pastry picker for convenience.
+  const pastryFirst = useMemo(() => {
+    const arr = [...items];
+    arr.sort((a, b) => {
+      const ap = a.category === "pastry" ? 0 : 1;
+      const bp = b.category === "pastry" ? 0 : 1;
+      return ap - bp || compareMenuItems(a, b);
+    });
+    return arr;
+  }, [items]);
+
+  const initialDrink = items.find((m) => m.category !== "pastry")?.id ?? items[0]?.id ?? "";
+  const initialPastry = pastryFirst[0]?.id ?? "";
+
+  const [drinkId, setDrinkId] = useState<string>(initialDrink);
+  const [pastryId, setPastryId] = useState<string>(initialPastry);
+
+  const drink = items.find((m) => m.id === drinkId);
+  const pastry = items.find((m) => m.id === pastryId);
+  const savings = (drink?.price ?? 0) + (pastry?.price ?? 0) - COMBO_PRICE;
+  const valid = Boolean(drink && pastry && drinkId !== pastryId);
+
+  return (
+    <Modal open onClose={onClose} title={`Combo deal — ${formatMoney(COMBO_PRICE)}`}>
+      <div className="space-y-3">
+        <p className="t-caption text-xs text-matcha-900/60">
+          pick any drink and any pastry — bundle is fixed at {formatMoney(COMBO_PRICE)}.
+          customize the drink&apos;s milk / cream after adding via the cart.
+        </p>
+        <Field label="drink">
+          <Select value={drinkId} onChange={(e) => setDrinkId(e.target.value)}>
+            {items.map((m) => (
+              <option key={m.id} value={m.id}>
+                {`${m.name} · ${formatMoney(m.price)}`.toUpperCase()}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="pastry">
+          <Select value={pastryId} onChange={(e) => setPastryId(e.target.value)}>
+            {pastryFirst.map((m) => (
+              <option key={m.id} value={m.id}>
+                {`${m.name} · ${formatMoney(m.price)}`.toUpperCase()}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <div className="t-caption flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2 text-xs text-matcha-900/80">
+          <span>combo price</span>
+          <span className="tabular-nums">
+            {formatMoney(COMBO_PRICE)}
+            {savings > 0 ? (
+              <span className="ml-2 text-matcha-700">(save {formatMoney(savings)})</span>
+            ) : null}
+          </span>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onPick(drinkId, pastryId)} disabled={!valid}>
+            Add combo
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -398,17 +511,25 @@ function CartPanel({
           />
         </Field>
 
-        <Field label="payment status">
-          <div className="flex gap-1.5">
-            {(["paid", "unpaid", "comped"] as PaymentStatus[]).map((s) => (
-              <Chip
-                key={s}
-                active={paymentStatus === s}
-                onClick={() => setPaymentStatus(s)}
-              >
-                {PAYMENT_STATUS_LABELS[s]}
-              </Chip>
-            ))}
+        <Field label="payment">
+          <div className="mt-1.5 flex items-center gap-3">
+            <label className="t-caption flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={paymentStatus === "paid"}
+                onChange={(e) => setPaymentStatus(e.target.checked ? "paid" : "unpaid")}
+                className="h-4 w-4 accent-matcha-500"
+              />
+              paid
+            </label>
+            <Chip
+              active={paymentStatus === "comped"}
+              onClick={() =>
+                setPaymentStatus(paymentStatus === "comped" ? "unpaid" : "comped")
+              }
+            >
+              free
+            </Chip>
           </div>
         </Field>
 
@@ -522,11 +643,19 @@ function CartLineRow({
   }
   if (line.specialRequests) mods.push(`"${line.specialRequests}"`);
 
+  const pastry = line.isCombo && line.comboPastryId
+    ? snapshot.menuItems.find((m) => m.id === line.comboPastryId)
+    : undefined;
+  const lineUnitPrice = line.isCombo ? COMBO_PRICE : item.price;
+  const displayName = line.isCombo
+    ? `Combo: ${item.name} + ${pastry?.name ?? "?"}`
+    : item.name;
+
   return (
     <div className="rounded-xl border border-cream-200 bg-cream-50/50 p-2.5">
       <div className="flex items-start justify-between gap-2">
         <button onClick={onEdit} className="min-w-0 flex-1 text-left">
-          <div className="t-display text-sm">{item.name}</div>
+          <div className="t-display text-sm">{displayName}</div>
           {mods.length > 0 ? (
             <div className="t-caption mt-0.5 line-clamp-2 text-xs text-matcha-900/60">
               {mods.join(" · ")}
@@ -539,7 +668,7 @@ function CartLineRow({
         </button>
         <div className="text-right">
           <div className="text-sm font-medium tabular-nums">
-            {formatMoney(item.price * line.quantity)}
+            {formatMoney(lineUnitPrice * line.quantity)}
           </div>
         </div>
       </div>

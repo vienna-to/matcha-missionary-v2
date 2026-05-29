@@ -1,10 +1,12 @@
-import type {
-  FixedCost,
-  Ingredient,
-  IngredientLine,
-  MenuItem,
-  MenuSnapshot,
-  Order,
+import {
+  COMBO_BUCKET_ID,
+  COMBO_PRICE,
+  type FixedCost,
+  type Ingredient,
+  type IngredientLine,
+  type MenuItem,
+  type MenuSnapshot,
+  type Order,
 } from "./types";
 import { sameCategory, toCanonical } from "./units";
 
@@ -105,10 +107,42 @@ export function computeItemTotals(
   // accumulate weighted cost sums separately
   const costSum = new Map<string, number>();
 
+  // Lazy-init the combo bucket the first time we see one.
+  function ensureCombo(): ItemTotals {
+    const existing = result.get(COMBO_BUCKET_ID);
+    if (existing) return existing;
+    const fresh: ItemTotals = {
+      menuItemId: COMBO_BUCKET_ID,
+      name: "Combo",
+      category: "other",
+      // Place combos last in any sortOrder-based render.
+      sortOrder: Number.POSITIVE_INFINITY - 1,
+      qty: 0,
+      paidQty: 0,
+      unpaidQty: 0,
+      compedQty: 0,
+      priceSnap: COMBO_PRICE,
+      costSnapAvg: 0,
+      revenuePaid: 0,
+      revenueOwed: 0,
+      totalCost: 0,
+      profit: 0,
+      margin: null,
+      cashPaidQty: 0,
+      venmoPaidQty: 0,
+      zellePaidQty: 0,
+      otherPaidQty: 0,
+    };
+    result.set(COMBO_BUCKET_ID, fresh);
+    return fresh;
+  }
+
   for (const order of orders) {
     if (order.status === "cancelled") continue;
     for (const oi of order.items) {
-      const t = result.get(oi.menuItemId);
+      // Combos bucket together so the underlying drink and pastry don't get
+      // double-counted as individual sales.
+      const t = oi.isCombo ? ensureCombo() : result.get(oi.menuItemId);
       if (!t) continue;
       t.qty += oi.quantity;
       t.totalCost += oi.costSnap * oi.quantity;

@@ -199,6 +199,7 @@ export type IceAdjustment = "light" | "normal" | "extra";
 export type OrderItem = {
   id: string;
   orderId: string;
+  /** For combos, this is the *drink* menu item id (modifiers belong to it). */
   menuItemId: string;
   menuItemNameSnap: string;
   priceSnap: number;
@@ -210,7 +211,18 @@ export type OrderItem = {
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
   status: OrderItemStatus;
+  /** Combo-deal fields. When `isCombo`, priceSnap is fixed at COMBO_PRICE and
+   *  costSnap is the sum of the drink and pastry costs at submission. */
+  isCombo?: boolean;
+  comboPastryId?: string;
+  comboPastryNameSnap?: string;
+  comboPastryCostSnap?: number;
 };
+
+/** Fixed price for a drink + pastry bundle. */
+export const COMBO_PRICE = 10;
+/** Sentinel used by computeItemTotals to bucket every combo together. */
+export const COMBO_BUCKET_ID = "__combo__";
 
 export type Order = {
   id: string;

@@ -112,6 +112,10 @@ export type DbOrderItem = {
   ice_adjustment: OrderItem["iceAdjustment"] | null;
   special_requests: string | null;
   status: OrderItem["status"];
+  is_combo: boolean;
+  combo_pastry_id: string | null;
+  combo_pastry_name_snap: string | null;
+  combo_pastry_cost_snap: number | null;
 };
 
 // ---------- DB → TS ----------
@@ -241,6 +245,11 @@ export function fromOrderItem(r: DbOrderItem): OrderItem {
     iceAdjustment: undef(r.ice_adjustment),
     specialRequests: undef(r.special_requests),
     status: r.status,
+    isCombo: r.is_combo || undefined,
+    comboPastryId: undef(r.combo_pastry_id),
+    comboPastryNameSnap: undef(r.combo_pastry_name_snap),
+    comboPastryCostSnap:
+      r.combo_pastry_cost_snap == null ? undefined : Number(r.combo_pastry_cost_snap),
   };
 }
 
@@ -401,6 +410,10 @@ export function toOrderItemInsert(
     ice_adjustment: nul(oi.iceAdjustment),
     special_requests: nul(oi.specialRequests),
     status: oi.status,
+    is_combo: Boolean(oi.isCombo),
+    combo_pastry_id: nul(oi.comboPastryId),
+    combo_pastry_name_snap: nul(oi.comboPastryNameSnap),
+    combo_pastry_cost_snap: nul(oi.comboPastryCostSnap),
   };
 }
 

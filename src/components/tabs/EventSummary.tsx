@@ -117,6 +117,11 @@ export default function EventSummary() {
   const cupsForLoad = totals.totalCups;
   const fixedShare = cupsForLoad > 0 ? totals.fixedCosts / cupsForLoad : 0;
 
+  const donationPct = event.donationPct ?? 0;
+  const donationAmount = totals.revenuePaid * (donationPct / 100);
+  const netProfit = totals.profit - donationAmount;
+  const netMargin = totals.revenuePaid > 0 ? netProfit / totals.revenuePaid : null;
+
   const handleExport = () => {
     const csv = buildCsv(event, snapshot, orders, totals);
     downloadCsv(csv, `${event.name.replace(/\s+/g, "-")}_${event.date}.csv`);
@@ -181,7 +186,10 @@ export default function EventSummary() {
       ) : null}
 
       {/* Metrics */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className={cn(
+        "grid grid-cols-2 gap-3",
+        donationPct > 0 ? "md:grid-cols-3 xl:grid-cols-5" : "md:grid-cols-4",
+      )}>
         <Metric label="Cups poured" value={totals.totalCups.toString()} subtext={`${totals.byItem.length} menu items`} />
         <Metric
           label="Revenue (paid)"
@@ -189,10 +197,25 @@ export default function EventSummary() {
           subtext={totals.revenueOwed > 0 ? `+ ${formatMoney(totals.revenueOwed)} owed` : undefined}
         />
         <Metric label="Total cost" value={formatMoney(totals.totalCost)} subtext={`incl. ${formatMoney(totals.fixedCosts)} fixed`} />
+        {donationPct > 0 ? (
+          <Metric
+            label="Donation"
+            value={formatMoney(donationAmount)}
+            subtext={`${donationPct}% of revenue`}
+          />
+        ) : null}
         <Metric
-          label="Profit"
-          value={formatMoney(totals.profit)}
-          subtext={totals.margin !== null ? `${formatPct(totals.margin)} margin` : undefined}
+          label={donationPct > 0 ? "Net profit" : "Profit"}
+          value={formatMoney(donationPct > 0 ? netProfit : totals.profit)}
+          subtext={
+            donationPct > 0
+              ? netMargin !== null
+                ? `${formatPct(netMargin)} after donation`
+                : "after donation"
+              : totals.margin !== null
+                ? `${formatPct(totals.margin)} margin`
+                : undefined
+          }
         />
       </div>
 
@@ -374,6 +397,26 @@ export default function EventSummary() {
                 <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatPct(totals.margin)}</td>
                 <td />
               </tr>
+              {donationPct > 0 ? (
+                <>
+                  <tr className="border-t border-cream-100 text-matcha-900/70">
+                    <td className="py-2 pr-4">− Donation ({donationPct}% of revenue)</td>
+                    <td />
+                    <td className="py-2 pr-4 text-right tabular-nums">−{formatMoney(donationAmount)}</td>
+                    <td />
+                    <td />
+                    <td />
+                  </tr>
+                  <tr className="border-t-2 border-cream-200">
+                    <td className="py-2 pr-4 font-semibold">Net (after donation)</td>
+                    <td />
+                    <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(totals.revenuePaid - donationAmount)}</td>
+                    <td />
+                    <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatPct(netMargin)}</td>
+                    <td />
+                  </tr>
+                </>
+              ) : null}
             </tfoot>
           </table>
         </div>
@@ -647,6 +690,14 @@ type AllEventsAggregate = {
   totalCost: number;
   totalProfit: number;
   overallMargin: number | null;
+  /** Sum of every inventory_purchase.amount in the workspace. */
+  inventorySpending: number;
+  /** Sum of per-event (revenue × donationPct/100). */
+  totalDonations: number;
+  /** revenue − totalCost − totalDonations − inventorySpending. */
+  netProfit: number;
+  /** netProfit / revenue. */
+  netMargin: number | null;
   byItem: AggregatedItem[];
   bestSeller: AggregatedItem | null;
   mostProfitable: AggregatedItem | null;
@@ -660,6 +711,7 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
   let totalRevenue = 0;
   let totalCost = 0;
   let totalProfit = 0;
+  let totalDonations = 0;
 
   // Combine per-item across all events, keyed by display name (snapshot IDs
   // differ across events so name is the stable joiner).
@@ -676,6 +728,9 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
     totalRevenue += t.revenuePaid;
     totalCost += t.totalCost;
     totalProfit += t.profit;
+    if (evt.donationPct && evt.donationPct > 0) {
+      totalDonations += t.revenuePaid * (evt.donationPct / 100);
+    }
 
     for (const it of t.byItem) {
       if (it.qty === 0) continue;
@@ -721,6 +776,9 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
       ? [...byItem].filter((i) => i.profit > 0).sort((a, b) => b.profit - a.profit)[0] ?? null
       : null;
 
+  const inventorySpending = state.inventoryPurchases.reduce((s, p) => s + p.amount, 0);
+  const netProfit = totalRevenue - totalCost - totalDonations - inventorySpending;
+
   return {
     eventCount: events.length,
     totalCups,
@@ -728,6 +786,10 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
     totalCost,
     totalProfit,
     overallMargin: totalRevenue > 0 ? totalProfit / totalRevenue : null,
+    inventorySpending,
+    totalDonations,
+    netProfit,
+    netMargin: totalRevenue > 0 ? netProfit / totalRevenue : null,
     byItem,
     bestSeller,
     mostProfitable,
@@ -775,17 +837,31 @@ function AllEventsView({
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Metric label="Cups poured" value={aggregate.totalCups.toString()} subtext={`${aggregate.eventCount} events`} />
         <Metric label="Total revenue" value={formatMoney(aggregate.totalRevenue)} />
-        <Metric label="Total spending" value={formatMoney(aggregate.totalCost)} subtext="ingredients + fixed costs" />
         <Metric
-          label="Total profit"
-          value={formatMoney(aggregate.totalProfit)}
+          label="Event costs"
+          value={formatMoney(aggregate.totalCost)}
+          subtext="ingredients + per-event fixed"
+        />
+        <Metric
+          label="Donations"
+          value={formatMoney(aggregate.totalDonations)}
+          subtext={aggregate.totalDonations > 0 ? "charity events" : "none recorded"}
+        />
+        <Metric
+          label="Inventory spending"
+          value={formatMoney(aggregate.inventorySpending)}
+          subtext="supplies / bulk purchases"
+        />
+        <Metric
+          label="Net profit"
+          value={formatMoney(aggregate.netProfit)}
           subtext={
-            aggregate.overallMargin !== null
-              ? `${formatPct(aggregate.overallMargin)} overall margin`
-              : undefined
+            aggregate.netMargin !== null
+              ? `${formatPct(aggregate.netMargin)} net margin`
+              : "after donations + inventory"
           }
         />
       </div>
@@ -894,7 +970,7 @@ function AllEventsView({
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-cream-200">
-                  <td className="py-2 pr-4 font-semibold">Totals</td>
+                  <td className="py-2 pr-4 font-semibold">Event totals</td>
                   <td className="py-2 pr-4 text-right font-semibold tabular-nums">{aggregate.totalCups}</td>
                   <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(aggregate.totalRevenue)}</td>
                   <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(aggregate.totalCost)}</td>
@@ -902,6 +978,39 @@ function AllEventsView({
                   <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatPct(aggregate.overallMargin)}</td>
                   <td />
                 </tr>
+                {aggregate.totalDonations > 0 ? (
+                  <tr className="border-t border-cream-100 text-matcha-900/70">
+                    <td className="py-2 pr-4">− Donations</td>
+                    <td />
+                    <td className="py-2 pr-4 text-right tabular-nums">−{formatMoney(aggregate.totalDonations)}</td>
+                    <td />
+                    <td className="py-2 pr-4 text-right tabular-nums">−{formatMoney(aggregate.totalDonations)}</td>
+                    <td />
+                    <td />
+                  </tr>
+                ) : null}
+                {aggregate.inventorySpending > 0 ? (
+                  <tr className="border-t border-cream-100 text-matcha-900/70">
+                    <td className="py-2 pr-4">− Inventory spending</td>
+                    <td />
+                    <td />
+                    <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(aggregate.inventorySpending)}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums">−{formatMoney(aggregate.inventorySpending)}</td>
+                    <td />
+                    <td />
+                  </tr>
+                ) : null}
+                {aggregate.totalDonations > 0 || aggregate.inventorySpending > 0 ? (
+                  <tr className="border-t-2 border-cream-200">
+                    <td className="py-2 pr-4 font-semibold">Net</td>
+                    <td />
+                    <td />
+                    <td />
+                    <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(aggregate.netProfit)}</td>
+                    <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatPct(aggregate.netMargin)}</td>
+                    <td />
+                  </tr>
+                ) : null}
               </tfoot>
             </table>
           </div>

@@ -2,6 +2,7 @@ import type {
   AppState,
   Event,
   Ingredient,
+  InventoryPurchase,
   MenuItem,
   MenuSnapshot,
   Order,
@@ -58,6 +59,7 @@ export type DbEvent = {
   start_time: string | null;
   end_time: string | null;
   target_revenue: number | null;
+  donation_pct: number | null;
   is_active: boolean;
   kind: Event["kind"];
   menu_snapshot: MenuSnapshot;
@@ -81,6 +83,17 @@ export type DbOrder = {
   notes: string | null;
   submitted_at: string;
   done_at: string | null;
+  updated_at: string;
+};
+
+export type DbInventoryPurchase = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  amount: number;
+  date: string;
+  notes: string | null;
+  created_at: string;
   updated_at: string;
 };
 
@@ -146,6 +159,7 @@ export function fromEvent(r: DbEvent): Event {
     startTime: r.start_time ?? "",
     endTime: r.end_time ?? "",
     targetRevenue: r.target_revenue ?? undefined,
+    donationPct: r.donation_pct == null ? undefined : Number(r.donation_pct),
     menuSnapshotId: r.menu_snapshot?.id ?? r.id,
     fixedCosts: r.fixed_costs ?? [],
     isActive: r.is_active,
@@ -173,6 +187,43 @@ export function fromOrder(r: DbOrder, items: OrderItem[]): Order {
     doneAt: undef(r.done_at),
     updatedAt: r.updated_at,
   };
+}
+
+export function fromInventoryPurchase(r: DbInventoryPurchase): InventoryPurchase {
+  return {
+    id: r.id,
+    name: r.name,
+    amount: Number(r.amount),
+    date: r.date,
+    notes: r.notes ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function toInventoryPurchaseInsert(
+  workspaceId: string,
+  p: InventoryPurchase,
+): Omit<DbInventoryPurchase, "created_at" | "updated_at"> {
+  return {
+    id: p.id,
+    workspace_id: workspaceId,
+    name: p.name,
+    amount: p.amount,
+    date: p.date,
+    notes: nul(p.notes),
+  };
+}
+
+export function toInventoryPurchasePatch(
+  patch: Partial<InventoryPurchase>,
+): Partial<DbInventoryPurchase> {
+  const r: Partial<DbInventoryPurchase> = {};
+  if (patch.name !== undefined) r.name = patch.name;
+  if (patch.amount !== undefined) r.amount = patch.amount;
+  if (patch.date !== undefined) r.date = patch.date;
+  if (patch.notes !== undefined) r.notes = nul(patch.notes);
+  return r;
 }
 
 export function fromOrderItem(r: DbOrderItem): OrderItem {
@@ -277,6 +328,7 @@ export function toEventInsert(
     start_time: evt.startTime || null,
     end_time: evt.endTime || null,
     target_revenue: nul(evt.targetRevenue),
+    donation_pct: nul(evt.donationPct),
     is_active: evt.isActive,
     kind: evt.kind ?? "live",
     menu_snapshot: snapshot,
@@ -292,6 +344,7 @@ export function toEventPatch(patch: Partial<Event>): Partial<DbEvent> {
   if (patch.startTime !== undefined) r.start_time = patch.startTime || null;
   if (patch.endTime !== undefined) r.end_time = patch.endTime || null;
   if (patch.targetRevenue !== undefined) r.target_revenue = nul(patch.targetRevenue);
+  if (patch.donationPct !== undefined) r.donation_pct = nul(patch.donationPct);
   if (patch.fixedCosts !== undefined) r.fixed_costs = patch.fixedCosts;
   if (patch.isActive !== undefined) r.is_active = patch.isActive;
   if (patch.notes !== undefined) r.notes = nul(patch.notes);
@@ -360,6 +413,7 @@ export function buildAppState(
   events: DbEvent[],
   orders: DbOrder[],
   orderItems: DbOrderItem[],
+  inventoryPurchases: DbInventoryPurchase[],
 ): AppState {
   const tsIngredients = ingredients.map(fromIngredient);
   const tsMenuItems = menuItems.map(fromMenuItem);
@@ -383,5 +437,6 @@ export function buildAppState(
     menuSnapshots: snapshots,
     events: tsEvents,
     orders: tsOrders,
+    inventoryPurchases: inventoryPurchases.map(fromInventoryPurchase),
   };
 }

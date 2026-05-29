@@ -5,6 +5,7 @@ import type {
   Event,
   FixedCost,
   Ingredient,
+  InventoryPurchase,
   MenuItem,
   MenuSnapshot,
   Order,
@@ -64,6 +65,14 @@ export type Action =
       status: OrderItemStatus;
     }
   | { type: "DELETE_ORDER"; id: string }
+  | {
+      type: "ADD_INVENTORY_PURCHASE";
+      purchase: Omit<InventoryPurchase, "id" | "createdAt" | "updatedAt">;
+    }
+  | { type: "UPDATE_INVENTORY_PURCHASE"; id: string; patch: Partial<InventoryPurchase> }
+  | { type: "DELETE_INVENTORY_PURCHASE"; id: string }
+  | { type: "RT_UPSERT_INVENTORY_PURCHASE"; purchase: InventoryPurchase }
+  | { type: "RT_DELETE_INVENTORY_PURCHASE"; id: string }
   | { type: "RESET_TO_SEED"; seed: AppState }
   // -- Realtime echoes from Supabase (idempotent upsert/delete) --
   | { type: "RT_UPSERT_INGREDIENT"; ing: Ingredient }
@@ -349,6 +358,49 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "DELETE_ORDER":
       return { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
+
+    case "ADD_INVENTORY_PURCHASE": {
+      const purchase: InventoryPurchase = {
+        ...action.purchase,
+        id: newId("inv"),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      return { ...state, inventoryPurchases: [...state.inventoryPurchases, purchase] };
+    }
+
+    case "UPDATE_INVENTORY_PURCHASE":
+      return {
+        ...state,
+        inventoryPurchases: state.inventoryPurchases.map((p) =>
+          p.id === action.id ? { ...p, ...action.patch, updatedAt: nowIso() } : p,
+        ),
+      };
+
+    case "DELETE_INVENTORY_PURCHASE":
+      return {
+        ...state,
+        inventoryPurchases: state.inventoryPurchases.filter((p) => p.id !== action.id),
+      };
+
+    case "RT_UPSERT_INVENTORY_PURCHASE": {
+      const exists = state.inventoryPurchases.some((p) => p.id === action.purchase.id);
+      return {
+        ...state,
+        inventoryPurchases: exists
+          ? state.inventoryPurchases.map((p) =>
+              p.id === action.purchase.id ? action.purchase : p,
+            )
+          : [...state.inventoryPurchases, action.purchase],
+      };
+    }
+
+    case "RT_DELETE_INVENTORY_PURCHASE":
+      if (!state.inventoryPurchases.some((p) => p.id === action.id)) return state;
+      return {
+        ...state,
+        inventoryPurchases: state.inventoryPurchases.filter((p) => p.id !== action.id),
+      };
 
     case "RESET_TO_SEED":
       return action.seed;

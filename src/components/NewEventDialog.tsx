@@ -25,6 +25,7 @@ export default function NewEventDialog({
   const [startTime, setStartTime] = useState("11:00");
   const [endTime, setEndTime] = useState("16:00");
   const [targetRevenue, setTargetRevenue] = useState<string>("");
+  const [donationPct, setDonationPct] = useState<string>("");
 
   const placeholder = `Pop-Up ${date}`;
   const submittable = date.length === 10 && startTime && endTime;
@@ -35,11 +36,13 @@ export default function NewEventDialog({
     setStartTime("11:00");
     setEndTime("16:00");
     setTargetRevenue("");
+    setDonationPct("");
   }
 
   function save() {
     if (!submittable) return;
     const goal = Number(targetRevenue);
+    const donate = Number(donationPct);
     dispatch({
       type: "CREATE_EVENT",
       event: {
@@ -48,6 +51,8 @@ export default function NewEventDialog({
         startTime,
         endTime,
         targetRevenue: Number.isFinite(goal) && goal > 0 ? goal : undefined,
+        donationPct:
+          Number.isFinite(donate) && donate > 0 && donate <= 100 ? donate : undefined,
       },
     });
     reset();
@@ -85,6 +90,19 @@ export default function NewEventDialog({
           </Field>
           <Field label="End time">
             <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+          </Field>
+          <Field label="Donation % (optional)" className="col-span-2">
+            <Input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              max="100"
+              step="1"
+              value={donationPct}
+              onChange={(e) => setDonationPct(e.target.value)}
+              onWheel={(e) => (e.target as HTMLInputElement).blur()}
+              placeholder="e.g. 10 — for charity events where X% of revenue is donated"
+            />
           </Field>
         </div>
         <p className="text-xs text-matcha-900/60">

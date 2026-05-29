@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Event,
   Ingredient,
+  InventoryPurchase,
   MenuItem,
   MenuSnapshot,
   Order,
@@ -13,6 +14,8 @@ import {
   toEventPatch,
   toIngredientInsert,
   toIngredientPatch,
+  toInventoryPurchaseInsert,
+  toInventoryPurchasePatch,
   toMenuItemInsert,
   toMenuItemPatch,
   toOrderInsert,
@@ -167,6 +170,30 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .eq("id", orderItemId)
       .eq("workspace_id", workspaceId);
     tag("updateOrderItemStatus")(error);
+  },
+
+  // ---------- inventory purchases ----------
+  async addInventoryPurchase(p: InventoryPurchase) {
+    const { error } = await supabase
+      .from("inventory_purchases")
+      .insert(toInventoryPurchaseInsert(workspaceId, p));
+    tag("addInventoryPurchase")(error);
+  },
+  async updateInventoryPurchase(id: string, patch: Partial<InventoryPurchase>) {
+    const { error } = await supabase
+      .from("inventory_purchases")
+      .update(toInventoryPurchasePatch(patch))
+      .eq("id", id)
+      .eq("workspace_id", workspaceId);
+    tag("updateInventoryPurchase")(error);
+  },
+  async deleteInventoryPurchase(id: string) {
+    const { error } = await supabase
+      .from("inventory_purchases")
+      .delete()
+      .eq("id", id)
+      .eq("workspace_id", workspaceId);
+    tag("deleteInventoryPurchase")(error);
   },
 });
 

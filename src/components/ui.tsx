@@ -69,22 +69,40 @@ export function Input(
 
 /**
  * Number input that lets the user fully clear the field (backspace → empty)
- * without the zero re-appearing. Internally tracks the raw string so
- * intermediate states like "0." or "" are allowed during typing. Parent
- * sees the parsed number on every keystroke (0 for empty).
+ * without the zero re-appearing. Tracks a local string draft so the UI is
+ * fully responsive on every keystroke. Parent's `onChange` is only invoked
+ * on blur / Enter — this keeps reducer dispatches + Supabase writes off the
+ * critical typing path. Pass `commit="change"` for live-update use cases.
  */
 export function NumberField({
   value,
   onChange,
   className,
+  commit = "blur",
+  onBlur,
+  onKeyDown,
   ...rest
 }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> & {
   value: number;
   onChange: (n: number) => void;
+  /** "blur" (default) commits on blur/Enter; "change" fires on every keystroke. */
+  commit?: "blur" | "change";
 }) {
-  // Local draft while the user is typing; null means "follow parent".
   const [draft, setDraft] = useState<string | null>(null);
   const display = draft ?? (value === 0 ? "" : String(value));
+
+  function parse(v: string): number {
+    if (v === "") return 0;
+    const n = Number(v);
+    return Number.isNaN(n) ? value : n;
+  }
+  function commitDraft() {
+    if (draft === null) return;
+    const next = parse(draft);
+    if (next !== value) onChange(next);
+    setDraft(null);
+  }
+
   return (
     <input
       type="number"
@@ -97,18 +115,64 @@ export function NumberField({
       onChange={(e) => {
         const v = e.target.value;
         setDraft(v);
-        if (v === "") {
-          onChange(0);
-        } else {
-          const n = Number(v);
-          if (!Number.isNaN(n)) onChange(n);
-        }
+        if (commit === "change") onChange(parse(v));
       }}
-      onBlur={() => setDraft(null)}
-      // Block mouse-wheel scroll from changing the value. Blurring the input
-      // (instead of preventDefault on the wheel event) keeps page scrolling
-      // working when the cursor happens to be over the field.
+      onBlur={(e) => {
+        commitDraft();
+        onBlur?.(e);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        onKeyDown?.(e);
+      }}
       onWheel={(e) => (e.target as HTMLInputElement).blur()}
+      {...rest}
+    />
+  );
+}
+
+/**
+ * Text input that commits to the parent only on blur / Enter — same idea as
+ * NumberField. Use this in inline-edit tables where each keystroke would
+ * otherwise dispatch + write to Supabase. Default for `<Input>` keeps the
+ * standard React controlled behaviour.
+ */
+export function TextField({
+  value,
+  onChange,
+  className,
+  onBlur,
+  onKeyDown,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
+  value: string;
+  onChange: (s: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const display = draft ?? value;
+
+  function commitDraft() {
+    if (draft === null) return;
+    if (draft !== value) onChange(draft);
+    setDraft(null);
+  }
+
+  return (
+    <input
+      className={cn(
+        "h-10 w-full rounded-xl border border-cream-200 bg-white px-3 text-sm placeholder:text-matcha-900/40",
+        className,
+      )}
+      value={display}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => {
+        commitDraft();
+        onBlur?.(e);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        onKeyDown?.(e);
+      }}
       {...rest}
     />
   );

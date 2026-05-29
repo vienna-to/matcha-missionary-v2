@@ -29,6 +29,7 @@ import {
   NumberField,
   Select,
   Textarea,
+  TextField,
   Badge,
   Chip,
   EmptyState,
@@ -468,6 +469,7 @@ function ItemEditor({
               step="0.01"
               min={0}
               value={draft.price}
+              commit="change"
               onChange={(n) => patch("price", n)}
             />
           </Field>
@@ -693,6 +695,7 @@ function LineRow({
         step="0.1"
         min={0}
         value={line.amount}
+        commit="change"
         onChange={(n) => onChange({ ...line, amount: n })}
       />
       <Select
@@ -792,10 +795,10 @@ function IngredientRow({
   return (
     <tr className="border-t border-cream-100">
       <td className="py-1.5 pr-3">
-        <Input
+        <TextField
           className="h-8"
           value={ing.name}
-          onChange={(e) => onChange({ name: e.target.value })}
+          onChange={(v) => onChange({ name: v })}
         />
       </td>
       <td className="py-1.5 pr-3">
@@ -865,6 +868,7 @@ function NewIngredientForm({
             step="0.01"
             min={0}
             value={packagePrice}
+            commit="change"
             onChange={setPackagePrice}
           />
         </Field>
@@ -873,6 +877,7 @@ function NewIngredientForm({
             step="0.01"
             min={0}
             value={packageAmount}
+            commit="change"
             onChange={setPackageAmount}
           />
         </Field>

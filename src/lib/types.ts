@@ -142,6 +142,9 @@ export type Event = {
   startTime: string; // HH:MM
   endTime: string; // HH:MM
   targetRevenue?: number;
+  /** Percentage of revenue (0–100) donated for charity events. When set,
+   *  Event Summary surfaces the donation amount and nets it out of profit. */
+  donationPct?: number;
   menuSnapshotId: string;
   fixedCosts: FixedCost[];
   isActive: boolean;
@@ -233,6 +236,21 @@ export type Settings = {
   audioUnlocked: boolean; // session-flag style; persists once user taps "Enable sound"
 };
 
+/**
+ * One inventory/supply purchase — a one-off cost (matcha tin, cups in bulk,
+ * tape, signage, anything). Tracked separately from per-drink ingredient
+ * costs and surfaced in the All Events aggregate to compute true net profit.
+ */
+export type InventoryPurchase = {
+  id: string;
+  name: string;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AppState = {
   settings: Settings;
   ingredients: Ingredient[]; // master
@@ -240,4 +258,5 @@ export type AppState = {
   menuSnapshots: MenuSnapshot[];
   events: Event[];
   orders: Order[];
+  inventoryPurchases: InventoryPurchase[];
 };

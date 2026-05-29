@@ -23,12 +23,14 @@ import {
 import {
   fromEvent,
   fromIngredient,
+  fromInventoryPurchase,
   fromMenuItem,
   fromOrder,
   fromOrderItem,
   fromWorkspaceSettings,
   type DbEvent,
   type DbIngredient,
+  type DbInventoryPurchase,
   type DbMenuItem,
   type DbOrder,
   type DbOrderItem,
@@ -47,6 +49,8 @@ function loadLocalState(): AppState {
     if (!raw) return initialSeed();
     const parsed = JSON.parse(raw) as AppState;
     if (!parsed.settings || !parsed.menuItems) return initialSeed();
+    // Backfill fields added in later releases so older payloads still work.
+    if (!Array.isArray(parsed.inventoryPurchases)) parsed.inventoryPurchases = [];
     return parsed;
   } catch {
     return initialSeed();
@@ -218,6 +222,16 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
         }
         baseDispatch({ type: "RT_UPSERT_ORDER_ITEM", item: fromOrderItem(row as DbOrderItem) });
       },
+      onInventory: (kind, row) => {
+        if (kind === "DELETE") {
+          baseDispatch({ type: "RT_DELETE_INVENTORY_PURCHASE", id: row.id });
+          return;
+        }
+        baseDispatch({
+          type: "RT_UPSERT_INVENTORY_PURCHASE",
+          purchase: fromInventoryPurchase(row as DbInventoryPurchase),
+        });
+      },
       onWorkspace: (row) => {
         baseDispatch({ type: "RT_UPDATE_SETTINGS", patch: fromWorkspaceSettings(row as DbWorkspace) });
       },
@@ -310,6 +324,18 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           break;
         case "SET_ORDER_ITEM_STATUS":
           w.updateOrderItemStatus(a.orderItemId, a.status);
+          break;
+        case "ADD_INVENTORY_PURCHASE":
+          setTimeout(() => {
+            const latest = stateRef.current.inventoryPurchases.at(-1);
+            if (latest) w.addInventoryPurchase(latest);
+          }, 0);
+          break;
+        case "UPDATE_INVENTORY_PURCHASE":
+          w.updateInventoryPurchase(a.id, a.patch);
+          break;
+        case "DELETE_INVENTORY_PURCHASE":
+          w.deleteInventoryPurchase(a.id);
           break;
         default:
           // REPLACE / RESET_TO_SEED / RT_* are local-only.

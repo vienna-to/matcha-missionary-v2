@@ -56,6 +56,7 @@ export default function QuickAddPastEventDialog({
   const [date, setDate] = useState(todayLocal());
   const [startTime, setStartTime] = useState("11:00");
   const [endTime, setEndTime] = useState("16:00");
+  const [donationPct, setDonationPct] = useState(0);
   const [notes, setNotes] = useState("");
   const [qty, setQty] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
@@ -75,6 +76,7 @@ export default function QuickAddPastEventDialog({
     setDate(todayLocal());
     setStartTime("11:00");
     setEndTime("16:00");
+    setDonationPct(0);
     setNotes("");
     setQty({});
   }
@@ -91,6 +93,7 @@ export default function QuickAddPastEventDialog({
         startTime,
         endTime,
         notes,
+        donationPct: donationPct > 0 ? donationPct : undefined,
         itemQuantities: qty,
       });
 
@@ -165,6 +168,16 @@ export default function QuickAddPastEventDialog({
           <Field label="end time">
             <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
           </Field>
+          <Field label="donation % (optional)" className="col-span-2" hint="for charity events — % of revenue donated">
+            <NumberField
+              min={0}
+              max={100}
+              step={1}
+              value={donationPct}
+              commit="change"
+              onChange={setDonationPct}
+            />
+          </Field>
         </div>
 
         <div className="rounded-xl border border-cream-200 p-3">
@@ -204,6 +217,7 @@ export default function QuickAddPastEventDialog({
                       min={0}
                       step={1}
                       value={n}
+                      commit="change"
                       onChange={(v) =>
                         setQty((q) => ({ ...q, [mi.id]: Math.max(0, Math.floor(v)) }))
                       }

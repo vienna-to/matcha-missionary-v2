@@ -4,11 +4,13 @@ import {
   buildAppState,
   fromEvent,
   fromIngredient,
+  fromInventoryPurchase,
   fromMenuItem,
   fromOrder,
   fromOrderItem,
   type DbEvent,
   type DbIngredient,
+  type DbInventoryPurchase,
   type DbMenuItem,
   type DbOrder,
   type DbOrderItem,
@@ -28,6 +30,7 @@ export async function loadFullState(
     { data: events, error: evErr },
     { data: orders, error: ordErr },
     { data: orderItems, error: oiErr },
+    { data: invs, error: invErr },
   ] = await Promise.all([
     supabase.from("workspaces").select("*").eq("id", workspaceId).single(),
     supabase.from("ingredients").select("*").eq("workspace_id", workspaceId),
@@ -35,9 +38,10 @@ export async function loadFullState(
     supabase.from("events").select("*").eq("workspace_id", workspaceId),
     supabase.from("orders").select("*").eq("workspace_id", workspaceId),
     supabase.from("order_items").select("*").eq("workspace_id", workspaceId),
+    supabase.from("inventory_purchases").select("*").eq("workspace_id", workspaceId),
   ]);
 
-  const err = wsErr || ingErr || miErr || evErr || ordErr || oiErr;
+  const err = wsErr || ingErr || miErr || evErr || ordErr || oiErr || invErr;
   if (err) throw err;
   if (!ws) throw new Error("workspace not found");
 
@@ -48,6 +52,7 @@ export async function loadFullState(
     (events ?? []) as DbEvent[],
     (orders ?? []) as DbOrder[],
     (orderItems ?? []) as DbOrderItem[],
+    (invs ?? []) as DbInventoryPurchase[],
   );
 }
 
@@ -96,6 +101,7 @@ export type RealtimeHandlers = {
   onEvent:      (kind: "INSERT" | "UPDATE" | "DELETE", row: DbEvent      | { id: string }) => void;
   onOrder:      (kind: "INSERT" | "UPDATE" | "DELETE", row: DbOrder      | { id: string }) => void;
   onOrderItem:  (kind: "INSERT" | "UPDATE" | "DELETE", row: DbOrderItem  | { id: string }) => void;
+  onInventory:  (kind: "INSERT" | "UPDATE" | "DELETE", row: DbInventoryPurchase | { id: string }) => void;
   onWorkspace:  (row: DbWorkspace) => void;
 };
 
@@ -158,6 +164,15 @@ export function subscribeAll(
     )
     .on(
       "postgres_changes",
+      { event: "*", schema: "public", table: "inventory_purchases", filter },
+      (p) => handlers.onInventory(
+        p.eventType as "INSERT" | "UPDATE" | "DELETE",
+        // @ts-expect-error see above
+        p.new && Object.keys(p.new).length ? p.new : p.old,
+      ),
+    )
+    .on(
+      "postgres_changes",
       { event: "UPDATE", schema: "public", table: "workspaces", filter: wsFilter },
       (p) => handlers.onWorkspace(p.new as DbWorkspace),
     )
@@ -169,4 +184,11 @@ export function subscribeAll(
 }
 
 // Re-export converters for store wiring
-export { fromIngredient, fromMenuItem, fromEvent, fromOrder, fromOrderItem };
+export {
+  fromIngredient,
+  fromMenuItem,
+  fromEvent,
+  fromOrder,
+  fromOrderItem,
+  fromInventoryPurchase,
+};

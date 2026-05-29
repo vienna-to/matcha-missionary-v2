@@ -27,6 +27,7 @@ export function buildQuickAddEvent({
   startTime,
   endTime,
   notes,
+  donationPct,
   itemQuantities,
   paymentMethod = "cash",
 }: {
@@ -36,6 +37,7 @@ export function buildQuickAddEvent({
   startTime: string; // HH:MM
   endTime: string; // HH:MM
   notes?: string;
+  donationPct?: number;
   itemQuantities: Record<string, number>;
   paymentMethod?: PaymentMethod;
 }): { event: Event; snapshot: MenuSnapshot; orders: Order[] } {
@@ -63,6 +65,10 @@ export function buildQuickAddEvent({
     startTime,
     endTime,
     targetRevenue: undefined,
+    donationPct:
+      donationPct !== undefined && donationPct > 0 && donationPct <= 100
+        ? donationPct
+        : undefined,
     menuSnapshotId: snapshot.id,
     fixedCosts: [],
     isActive: false, // past event — don't steal active from current live event

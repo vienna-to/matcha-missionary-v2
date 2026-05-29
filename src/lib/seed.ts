@@ -353,6 +353,7 @@ export function initialSeed(): AppState {
       menuSnapshots: [snapshotOrdered],
       events: [event],
       orders,
+      inventoryPurchases: [],
     } satisfies AppState),
   );
 }

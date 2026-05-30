@@ -12,15 +12,17 @@ import {
   Textarea,
 } from "@/components/ui";
 import { useDispatch } from "@/lib/store";
-import type {
-  Ingredient,
-  MenuItem,
-  MenuSnapshot,
-  Order,
-  OrderItem,
-  SugarAdjustment,
-  IceAdjustment,
+import {
+  COMBO_PRICE,
+  type Ingredient,
+  type MenuItem,
+  type MenuSnapshot,
+  type Order,
+  type OrderItem,
+  type SugarAdjustment,
+  type IceAdjustment,
 } from "@/lib/types";
+import { DiscountRow } from "@/components/DiscountRow";
 import { newId } from "@/lib/id";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -177,6 +179,9 @@ export default function EditOrderModal({
                   onEdit={() => setEditingItemId(it.id)}
                   onRemove={() => removeItem(it.id)}
                   onIncrement={(d) => updateItem(it.id, { quantity: Math.max(1, it.quantity + d) })}
+                  onSetDiscount={(pct) =>
+                    updateItem(it.id, { discountPct: pct > 0 ? pct : undefined })
+                  }
                 />
               ))}
             </div>
@@ -233,13 +238,17 @@ function DraftItemRow({
   onEdit,
   onRemove,
   onIncrement,
+  onSetDiscount,
 }: {
   item: DraftItem;
   snapshot: MenuSnapshot;
   onEdit: () => void;
   onRemove: () => void;
   onIncrement: (d: number) => void;
+  onSetDiscount: (pct: number) => void;
 }) {
+  // Hook must run before any conditional return.
+  const [discountOpen, setDiscountOpen] = useState(false);
   const mi = snapshot.menuItems.find((m) => m.id === item.menuItemId);
   if (!mi) return null;
   const summary: string[] = [];
@@ -266,30 +275,55 @@ function DraftItemRow({
   const displayName = item.isCombo
     ? `Combo: ${mi.name} + ${pastry?.name ?? "?"}`
     : mi.name;
+  const unitPrice = item.isCombo ? COMBO_PRICE : mi.price;
+  const pct = item.discountPct ?? 0;
 
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-cream-200 bg-cream-50/50 p-2.5">
-      <button onClick={onEdit} className="min-w-0 flex-1 text-left">
-        <div className="text-sm font-medium">{displayName}</div>
-        {summary.length > 0 ? (
-          <div className="mt-0.5 text-xs text-matcha-900/60">{summary.join(" · ")}</div>
-        ) : null}
-      </button>
-      <div className="flex items-center gap-1">
-        <Button size="sm" variant="outline" onClick={() => onIncrement(-1)}>
-          <Minus className="h-3.5 w-3.5" />
+    <div className="rounded-xl border border-cream-200 bg-cream-50/50 p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={onEdit} className="min-w-0 flex-1 text-left">
+          <div className="text-sm font-medium">{displayName}</div>
+          {summary.length > 0 ? (
+            <div className="mt-0.5 text-xs text-matcha-900/60">{summary.join(" · ")}</div>
+          ) : null}
+          {pct > 0 ? (
+            <div className="t-caption mt-0.5 text-[11px] text-matcha-700">
+              {pct === 100 ? "FREE" : `${pct}% off`}
+            </div>
+          ) : null}
+        </button>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="outline" onClick={() => onIncrement(-1)}>
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+          <div className="min-w-7 text-center text-sm font-medium tabular-nums">{item.quantity}</div>
+          <Button size="sm" variant="outline" onClick={() => onIncrement(1)}>
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <Button
+          size="sm"
+          variant={pct > 0 ? "primary" : "ghost"}
+          onClick={() => setDiscountOpen((s) => !s)}
+          title={pct > 0 ? "Edit discount" : "Add discount"}
+        >
+          <span className="t-display text-[11px]">%</span>
         </Button>
-        <div className="min-w-7 text-center text-sm font-medium tabular-nums">{item.quantity}</div>
-        <Button size="sm" variant="outline" onClick={() => onIncrement(1)}>
-          <Plus className="h-3.5 w-3.5" />
+        <Button size="sm" variant="ghost" onClick={onEdit}>
+          <Sliders className="h-3.5 w-3.5" />
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onRemove}>
+          <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <Button size="sm" variant="ghost" onClick={onEdit}>
-        <Sliders className="h-3.5 w-3.5" />
-      </Button>
-      <Button size="sm" variant="ghost" onClick={onRemove}>
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+      {discountOpen ? (
+        <DiscountRow
+          unitPrice={unitPrice}
+          pct={pct}
+          onPct={onSetDiscount}
+          onClose={() => setDiscountOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

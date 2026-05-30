@@ -61,6 +61,13 @@ export type Action =
       orderItemId: string;
       status: OrderItemStatus;
     }
+  /** Patch a single order item in place (e.g. change discountPct). */
+  | {
+      type: "UPDATE_ORDER_ITEM";
+      orderId: string;
+      orderItemId: string;
+      patch: Partial<OrderItem>;
+    }
   | { type: "DELETE_ORDER"; id: string }
   | {
       type: "ADD_INVENTORY_PURCHASE";
@@ -400,6 +407,18 @@ export function reducer(state: AppState, action: Action): AppState {
           if (status === "completed" && !doneAt) doneAt = nowIso();
           else if (status !== "completed" && doneAt) doneAt = undefined;
           return { ...o, items, status, doneAt, updatedAt: nowIso() };
+        }),
+      };
+
+    case "UPDATE_ORDER_ITEM":
+      return {
+        ...state,
+        orders: state.orders.map((o) => {
+          if (o.id !== action.orderId) return o;
+          const items = o.items.map((it) =>
+            it.id === action.orderItemId ? { ...it, ...action.patch } : it,
+          );
+          return { ...o, items, updatedAt: nowIso() };
         }),
       };
 

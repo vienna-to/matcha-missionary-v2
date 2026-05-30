@@ -20,6 +20,7 @@ import {
   toMenuItemPatch,
   toOrderInsert,
   toOrderItemInsert,
+  toOrderItemPatch,
   toOrderPatch,
 } from "./serialize";
 
@@ -170,6 +171,16 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .eq("id", orderItemId)
       .eq("workspace_id", workspaceId);
     tag("updateOrderItemStatus")(error);
+  },
+  async updateOrderItem(orderItemId: string, patch: Partial<OrderItem>) {
+    const dbPatch = toOrderItemPatch(patch);
+    if (Object.keys(dbPatch).length === 0) return;
+    const { error } = await supabase
+      .from("order_items")
+      .update(dbPatch)
+      .eq("id", orderItemId)
+      .eq("workspace_id", workspaceId);
+    tag("updateOrderItem")(error);
   },
 
   // ---------- inventory purchases ----------

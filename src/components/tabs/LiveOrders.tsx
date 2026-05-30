@@ -38,6 +38,7 @@ import {
 import { computeItemCost } from "@/lib/calc";
 import { deriveOrderItem, nextOrderNumber } from "@/lib/reducer";
 import { newId, nowIso } from "@/lib/id";
+import { DiscountRow } from "@/components/DiscountRow";
 import { cn, formatMoney } from "@/lib/utils";
 
 type CartLine = {
@@ -643,55 +644,6 @@ function CartLineRow({
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function DiscountRow({
-  unitPrice,
-  pct,
-  onPct,
-  onClose,
-}: {
-  unitPrice: number;
-  pct: number;
-  onPct: (p: number) => void;
-  onClose: () => void;
-}) {
-  const finalPrice = unitPrice * (1 - Math.min(100, Math.max(0, pct)) / 100);
-  return (
-    <div className="mt-2 grid grid-cols-[1fr_1fr_auto_auto] items-end gap-2 rounded-xl bg-cream-50 p-2">
-      <Field label="% off">
-        <NumberField
-          min={0}
-          max={100}
-          step={1}
-          value={pct}
-          commit="change"
-          onChange={(p) => onPct(Math.min(100, Math.max(0, p)))}
-          className="h-8"
-        />
-      </Field>
-      <Field label="final price ($)">
-        <NumberField
-          min={0}
-          step="0.01"
-          value={Number(finalPrice.toFixed(2))}
-          commit="change"
-          onChange={(p) => {
-            if (unitPrice <= 0) return;
-            const next = (1 - Math.min(unitPrice, Math.max(0, p)) / unitPrice) * 100;
-            onPct(Math.min(100, Math.max(0, Math.round(next * 10) / 10)));
-          }}
-          className="h-8"
-        />
-      </Field>
-      <Button size="sm" variant={pct === 100 ? "primary" : "outline"} onClick={() => onPct(100)}>
-        FREE
-      </Button>
-      <Button size="sm" variant="ghost" onClick={onClose}>
-        ✓
-      </Button>
     </div>
   );
 }

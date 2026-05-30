@@ -12,6 +12,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { Button, Card, EmptyState } from "@/components/ui";
+import { DiscountRow } from "@/components/DiscountRow";
 import { useActiveEvent, useStore } from "@/lib/store";
 import { playPing, unlockAudio } from "@/lib/audio";
 import { cn, formatTime, minutesAgo } from "@/lib/utils";
@@ -126,6 +127,15 @@ export default function BaristaQueue() {
     });
   }
 
+  function setItemDiscount(orderId: string, itemId: string, pct: number) {
+    dispatch({
+      type: "UPDATE_ORDER_ITEM",
+      orderId,
+      orderItemId: itemId,
+      patch: { discountPct: pct > 0 ? pct : undefined },
+    });
+  }
+
   function markComplete(o: Order) {
     dispatch({
       type: "UPDATE_ORDER",
@@ -197,6 +207,7 @@ export default function BaristaQueue() {
               pinned={typeof o.queuePriority === "number"}
               onPin={() => pin(o.id, typeof o.queuePriority === "number")}
               onToggleItem={(itemId, status) => toggleItem(o, itemId, status)}
+              onSetItemDiscount={(itemId, pct) => setItemDiscount(o.id, itemId, pct)}
               onMarkComplete={() => markComplete(o)}
               onEdit={() => setEditingId(o.id)}
               onRemove={() => remove(o.id, o.customerName)}
@@ -253,6 +264,7 @@ function OrderCard({
   pinned,
   onPin,
   onToggleItem,
+  onSetItemDiscount,
   onMarkComplete,
   onEdit,
   onRemove,
@@ -263,6 +275,7 @@ function OrderCard({
   pinned: boolean;
   onPin: () => void;
   onToggleItem: (itemId: string, status: OrderItemStatus) => void;
+  onSetItemDiscount: (itemId: string, pct: number) => void;
   onMarkComplete: () => void;
   onEdit: () => void;
   onRemove: () => void;
@@ -324,6 +337,7 @@ function OrderCard({
             snapshot={snapshot}
             interactive
             onToggle={() => onToggleItem(it.id, it.status)}
+            onSetDiscount={(pct) => onSetItemDiscount(it.id, pct)}
           />
         ))}
       </div>
@@ -400,50 +414,81 @@ function OrderItemRow({
   interactive,
   compact,
   onToggle,
+  onSetDiscount,
 }: {
   item: OrderItem;
   snapshot: MenuSnapshot;
   interactive?: boolean;
   compact?: boolean;
   onToggle?: () => void;
+  onSetDiscount?: (pct: number) => void;
 }) {
+  // Hook must run before any conditional return.
+  const [discountOpen, setDiscountOpen] = useState(false);
+
   const displayName = item.isCombo
     ? `Combo: ${item.menuItemNameSnap} + ${item.comboPastryNameSnap ?? "?"}`
     : item.menuItemNameSnap;
   const done = item.status === "done";
+  // priceSnap stores the un-discounted unit price (combo: COMBO_PRICE, else
+  // the menu price). So it's the right base for the discount editor.
+  const unitPrice = item.priceSnap;
+  const pct = item.discountPct ?? 0;
 
   return (
     <div
       className={cn(
-        "flex items-start gap-3 rounded-xl border border-cream-200 px-3 py-2",
+        "rounded-xl border border-cream-200 px-3 py-2",
         done && interactive && "bg-matcha-50/60 text-matcha-700 line-through",
         compact && "py-1.5",
       )}
     >
-      {interactive ? (
-        <button
-          onClick={onToggle}
-          aria-label={done ? "Mark as not done" : "Mark as done"}
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors",
-            done
-              ? "border-matcha-500 bg-matcha-500 text-white"
-              : "border-cream-300 bg-white hover:border-matcha-400",
-          )}
-        >
-          {done ? <CheckCircle2 className="h-4 w-4" /> : null}
-        </button>
-      ) : null}
-      <div className="min-w-0 flex-1">
-        <div className={cn("t-display", compact ? "text-sm" : "text-base")}>
-          {item.quantity}× {displayName}
+      <div className="flex items-start gap-3">
+        {interactive ? (
+          <button
+            onClick={onToggle}
+            aria-label={done ? "Mark as not done" : "Mark as done"}
+            className={cn(
+              "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors",
+              done
+                ? "border-matcha-500 bg-matcha-500 text-white"
+                : "border-cream-300 bg-white hover:border-matcha-400",
+            )}
+          >
+            {done ? <CheckCircle2 className="h-4 w-4" /> : null}
+          </button>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className={cn("t-display", compact ? "text-sm" : "text-base")}>
+            {item.quantity}× {displayName}
+          </div>
+          <ItemModifiers item={item} snapshot={snapshot} />
         </div>
-        <ItemModifiers item={item} snapshot={snapshot} />
+        <div className="flex shrink-0 items-center gap-2">
+          {pct > 0 ? (
+            <div className="t-caption text-right text-[11px] text-matcha-700">
+              {pct === 100 ? "FREE" : `${pct}% off`}
+            </div>
+          ) : null}
+          {interactive && onSetDiscount ? (
+            <Button
+              size="sm"
+              variant={pct > 0 ? "primary" : "ghost"}
+              onClick={() => setDiscountOpen((s) => !s)}
+              title={pct > 0 ? "Edit discount" : "Add discount"}
+            >
+              <span className="t-display text-[11px]">%</span>
+            </Button>
+          ) : null}
+        </div>
       </div>
-      {item.discountPct ? (
-        <div className="t-caption shrink-0 text-right text-[11px] text-matcha-700">
-          {item.discountPct === 100 ? "FREE" : `${item.discountPct}% off`}
-        </div>
+      {discountOpen && onSetDiscount ? (
+        <DiscountRow
+          unitPrice={unitPrice}
+          pct={pct}
+          onPct={onSetDiscount}
+          onClose={() => setDiscountOpen(false)}
+        />
       ) : null}
     </div>
   );

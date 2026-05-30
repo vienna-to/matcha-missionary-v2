@@ -425,6 +425,27 @@ export function toOrderItemInsert(
   };
 }
 
+export function toOrderItemPatch(patch: Partial<OrderItem>): Partial<DbOrderItem> {
+  const r: Partial<DbOrderItem> = {};
+  if (patch.menuItemId !== undefined) r.menu_item_id = patch.menuItemId;
+  if (patch.menuItemNameSnap !== undefined) r.menu_item_name_snap = patch.menuItemNameSnap;
+  if (patch.priceSnap !== undefined) r.price_snap = patch.priceSnap;
+  if (patch.costSnap !== undefined) r.cost_snap = patch.costSnap;
+  if (patch.quantity !== undefined) r.quantity = patch.quantity;
+  if (patch.milkChoiceId !== undefined) r.milk_choice_id = nul(patch.milkChoiceId);
+  if (patch.creamChoiceId !== undefined) r.cream_choice_id = nul(patch.creamChoiceId);
+  if (patch.sugarAdjustment !== undefined) r.sugar_adjustment = nul(patch.sugarAdjustment);
+  if (patch.iceAdjustment !== undefined) r.ice_adjustment = nul(patch.iceAdjustment);
+  if (patch.specialRequests !== undefined) r.special_requests = nul(patch.specialRequests);
+  if (patch.status !== undefined) r.status = patch.status;
+  if (patch.isCombo !== undefined) r.is_combo = patch.isCombo;
+  if (patch.comboPastryId !== undefined) r.combo_pastry_id = nul(patch.comboPastryId);
+  if (patch.comboPastryNameSnap !== undefined) r.combo_pastry_name_snap = nul(patch.comboPastryNameSnap);
+  if (patch.comboPastryCostSnap !== undefined) r.combo_pastry_cost_snap = nul(patch.comboPastryCostSnap);
+  if (patch.discountPct !== undefined) r.discount_pct = nul(patch.discountPct);
+  return r;
+}
+
 // ---------- Build AppState from DB rows ----------
 
 export function buildAppState(

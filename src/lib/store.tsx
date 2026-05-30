@@ -331,6 +331,9 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
         case "SET_ORDER_ITEM_STATUS":
           w.updateOrderItemStatus(a.orderItemId, a.status);
           break;
+        case "UPDATE_ORDER_ITEM":
+          w.updateOrderItem(a.orderItemId, a.patch);
+          break;
         case "ADD_INVENTORY_PURCHASE":
           setTimeout(() => {
             const latest = stateRef.current.inventoryPurchases.at(-1);

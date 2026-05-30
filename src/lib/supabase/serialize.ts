@@ -84,6 +84,7 @@ export type DbOrder = {
   submitted_at: string;
   done_at: string | null;
   updated_at: string;
+  queue_priority: number | null;
 };
 
 export type DbInventoryPurchase = {
@@ -116,6 +117,7 @@ export type DbOrderItem = {
   combo_pastry_id: string | null;
   combo_pastry_name_snap: string | null;
   combo_pastry_cost_snap: number | null;
+  discount_pct: number | null;
 };
 
 // ---------- DB → TS ----------
@@ -190,6 +192,7 @@ export function fromOrder(r: DbOrder, items: OrderItem[]): Order {
     submittedAt: r.submitted_at,
     doneAt: undef(r.done_at),
     updatedAt: r.updated_at,
+    queuePriority: r.queue_priority == null ? undefined : Number(r.queue_priority),
   };
 }
 
@@ -250,6 +253,7 @@ export function fromOrderItem(r: DbOrderItem): OrderItem {
     comboPastryNameSnap: undef(r.combo_pastry_name_snap),
     comboPastryCostSnap:
       r.combo_pastry_cost_snap == null ? undefined : Number(r.combo_pastry_cost_snap),
+    discountPct: r.discount_pct == null ? undefined : Number(r.discount_pct),
   };
 }
 
@@ -375,11 +379,13 @@ export function toOrderInsert(workspaceId: string, o: Order): Omit<DbOrder, "cre
     notes: nul(o.notes),
     submitted_at: o.submittedAt,
     done_at: nul(o.doneAt),
+    queue_priority: nul(o.queuePriority),
   };
 }
 
 export function toOrderPatch(patch: Partial<Order>): Partial<DbOrder> {
   const r: Partial<DbOrder> = {};
+  if (patch.orderNumber !== undefined) r.order_number = patch.orderNumber;
   if (patch.customerName !== undefined) r.customer_name = patch.customerName;
   if (patch.status !== undefined) r.status = patch.status;
   if (patch.paymentStatus !== undefined) r.payment_status = patch.paymentStatus;
@@ -388,6 +394,7 @@ export function toOrderPatch(patch: Partial<Order>): Partial<DbOrder> {
   if (patch.compReasonOther !== undefined) r.comp_reason_other = nul(patch.compReasonOther);
   if (patch.notes !== undefined) r.notes = nul(patch.notes);
   if (patch.doneAt !== undefined) r.done_at = nul(patch.doneAt);
+  if (patch.queuePriority !== undefined) r.queue_priority = nul(patch.queuePriority);
   return r;
 }
 
@@ -414,6 +421,7 @@ export function toOrderItemInsert(
     combo_pastry_id: nul(oi.comboPastryId),
     combo_pastry_name_snap: nul(oi.comboPastryNameSnap),
     combo_pastry_cost_snap: nul(oi.comboPastryCostSnap),
+    discount_pct: nul(oi.discountPct),
   };
 }
 

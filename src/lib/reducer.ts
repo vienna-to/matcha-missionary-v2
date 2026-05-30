@@ -43,14 +43,10 @@ export type Action =
       eventId: string;
       patch: Partial<MenuSnapshot>;
     }
-  | {
-      type: "SUBMIT_ORDER";
-      order: Omit<Order, "id" | "orderNumber" | "items" | "submittedAt" | "updatedAt"> & {
-        items: (Omit<OrderItem, "id" | "orderId" | "priceSnap" | "costSnap" | "menuItemNameSnap" | "status"> & {
-          status?: OrderItemStatus;
-        })[];
-      };
-    }
+  /** The caller must pass a fully-formed Order (with id + items + orderNumber).
+   *  This avoids the race where setTimeout-based writers re-read stateRef and
+   *  pick up the wrong "latest" order when two submits happen back-to-back. */
+  | { type: "SUBMIT_ORDER"; order: Order }
   | { type: "UPDATE_ORDER"; id: string; patch: Partial<Order> }
   | {
       type: "REPLACE_ORDER_ITEMS";
@@ -96,7 +92,7 @@ function findEvent(state: AppState, id: string): Event | undefined {
   return state.events.find((e) => e.id === id);
 }
 
-function deriveOrderItem(
+export function deriveOrderItem(
   raw: Omit<OrderItem, "id" | "orderId" | "priceSnap" | "costSnap" | "menuItemNameSnap" | "status"> & {
     status?: OrderItemStatus;
   },
@@ -129,6 +125,7 @@ function deriveOrderItem(
       sugarAdjustment: raw.sugarAdjustment,
       iceAdjustment: raw.iceAdjustment,
       specialRequests: raw.specialRequests,
+      discountPct: raw.discountPct,
       status: raw.status ?? "pending",
       isCombo: true,
       comboPastryId: raw.comboPastryId,
@@ -150,11 +147,12 @@ function deriveOrderItem(
     sugarAdjustment: raw.sugarAdjustment,
     iceAdjustment: raw.iceAdjustment,
     specialRequests: raw.specialRequests,
+    discountPct: raw.discountPct,
     status: raw.status ?? "pending",
   };
 }
 
-function nextOrderNumber(state: AppState, eventId: string): number {
+export function nextOrderNumber(state: AppState, eventId: string): number {
   const ns = state.orders
     .filter((o) => o.eventId === eventId)
     .map((o) => o.orderNumber);
@@ -163,9 +161,44 @@ function nextOrderNumber(state: AppState, eventId: string): number {
 
 function deriveOrderStatusFromItems(items: OrderItem[]): OrderStatus | null {
   if (items.length === 0) return null;
-  if (items.every((it) => it.status === "done")) return "completed";
-  if (items.some((it) => it.status !== "pending")) return "in_progress";
-  return "pending";
+  return items.every((it) => it.status === "done") ? "completed" : "pending";
+}
+
+/** Reassign sequential 1..N order numbers to all remaining orders in an event
+ *  (after a deletion). Caller is responsible for persisting the changes. */
+function renumberEventOrders(state: AppState, eventId: string): AppState {
+  const ordered = state.orders
+    .filter((o) => o.eventId === eventId)
+    .sort((a, b) => a.orderNumber - b.orderNumber);
+  const remap = new Map<string, number>();
+  ordered.forEach((o, idx) => {
+    if (o.orderNumber !== idx + 1) remap.set(o.id, idx + 1);
+  });
+  if (remap.size === 0) return state;
+  return {
+    ...state,
+    orders: state.orders.map((o) =>
+      remap.has(o.id) ? { ...o, orderNumber: remap.get(o.id)! } : o,
+    ),
+  };
+}
+
+/** Returns the renumbering map produced by deleting `deletedOrderId` from
+ *  `eventId` — usable by the dispatch wrapper to mirror writes to Supabase. */
+export function renumberAfterDelete(
+  ordersBeforeDelete: Order[],
+  deletedOrderId: string,
+): Array<{ id: string; orderNumber: number }> {
+  const deleted = ordersBeforeDelete.find((o) => o.id === deletedOrderId);
+  if (!deleted) return [];
+  const remaining = ordersBeforeDelete
+    .filter((o) => o.eventId === deleted.eventId && o.id !== deletedOrderId)
+    .sort((a, b) => a.orderNumber - b.orderNumber);
+  const out: Array<{ id: string; orderNumber: number }> = [];
+  remaining.forEach((o, idx) => {
+    if (o.orderNumber !== idx + 1) out.push({ id: o.id, orderNumber: idx + 1 });
+  });
+  return out;
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -309,23 +342,9 @@ export function reducer(state: AppState, action: Action): AppState {
       };
 
     case "SUBMIT_ORDER": {
-      const evt = findEvent(state, action.order.eventId);
-      if (!evt) return state;
-      const snap = findSnapshot(state, evt.menuSnapshotId);
-      if (!snap) return state;
-      const orderId = newId("ord");
-      const items: OrderItem[] = action.order.items.map((raw) =>
-        deriveOrderItem(raw, orderId, snap),
-      );
-      const order: Order = {
-        ...action.order,
-        id: orderId,
-        orderNumber: nextOrderNumber(state, evt.id),
-        items,
-        submittedAt: nowIso(),
-        updatedAt: nowIso(),
-      };
-      return { ...state, orders: [...state.orders, order] };
+      // Dedupe in case the realtime echo and the optimistic dispatch race.
+      if (state.orders.some((o) => o.id === action.order.id)) return state;
+      return { ...state, orders: [...state.orders, action.order] };
     }
 
     case "UPDATE_ORDER":
@@ -384,8 +403,12 @@ export function reducer(state: AppState, action: Action): AppState {
         }),
       };
 
-    case "DELETE_ORDER":
-      return { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
+    case "DELETE_ORDER": {
+      const deleted = state.orders.find((o) => o.id === action.id);
+      const filtered = { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
+      if (!deleted) return filtered;
+      return renumberEventOrders(filtered, deleted.eventId);
+    }
 
     case "ADD_INVENTORY_PURCHASE": {
       const purchase: InventoryPurchase = {

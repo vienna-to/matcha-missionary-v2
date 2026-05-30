@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Plus, Minus, Trash2, Sliders, X } from "lucide-react";
 import {
-  Badge,
   Button,
   Chip,
   Field,
@@ -13,22 +12,14 @@ import {
   Textarea,
 } from "@/components/ui";
 import { useDispatch } from "@/lib/store";
-import {
-  COMP_REASONS,
-  COMP_REASON_LABELS,
-  PAYMENT_METHODS,
-  PAYMENT_METHOD_LABELS,
-  type CompReason,
-  type Ingredient,
-  type MenuItem,
-  type MenuSnapshot,
-  type Order,
-  type OrderItem,
-  type OrderStatus,
-  type PaymentMethod,
-  type PaymentStatus,
-  type SugarAdjustment,
-  type IceAdjustment,
+import type {
+  Ingredient,
+  MenuItem,
+  MenuSnapshot,
+  Order,
+  OrderItem,
+  SugarAdjustment,
+  IceAdjustment,
 } from "@/lib/types";
 import { newId } from "@/lib/id";
 import { cn, formatMoney } from "@/lib/utils";
@@ -42,6 +33,7 @@ type DraftItem = {
   sugarAdjustment?: SugarAdjustment;
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
+  discountPct?: number;
   status: "pending" | "in_progress" | "done";
   // Combo passthrough — preserve when re-saving so existing combos aren't
   // accidentally broken into singletons by an unrelated edit.
@@ -60,13 +52,6 @@ export default function EditOrderModal({
 }) {
   const dispatch = useDispatch();
   const [name, setName] = useState(order.customerName);
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(order.paymentStatus);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">(
-    order.paymentMethod ?? "",
-  );
-  const [compReason, setCompReason] = useState<CompReason | "">(order.compReason ?? "");
-  const [compReasonOther, setCompReasonOther] = useState(order.compReasonOther ?? "");
-  const [status, setStatus] = useState<OrderStatus>(order.status);
   const [notes, setNotes] = useState(order.notes ?? "");
   const [items, setItems] = useState<DraftItem[]>(() =>
     order.items.map((it) => ({
@@ -81,6 +66,7 @@ export default function EditOrderModal({
       status: it.status,
       isCombo: it.isCombo,
       comboPastryId: it.comboPastryId,
+      discountPct: it.discountPct,
     })),
   );
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -111,10 +97,14 @@ export default function EditOrderModal({
   }
 
   const nameOk = name.trim().length > 0;
-  const methodOk = paymentStatus !== "paid" || paymentMethod !== "";
-  const compOk = paymentStatus !== "comped" || compReason !== "";
   const itemsOk = items.length > 0;
-  const submittable = nameOk && methodOk && compOk && itemsOk;
+  const submittable = nameOk && itemsOk;
+
+  function deleteOrder() {
+    if (!confirm(`Delete order #${order.orderNumber} for ${order.customerName}?`)) return;
+    dispatch({ type: "DELETE_ORDER", id: order.id });
+    onClose();
+  }
 
   function save() {
     if (!submittable) return;
@@ -123,14 +113,6 @@ export default function EditOrderModal({
       id: order.id,
       patch: {
         customerName: name.trim(),
-        paymentStatus,
-        paymentMethod: paymentStatus === "paid" ? (paymentMethod as PaymentMethod) : undefined,
-        compReason: paymentStatus === "comped" ? (compReason as CompReason) : undefined,
-        compReasonOther:
-          paymentStatus === "comped" && compReason === "other" && compReasonOther.trim()
-            ? compReasonOther.trim()
-            : undefined,
-        status,
         notes: notes.trim() || undefined,
       },
     });
@@ -148,6 +130,7 @@ export default function EditOrderModal({
         status: it.status,
         isCombo: it.isCombo,
         comboPastryId: it.comboPastryId,
+        discountPct: it.discountPct,
       })),
     });
     onClose();
@@ -161,79 +144,15 @@ export default function EditOrderModal({
   return (
     <Modal open onClose={onClose} title={`Edit order #${order.orderNumber}`}>
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Customer name" className="col-span-2">
+        <div className="grid grid-cols-1 gap-3">
+          <Field label="Customer name">
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
               className={cn(!nameOk && "border-amber-400")}
             />
           </Field>
-          <Field label="Order status" className="col-span-2">
-            <div className="flex flex-wrap gap-1.5">
-              {(["pending", "in_progress", "completed", "cancelled"] as OrderStatus[]).map((s) => (
-                <Chip key={s} active={status === s} onClick={() => setStatus(s)}>
-                  {s === "in_progress" ? "In progress" : s[0].toUpperCase() + s.slice(1)}
-                </Chip>
-              ))}
-            </div>
-          </Field>
         </div>
-
-        <div>
-          <Label>Payment</Label>
-          <div className="mt-1.5 flex items-center gap-3">
-            <label className="t-caption flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={paymentStatus === "paid"}
-                onChange={(e) => setPaymentStatus(e.target.checked ? "paid" : "unpaid")}
-                className="h-4 w-4 accent-matcha-500"
-              />
-              paid
-            </label>
-            <Chip
-              active={paymentStatus === "comped"}
-              onClick={() =>
-                setPaymentStatus(paymentStatus === "comped" ? "unpaid" : "comped")
-              }
-            >
-              free
-            </Chip>
-          </div>
-        </div>
-
-        {paymentStatus === "paid" ? (
-          <Field label="Payment method">
-            <div className="flex flex-wrap gap-1.5">
-              {PAYMENT_METHODS.map((m) => (
-                <Chip key={m} active={paymentMethod === m} onClick={() => setPaymentMethod(m)}>
-                  {PAYMENT_METHOD_LABELS[m]}
-                </Chip>
-              ))}
-            </div>
-          </Field>
-        ) : null}
-
-        {paymentStatus === "comped" ? (
-          <Field label="free reason">
-            <div className="flex flex-wrap gap-1.5">
-              {COMP_REASONS.map((r) => (
-                <Chip key={r} active={compReason === r} onClick={() => setCompReason(r)}>
-                  {COMP_REASON_LABELS[r]}
-                </Chip>
-              ))}
-            </div>
-            {compReason === "other" ? (
-              <Input
-                placeholder="Why? (one line)"
-                value={compReasonOther}
-                onChange={(e) => setCompReasonOther(e.target.value)}
-                className="mt-2"
-              />
-            ) : null}
-          </Field>
-        ) : null}
 
         <Field label="Notes (optional)">
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -269,13 +188,18 @@ export default function EditOrderModal({
           <span className="text-lg font-semibold tabular-nums">{formatMoney(total)}</span>
         </div>
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
+        <div className="flex flex-wrap justify-between gap-2 pt-2">
+          <Button variant="danger" onClick={deleteOrder}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete order
           </Button>
-          <Button onClick={save} disabled={!submittable}>
-            Save
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={save} disabled={!submittable}>
+              Save
+            </Button>
+          </div>
         </div>
       </div>
 

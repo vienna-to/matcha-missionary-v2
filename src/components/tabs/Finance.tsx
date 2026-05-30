@@ -53,6 +53,19 @@ export default function Finance() {
         </p>
       </header>
 
+      <InventoryCard
+        newName={newName}
+        setNewName={setNewName}
+        newAmount={newAmount}
+        setNewAmount={setNewAmount}
+        newDate={newDate}
+        setNewDate={setNewDate}
+        addPurchase={addPurchase}
+        sortedPurchases={sortedPurchases}
+        totalInventory={totalInventory}
+        dispatch={dispatch}
+      />
+
       <Card>
         <h2 className="t-display mb-3 text-sm">Per-item costs</h2>
         <div className="overflow-x-auto">
@@ -144,94 +157,123 @@ export default function Finance() {
         </div>
       </Card>
 
-      <Card>
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h2 className="t-display text-sm">Inventory & supplies</h2>
-            <p className="t-caption mt-0.5 text-[11px] text-matcha-900/60">
-              one-off purchases (bulk matcha, cups, signage). subtracted from event profit
-              in the All Events summary view.
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="t-display text-[10px] text-matcha-900/50">Total spent</div>
-            <div className="text-base font-semibold tabular-nums">{formatMoney(totalInventory)}</div>
-          </div>
-        </div>
-
-        <div className="mb-3 grid grid-cols-[1fr_120px_140px_auto] gap-2">
-          <Field label="item">
-            <Input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="what did you buy?"
-            />
-          </Field>
-          <Field label="amount ($)">
-            <NumberField min={0} step="0.01" value={newAmount} commit="change" onChange={setNewAmount} />
-          </Field>
-          <Field label="date">
-            <Input
-              type="date"
-              value={newDate}
-              onChange={(e) => setNewDate(e.target.value)}
-            />
-          </Field>
-          <div className="flex items-end">
-            <Button
-              onClick={addPurchase}
-              disabled={!newName.trim() || newAmount <= 0}
-              size="md"
-            >
-              <Plus className="h-3.5 w-3.5" /> Add
-            </Button>
-          </div>
-        </div>
-
-        {sortedPurchases.length === 0 ? (
-          <p className="t-caption text-xs text-matcha-900/60">
-            no purchases logged yet.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="t-display text-left text-xs text-matcha-900/60">
-                  <th className="py-2 pr-4">Item</th>
-                  <th className="py-2 pr-4">Date</th>
-                  <th className="py-2 pr-4 text-right">Amount</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedPurchases.map((p) => (
-                  <PurchaseRow
-                    key={p.id}
-                    purchase={p}
-                    onPatch={(patch) =>
-                      dispatch({ type: "UPDATE_INVENTORY_PURCHASE", id: p.id, patch })
-                    }
-                    onDelete={() =>
-                      dispatch({ type: "DELETE_INVENTORY_PURCHASE", id: p.id })
-                    }
-                  />
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-cream-200">
-                  <td className="py-2 pr-4 font-semibold">Total</td>
-                  <td />
-                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">
-                    {formatMoney(totalInventory)}
-                  </td>
-                  <td />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </Card>
     </div>
+  );
+}
+
+function InventoryCard({
+  newName,
+  setNewName,
+  newAmount,
+  setNewAmount,
+  newDate,
+  setNewDate,
+  addPurchase,
+  sortedPurchases,
+  totalInventory,
+  dispatch,
+}: {
+  newName: string;
+  setNewName: (s: string) => void;
+  newAmount: number;
+  setNewAmount: (n: number) => void;
+  newDate: string;
+  setNewDate: (s: string) => void;
+  addPurchase: () => void;
+  sortedPurchases: InventoryPurchase[];
+  totalInventory: number;
+  dispatch: ReturnType<typeof useStore>["dispatch"];
+}) {
+  return (
+    <Card>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="t-display text-sm">Inventory & supplies</h2>
+          <p className="t-caption mt-0.5 text-[11px] text-matcha-900/60">
+            one-off purchases (bulk matcha, cups, signage). subtracted from event profit
+            in the All Events summary view.
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="t-display text-[10px] text-matcha-900/50">Total spent</div>
+          <div className="text-base font-semibold tabular-nums">{formatMoney(totalInventory)}</div>
+        </div>
+      </div>
+
+      {/* Add-purchase form. Stacks on mobile; columns on sm+. */}
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px_140px_auto]">
+        <Field label="item">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="what did you buy?"
+          />
+        </Field>
+        <Field label="amount ($)">
+          <NumberField min={0} step="0.01" value={newAmount} commit="change" onChange={setNewAmount} />
+        </Field>
+        <Field label="date">
+          <Input
+            type="date"
+            value={newDate}
+            onChange={(e) => setNewDate(e.target.value)}
+          />
+        </Field>
+        <div className="flex items-end">
+          <Button
+            onClick={addPurchase}
+            disabled={!newName.trim() || newAmount <= 0}
+            size="md"
+            className="w-full sm:w-auto"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add
+          </Button>
+        </div>
+      </div>
+
+      {sortedPurchases.length === 0 ? (
+        <p className="t-caption text-xs text-matcha-900/60">
+          no purchases logged yet.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="t-display text-left text-xs text-matcha-900/60">
+                <th className="py-2 pr-4">Item</th>
+                <th className="py-2 pr-4">Date</th>
+                <th className="py-2 pr-4 text-right">Amount</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedPurchases.map((p) => (
+                <PurchaseRow
+                  key={p.id}
+                  purchase={p}
+                  onPatch={(patch) =>
+                    dispatch({ type: "UPDATE_INVENTORY_PURCHASE", id: p.id, patch })
+                  }
+                  onDelete={() =>
+                    dispatch({ type: "DELETE_INVENTORY_PURCHASE", id: p.id })
+                  }
+                />
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-cream-200">
+                <td className="py-2 pr-4 font-semibold">Total</td>
+                <td />
+                <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                  {formatMoney(totalInventory)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 

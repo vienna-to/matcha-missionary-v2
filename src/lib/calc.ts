@@ -60,20 +60,15 @@ export type ItemTotals = {
   category: string;
   sortOrder: number;
   qty: number;
-  paidQty: number;
-  unpaidQty: number;
-  compedQty: number;
   priceSnap: number; // representative selling price (first observed)
   costSnapAvg: number; // average costSnap weighted by qty
+  /** Effective revenue (after per-item discount). */
   revenuePaid: number;
-  revenueOwed: number;
+  /** Sum of full price × qty before discount (for "you saved $X" UI). */
+  revenueGross: number;
   totalCost: number;
   profit: number;
   margin: number | null;
-  cashPaidQty: number;
-  venmoPaidQty: number;
-  zellePaidQty: number;
-  otherPaidQty: number;
 };
 
 export function computeItemTotals(
@@ -88,20 +83,13 @@ export function computeItemTotals(
       category: mi.category,
       sortOrder: mi.sortOrder ?? Number.POSITIVE_INFINITY,
       qty: 0,
-      paidQty: 0,
-      unpaidQty: 0,
-      compedQty: 0,
       priceSnap: mi.price,
       costSnapAvg: 0,
       revenuePaid: 0,
-      revenueOwed: 0,
+      revenueGross: 0,
       totalCost: 0,
       profit: 0,
       margin: null,
-      cashPaidQty: 0,
-      venmoPaidQty: 0,
-      zellePaidQty: 0,
-      otherPaidQty: 0,
     });
   }
   // accumulate weighted cost sums separately
@@ -118,60 +106,33 @@ export function computeItemTotals(
       // Place combos last in any sortOrder-based render.
       sortOrder: Number.POSITIVE_INFINITY - 1,
       qty: 0,
-      paidQty: 0,
-      unpaidQty: 0,
-      compedQty: 0,
       priceSnap: COMBO_PRICE,
       costSnapAvg: 0,
       revenuePaid: 0,
-      revenueOwed: 0,
+      revenueGross: 0,
       totalCost: 0,
       profit: 0,
       margin: null,
-      cashPaidQty: 0,
-      venmoPaidQty: 0,
-      zellePaidQty: 0,
-      otherPaidQty: 0,
     };
     result.set(COMBO_BUCKET_ID, fresh);
     return fresh;
   }
 
   for (const order of orders) {
+    // Legacy: skip cancelled orders if the field is still present in old data.
     if (order.status === "cancelled") continue;
     for (const oi of order.items) {
       // Combos bucket together so the underlying drink and pastry don't get
       // double-counted as individual sales.
       const t = oi.isCombo ? ensureCombo() : result.get(oi.menuItemId);
       if (!t) continue;
+      const discountFraction = Math.min(1, Math.max(0, (oi.discountPct ?? 0) / 100));
+      const effectivePrice = oi.priceSnap * (1 - discountFraction);
       t.qty += oi.quantity;
       t.totalCost += oi.costSnap * oi.quantity;
+      t.revenuePaid += effectivePrice * oi.quantity;
+      t.revenueGross += oi.priceSnap * oi.quantity;
       costSum.set(oi.menuItemId, (costSum.get(oi.menuItemId) ?? 0) + oi.costSnap * oi.quantity);
-      if (order.paymentStatus === "paid") {
-        t.paidQty += oi.quantity;
-        t.revenuePaid += oi.priceSnap * oi.quantity;
-        switch (order.paymentMethod) {
-          case "cash":
-            t.cashPaidQty += oi.quantity;
-            break;
-          case "venmo":
-            t.venmoPaidQty += oi.quantity;
-            break;
-          case "zelle":
-            t.zellePaidQty += oi.quantity;
-            break;
-          // Legacy "card" rolls into "other" so we don't lose the cup count.
-          case "card":
-          case "other":
-            t.otherPaidQty += oi.quantity;
-            break;
-        }
-      } else if (order.paymentStatus === "unpaid") {
-        t.unpaidQty += oi.quantity;
-        t.revenueOwed += oi.priceSnap * oi.quantity;
-      } else if (order.paymentStatus === "comped") {
-        t.compedQty += oi.quantity;
-      }
     }
   }
 
@@ -185,13 +146,11 @@ export function computeItemTotals(
 
 export type EventTotals = {
   totalOrders: number;
-  paidOrders: number;
-  unpaidOrders: number;
-  compedOrders: number;
-  cancelledOrders: number;
   totalCups: number;
+  /** Effective revenue (after per-item discount). */
   revenuePaid: number;
-  revenueOwed: number;
+  /** Gross before discount — useful for "total discounts given" math. */
+  revenueGross: number;
   ingredientCost: number;
   fixedCosts: number;
   totalCost: number;
@@ -206,24 +165,12 @@ export function computeEventTotals(
   orders: Order[],
 ): EventTotals {
   const byItem = computeItemTotals(snapshot, orders);
-  let totalOrders = 0;
-  let paidOrders = 0;
-  let unpaidOrders = 0;
-  let compedOrders = 0;
-  let cancelledOrders = 0;
-  for (const o of orders) {
-    if (o.status === "cancelled") {
-      cancelledOrders += 1;
-      continue;
-    }
-    totalOrders += 1;
-    if (o.paymentStatus === "paid") paidOrders += 1;
-    else if (o.paymentStatus === "unpaid") unpaidOrders += 1;
-    else if (o.paymentStatus === "comped") compedOrders += 1;
-  }
+  // Legacy "cancelled" orders (from before status was removed) are excluded.
+  const live = orders.filter((o) => o.status !== "cancelled");
+  const totalOrders = live.length;
   const totalCups = byItem.reduce((s, t) => s + t.qty, 0);
   const revenuePaid = byItem.reduce((s, t) => s + t.revenuePaid, 0);
-  const revenueOwed = byItem.reduce((s, t) => s + t.revenueOwed, 0);
+  const revenueGross = byItem.reduce((s, t) => s + t.revenueGross, 0);
   const ingredientCost = byItem.reduce((s, t) => s + t.totalCost, 0);
   const fixedCostsSum = fixedCosts.reduce((s, f) => s + f.amount, 0);
   const totalCost = ingredientCost + fixedCostsSum;
@@ -231,13 +178,9 @@ export function computeEventTotals(
   const margin = revenuePaid > 0 ? profit / revenuePaid : null;
   return {
     totalOrders,
-    paidOrders,
-    unpaidOrders,
-    compedOrders,
-    cancelledOrders,
     totalCups,
     revenuePaid,
-    revenueOwed,
+    revenueGross,
     ingredientCost,
     fixedCosts: fixedCostsSum,
     totalCost,

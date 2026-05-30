@@ -194,7 +194,11 @@ export default function EventSummary() {
         <Metric
           label="Revenue (paid)"
           value={formatMoney(totals.revenuePaid)}
-          subtext={totals.revenueOwed > 0 ? `+ ${formatMoney(totals.revenueOwed)} owed` : undefined}
+          subtext={
+            totals.revenueGross > totals.revenuePaid
+              ? `${formatMoney(totals.revenueGross - totals.revenuePaid)} in discounts`
+              : undefined
+          }
         />
         <Metric label="Total cost" value={formatMoney(totals.totalCost)} subtext={`incl. ${formatMoney(totals.fixedCosts)} fixed`} />
         {donationPct > 0 ? (
@@ -425,14 +429,6 @@ export default function EventSummary() {
         </p>
       </Card>
 
-      {/* Payment mix — past events synthesize a single payment method per
-          order, which would skew this card. Suppress it. */}
-      {event.kind !== "past" ? (
-        <Card>
-          <h2 className="t-display mb-3 text-sm">Payment breakdown</h2>
-          <PaymentMix totals={totals} />
-        </Card>
-      ) : null}
     </div>
   );
 }
@@ -452,52 +448,6 @@ function Metric({
       <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
       {subtext ? <div className="t-caption mt-0.5 text-xs text-matcha-900/60">{subtext}</div> : null}
     </Card>
-  );
-}
-
-function PaymentMix({ totals }: { totals: ReturnType<typeof computeEventTotals> }) {
-  const sums = totals.byItem.reduce(
-    (acc, t) => {
-      acc.cash += t.cashPaidQty;
-      acc.venmo += t.venmoPaidQty;
-      acc.zelle += t.zellePaidQty;
-      acc.other += t.otherPaidQty;
-      return acc;
-    },
-    { cash: 0, venmo: 0, zelle: 0, other: 0 },
-  );
-  const rows = [
-    { label: "Zelle", count: sums.zelle },
-    { label: "Venmo", count: sums.venmo },
-    { label: "Cash", count: sums.cash },
-    { label: "Other", count: sums.other },
-  ].filter((r) => r.count > 0);
-  if (rows.length === 0) {
-    return <p className="text-sm text-matcha-900/60">No paid orders yet.</p>;
-  }
-  const paidTotal = rows.reduce((s, r) => s + r.count, 0);
-  return (
-    <div className="space-y-2">
-      {rows.map((r) => {
-        const pct = paidTotal > 0 ? r.count / paidTotal : 0;
-        return (
-          <div key={r.label}>
-            <div className="flex justify-between text-sm">
-              <span>{r.label}</span>
-              <span className="tabular-nums text-matcha-900/70">
-                {r.count} cups · {formatPct(pct)}
-              </span>
-            </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-cream-100">
-              <div className="h-full bg-matcha-500" style={{ width: `${Math.round(pct * 100)}%` }} />
-            </div>
-          </div>
-        );
-      })}
-      <p className="pt-1 text-xs text-matcha-900/60">
-        Counts cups across paid orders only. Unpaid: {totals.unpaidOrders} orders ({formatMoney(totals.revenueOwed)} owed). Free: {totals.compedOrders}. Cancelled: {totals.cancelledOrders}.
-      </p>
-    </div>
   );
 }
 
@@ -597,8 +547,8 @@ function buildCsv(
   rows.push(["Totals"]);
   rows.push(["Total Orders", String(totals.totalOrders)]);
   rows.push(["Cups Poured", String(totals.totalCups)]);
-  rows.push(["Revenue (paid)", totals.revenuePaid.toFixed(2)]);
-  rows.push(["Revenue (owed)", totals.revenueOwed.toFixed(2)]);
+  rows.push(["Revenue", totals.revenuePaid.toFixed(2)]);
+  rows.push(["Gross (before discounts)", totals.revenueGross.toFixed(2)]);
   rows.push(["Ingredient Cost", totals.ingredientCost.toFixed(2)]);
   rows.push(["Fixed Costs", totals.fixedCosts.toFixed(2)]);
   rows.push(["Total Cost", totals.totalCost.toFixed(2)]);
@@ -614,22 +564,6 @@ function buildCsv(
     }
     rows.push([]);
   }
-
-  // Payment breakdown
-  const pm = totals.byItem.reduce(
-    (a, t) => ({
-      cash: a.cash + t.cashPaidQty,
-      venmo: a.venmo + t.venmoPaidQty,
-      zelle: a.zelle + t.zellePaidQty,
-      other: a.other + t.otherPaidQty,
-    }),
-    { cash: 0, venmo: 0, zelle: 0, other: 0 },
-  );
-  rows.push(["Payment Mix (cups)"]);
-  rows.push(["Zelle", String(pm.zelle)]);
-  rows.push(["Venmo", String(pm.venmo)]);
-  rows.push(["Cash", String(pm.cash)]);
-  rows.push(["Other", String(pm.other)]);
 
   return rows.map(toCsvRow).join("\r\n");
 }

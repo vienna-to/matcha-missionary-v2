@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { initialSeed } from "./seed";
-import { reducer, type Action } from "./reducer";
+import { reducer, renumberAfterDelete, type Action } from "./reducer";
 import type { AppState, Event, MenuSnapshot, Order, OrderItem } from "./types";
 import {
   getClient,
@@ -305,17 +305,23 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           w.setActiveEvent(a.id);
           break;
         case "SUBMIT_ORDER":
-          setTimeout(() => {
-            const latest = stateRef.current.orders.at(-1);
-            if (latest) w.submitOrder(latest);
-          }, 0);
+          // Use the action's order directly (no setTimeout/stateRef lookup) so
+          // two rapid submits don't race and write the same "latest" order twice.
+          w.submitOrder(a.order);
           break;
         case "UPDATE_ORDER":
           w.updateOrder(a.id, a.patch);
           break;
-        case "DELETE_ORDER":
+        case "DELETE_ORDER": {
+          // Use the pre-delete state to compute renumbering for the remaining
+          // siblings, then issue the writes after the delete completes.
+          const renumber = renumberAfterDelete(stateRef.current.orders, a.id);
           w.deleteOrder(a.id);
+          for (const r of renumber) {
+            w.updateOrder(r.id, { orderNumber: r.orderNumber });
+          }
           break;
+        }
         case "REPLACE_ORDER_ITEMS":
           setTimeout(() => {
             const o = stateRef.current.orders.find((x) => x.id === a.orderId);

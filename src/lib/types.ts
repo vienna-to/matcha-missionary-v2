@@ -210,6 +210,10 @@ export type OrderItem = {
   sugarAdjustment?: SugarAdjustment;
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
+  /** Per-item discount as a percentage (0–100). 0 = full price, 100 = free.
+   *  Effective price = priceSnap × (1 − discountPct/100). */
+  discountPct?: number;
+  /** @deprecated Order status flow was removed; field kept for legacy data. */
   status: OrderItemStatus;
   /** Combo-deal fields. When `isCombo`, priceSnap is fixed at COMBO_PRICE and
    *  costSnap is the sum of the drink and pastry costs at submission. */
@@ -231,14 +235,22 @@ export type Order = {
   customerName: string;
   items: OrderItem[];
   notes?: string;
+  /** Pin to top of Barista Queue — sort by descending value, undefined sorts last. */
+  queuePriority?: number;
+  submittedAt: string;
+  updatedAt: string;
+  // ---- Legacy fields kept for back-compat with existing data ----
+  /** @deprecated paid/unpaid was removed; new orders default this to "paid". */
   paymentStatus: PaymentStatus;
+  /** @deprecated payment methods were removed from tracking. */
   paymentMethod?: PaymentMethod;
+  /** @deprecated comp reasons were removed; discountPct on items replaces "free". */
   compReason?: CompReason;
   compReasonOther?: string;
+  /** @deprecated order status flow was removed. */
   status: OrderStatus;
-  submittedAt: string;
+  /** @deprecated done timestamp from the old status flow. */
   doneAt?: string;
-  updatedAt: string;
 };
 
 export type Settings = {

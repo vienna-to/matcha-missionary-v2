@@ -19,6 +19,7 @@ import {
   Input,
   Label,
   Modal,
+  NumberField,
   Select,
   Sheet,
   Textarea,
@@ -26,22 +27,17 @@ import {
 import { useActiveEvent, useStore } from "@/lib/store";
 import {
   COMBO_PRICE,
-  COMP_REASONS,
-  COMP_REASON_LABELS,
-  PAYMENT_METHODS,
-  PAYMENT_METHOD_LABELS,
   compareMenuItems,
-  type CompReason,
   type Ingredient,
   type MenuItem,
   type MenuSnapshot,
-  type PaymentMethod,
-  type PaymentStatus,
+  type Order,
   type SugarAdjustment,
   type IceAdjustment,
 } from "@/lib/types";
 import { computeItemCost } from "@/lib/calc";
-import { newId } from "@/lib/id";
+import { deriveOrderItem, nextOrderNumber } from "@/lib/reducer";
+import { newId, nowIso } from "@/lib/id";
 import { cn, formatMoney } from "@/lib/utils";
 
 type CartLine = {
@@ -53,6 +49,8 @@ type CartLine = {
   sugarAdjustment?: SugarAdjustment;
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
+  /** Per-item discount as a percent (0–100). 100 = free. */
+  discountPct?: number;
   /** Combo deal: priced at COMBO_PRICE, bundles drink (menuItemId) + pastry. */
   isCombo?: boolean;
   comboPastryId?: string;
@@ -69,10 +67,6 @@ export default function LiveOrders() {
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
-  // Default: unpaid (Paid checkbox unchecked). The user explicitly opts in.
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("unpaid");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
-  const [compReason, setCompReason] = useState<CompReason | "">("");
   const [notes, setNotes] = useState("");
   const [editingCid, setEditingCid] = useState<string | null>(null);
   const [cartOpenMobile, setCartOpenMobile] = useState(false);
@@ -88,11 +82,16 @@ export default function LiveOrders() {
   }
 
   const activeEvent_ = event;
-  const activeItems = snapshot.menuItems.filter((m) => m.active).sort(compareMenuItems);
+  // Capture the narrowed snapshot reference so closures (submit, addLine etc.)
+  // don't lose the non-undefined narrowing TS gave us via the early return.
+  const snap = snapshot;
+  const activeItems = snap.menuItems.filter((m) => m.active).sort(compareMenuItems);
   const total = cart.reduce((sum, line) => {
-    if (line.isCombo) return sum + COMBO_PRICE * line.quantity;
-    const mi = snapshot.menuItems.find((m) => m.id === line.menuItemId);
-    return sum + (mi ? mi.price : 0) * line.quantity;
+    const unit = line.isCombo
+      ? COMBO_PRICE
+      : snapshot.menuItems.find((m) => m.id === line.menuItemId)?.price ?? 0;
+    const factor = 1 - Math.min(1, Math.max(0, (line.discountPct ?? 0) / 100));
+    return sum + unit * factor * line.quantity;
   }, 0);
 
   function addLine(item: MenuItem) {
@@ -130,32 +129,23 @@ export default function LiveOrders() {
   function reset() {
     setCart([]);
     setCustomerName("");
-    setPaymentStatus("unpaid");
-    setPaymentMethod("");
-    setCompReason("");
     setNotes("");
     setCartOpenMobile(false);
   }
 
   const nameOk = customerName.trim().length > 0;
-  const paymentMethodOk =
-    paymentStatus !== "paid" || (paymentMethod !== "" && paymentMethod !== undefined);
-  const compReasonOk = paymentStatus !== "comped" || compReason !== "";
-  const submittable = cart.length > 0 && nameOk && paymentMethodOk && compReasonOk;
+  const submittable = cart.length > 0 && nameOk;
 
   function submit() {
     if (!submittable) return;
-    dispatch({
-      type: "SUBMIT_ORDER",
-      order: {
-        eventId: activeEvent_.id,
-        customerName: customerName.trim(),
-        notes: notes.trim() || undefined,
-        paymentStatus,
-        paymentMethod: paymentStatus === "paid" ? (paymentMethod as PaymentMethod) : undefined,
-        compReason: paymentStatus === "comped" ? (compReason as CompReason) : undefined,
-        status: "pending",
-        items: cart.map((l) => ({
+    // Build the full Order in the caller so the dispatch wrapper can write to
+    // Supabase without re-reading stateRef (which races on rapid submits).
+    const orderId = newId("ord");
+    const orderNumber = nextOrderNumber(state, activeEvent_.id);
+    const submittedAt = nowIso();
+    const items = cart.map((l) =>
+      deriveOrderItem(
+        {
           menuItemId: l.menuItemId,
           quantity: l.quantity,
           milkChoiceId: l.milkChoiceId,
@@ -163,11 +153,30 @@ export default function LiveOrders() {
           sugarAdjustment: l.sugarAdjustment,
           iceAdjustment: l.iceAdjustment,
           specialRequests: l.specialRequests,
+          discountPct: l.discountPct,
           isCombo: l.isCombo,
           comboPastryId: l.comboPastryId,
-        })),
-      },
-    });
+          status: "pending",
+        },
+        orderId,
+        snap,
+      ),
+    );
+    const order: Order = {
+      id: orderId,
+      eventId: activeEvent_.id,
+      orderNumber,
+      customerName: customerName.trim(),
+      items,
+      notes: notes.trim() || undefined,
+      submittedAt,
+      updatedAt: submittedAt,
+      // Orders are pending until the barista checks all items off / marks the
+      // order complete. Legacy paymentStatus kept so DB column has a value.
+      status: "pending",
+      paymentStatus: "paid",
+    };
+    dispatch({ type: "SUBMIT_ORDER", order });
     reset();
   }
 
@@ -207,24 +216,15 @@ export default function LiveOrders() {
               const q = Math.max(1, line.quantity + delta);
               updateLine(cid, { quantity: q });
             }}
+            onDiscount={(cid, pct) => updateLine(cid, { discountPct: pct })}
             customerName={customerName}
             setCustomerName={setCustomerName}
-            paymentStatus={paymentStatus}
-            setPaymentStatus={setPaymentStatus}
-            paymentMethod={paymentMethod}
-            setPaymentMethod={setPaymentMethod}
-            compReason={compReason}
-            setCompReason={setCompReason}
             notes={notes}
             setNotes={setNotes}
             total={total}
             submittable={submittable}
             onSubmit={submit}
-            errors={{
-              name: !nameOk,
-              method: !paymentMethodOk,
-              comp: !compReasonOk,
-            }}
+            errors={{ name: !nameOk }}
           />
         </div>
       </aside>
@@ -262,26 +262,15 @@ export default function LiveOrders() {
                 const q = Math.max(1, line.quantity + delta);
                 updateLine(cid, { quantity: q });
               }}
+              onDiscount={(cid, pct) => updateLine(cid, { discountPct: pct })}
               customerName={customerName}
               setCustomerName={setCustomerName}
-              paymentStatus={paymentStatus}
-              setPaymentStatus={setPaymentStatus}
-              paymentMethod={paymentMethod}
-              setPaymentMethod={setPaymentMethod}
-              compReason={compReason}
-              setCompReason={setCompReason}
               notes={notes}
               setNotes={setNotes}
               total={total}
               submittable={submittable}
-              onSubmit={() => {
-                submit();
-              }}
-              errors={{
-                name: !nameOk,
-                method: !paymentMethodOk,
-                comp: !compReasonOk,
-              }}
+              onSubmit={() => submit()}
+              errors={{ name: !nameOk }}
             />
           </div>
         </Sheet>
@@ -440,14 +429,9 @@ function CartPanel({
   onEdit,
   onRemove,
   onIncrement,
+  onDiscount,
   customerName,
   setCustomerName,
-  paymentStatus,
-  setPaymentStatus,
-  paymentMethod,
-  setPaymentMethod,
-  compReason,
-  setCompReason,
   notes,
   setNotes,
   total,
@@ -460,20 +444,15 @@ function CartPanel({
   onEdit: (cid: string) => void;
   onRemove: (cid: string) => void;
   onIncrement: (cid: string, delta: number) => void;
+  onDiscount: (cid: string, pct: number | undefined) => void;
   customerName: string;
   setCustomerName: (s: string) => void;
-  paymentStatus: PaymentStatus;
-  setPaymentStatus: (s: PaymentStatus) => void;
-  paymentMethod: PaymentMethod | "";
-  setPaymentMethod: (s: PaymentMethod | "") => void;
-  compReason: CompReason | "";
-  setCompReason: (s: CompReason | "") => void;
   notes: string;
   setNotes: (s: string) => void;
   total: number;
   submittable: boolean;
   onSubmit: () => void;
-  errors: { name: boolean; method: boolean; comp: boolean };
+  errors: { name: boolean };
 }) {
   return (
     <Card className="space-y-4 p-4">
@@ -496,6 +475,7 @@ function CartPanel({
               onEdit={() => onEdit(line.cid)}
               onRemove={() => onRemove(line.cid)}
               onIncrement={(delta) => onIncrement(line.cid, delta)}
+              onDiscount={(pct) => onDiscount(line.cid, pct)}
             />
           ))}
         </div>
@@ -510,61 +490,6 @@ function CartPanel({
             className={cn(errors.name && "border-amber-400")}
           />
         </Field>
-
-        <Field label="payment">
-          <div className="mt-1.5 flex items-center gap-3">
-            <label className="t-caption flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={paymentStatus === "paid"}
-                onChange={(e) => setPaymentStatus(e.target.checked ? "paid" : "unpaid")}
-                className="h-4 w-4 accent-matcha-500"
-              />
-              paid
-            </label>
-            <Chip
-              active={paymentStatus === "comped"}
-              onClick={() =>
-                setPaymentStatus(paymentStatus === "comped" ? "unpaid" : "comped")
-              }
-            >
-              free
-            </Chip>
-          </div>
-        </Field>
-
-        {paymentStatus === "paid" ? (
-          <Field label="payment method">
-            <div className="flex flex-wrap gap-1.5">
-              {PAYMENT_METHODS.map((m) => (
-                <Chip
-                  key={m}
-                  active={paymentMethod === m}
-                  onClick={() => setPaymentMethod(m)}
-                >
-                  {PAYMENT_METHOD_LABELS[m]}
-                </Chip>
-              ))}
-            </div>
-          </Field>
-        ) : null}
-
-        {paymentStatus === "comped" ? (
-          <Field label="free reason">
-            <div className="flex flex-wrap gap-1.5">
-              {COMP_REASONS.map((r) => (
-                <Chip
-                  key={r}
-                  active={compReason === r}
-                  onClick={() => setCompReason(r)}
-                >
-                  {COMP_REASON_LABELS[r]}
-                </Chip>
-              ))}
-            </div>
-          </Field>
-        ) : null}
-
         <Field label="order notes (optional)">
           <Textarea
             rows={2}
@@ -575,7 +500,7 @@ function CartPanel({
       </div>
 
       <div className="rounded-xl bg-matcha-50 p-3">
-        <div className="flex items-end justify-between">
+        <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <div className="t-display text-[11px] text-matcha-700">Total</div>
             <div className="text-2xl font-semibold tabular-nums text-matcha-900">
@@ -586,11 +511,9 @@ function CartPanel({
             Submit
           </Button>
         </div>
-        {!submittable && cart.length > 0 ? (
+        {!submittable && cart.length > 0 && errors.name ? (
           <div className="t-caption mt-2 text-[11px] text-amber-700">
-            {errors.name && "name required. "}
-            {errors.method && "payment method required. "}
-            {errors.comp && "free reason required."}
+            name required.
           </div>
         ) : null}
       </div>
@@ -604,13 +527,17 @@ function CartLineRow({
   onEdit,
   onRemove,
   onIncrement,
+  onDiscount,
 }: {
   line: CartLine;
   snapshot: MenuSnapshot;
   onEdit: () => void;
   onRemove: () => void;
   onIncrement: (delta: number) => void;
+  onDiscount: (pct: number | undefined) => void;
 }) {
+  // All hooks must run before any conditional early return.
+  const [discountOpen, setDiscountOpen] = useState(false);
   const item = snapshot.menuItems.find((m) => m.id === line.menuItemId);
   if (!item) return null;
   const milk = line.milkChoiceId
@@ -647,6 +574,8 @@ function CartLineRow({
     ? snapshot.menuItems.find((m) => m.id === line.comboPastryId)
     : undefined;
   const lineUnitPrice = line.isCombo ? COMBO_PRICE : item.price;
+  const discountFraction = Math.min(1, Math.max(0, (line.discountPct ?? 0) / 100));
+  const effectiveUnit = lineUnitPrice * (1 - discountFraction);
   const displayName = line.isCombo
     ? `Combo: ${item.name} + ${pastry?.name ?? "?"}`
     : item.name;
@@ -668,10 +597,23 @@ function CartLineRow({
         </button>
         <div className="text-right">
           <div className="text-sm font-medium tabular-nums">
-            {formatMoney(lineUnitPrice * line.quantity)}
+            {formatMoney(effectiveUnit * line.quantity)}
           </div>
+          {discountFraction > 0 ? (
+            <div className="t-caption text-[11px] text-matcha-700">
+              {line.discountPct === 100 ? "FREE" : `${line.discountPct}% off`}
+            </div>
+          ) : null}
         </div>
       </div>
+      {discountOpen ? (
+        <DiscountRow
+          unitPrice={lineUnitPrice}
+          pct={line.discountPct ?? 0}
+          onPct={(p) => onDiscount(p > 0 ? Math.min(100, Math.max(0, p)) : undefined)}
+          onClose={() => setDiscountOpen(false)}
+        />
+      ) : null}
       <div className="mt-2 flex items-center justify-between">
         <div className="flex items-center gap-1">
           <Button size="sm" variant="outline" onClick={() => onIncrement(-1)}>
@@ -685,6 +627,14 @@ function CartLineRow({
           </Button>
         </div>
         <div className="flex gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setDiscountOpen((s) => !s)}
+            title="Discount"
+          >
+            <span className="t-display text-[11px]">%</span>
+          </Button>
           <Button size="sm" variant="ghost" onClick={onEdit}>
             <Sliders className="h-3.5 w-3.5" />
           </Button>
@@ -693,6 +643,55 @@ function CartLineRow({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DiscountRow({
+  unitPrice,
+  pct,
+  onPct,
+  onClose,
+}: {
+  unitPrice: number;
+  pct: number;
+  onPct: (p: number) => void;
+  onClose: () => void;
+}) {
+  const finalPrice = unitPrice * (1 - Math.min(100, Math.max(0, pct)) / 100);
+  return (
+    <div className="mt-2 grid grid-cols-[1fr_1fr_auto_auto] items-end gap-2 rounded-xl bg-cream-50 p-2">
+      <Field label="% off">
+        <NumberField
+          min={0}
+          max={100}
+          step={1}
+          value={pct}
+          commit="change"
+          onChange={(p) => onPct(Math.min(100, Math.max(0, p)))}
+          className="h-8"
+        />
+      </Field>
+      <Field label="final price ($)">
+        <NumberField
+          min={0}
+          step="0.01"
+          value={Number(finalPrice.toFixed(2))}
+          commit="change"
+          onChange={(p) => {
+            if (unitPrice <= 0) return;
+            const next = (1 - Math.min(unitPrice, Math.max(0, p)) / unitPrice) * 100;
+            onPct(Math.min(100, Math.max(0, Math.round(next * 10) / 10)));
+          }}
+          className="h-8"
+        />
+      </Field>
+      <Button size="sm" variant={pct === 100 ? "primary" : "outline"} onClick={() => onPct(100)}>
+        FREE
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onClose}>
+        ✓
+      </Button>
     </div>
   );
 }

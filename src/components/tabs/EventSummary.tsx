@@ -188,9 +188,17 @@ export default function EventSummary() {
       {/* Metrics */}
       <div className={cn(
         "grid grid-cols-2 gap-3",
-        donationPct > 0 ? "md:grid-cols-3 xl:grid-cols-5" : "md:grid-cols-4",
+        donationPct > 0 ? "md:grid-cols-3 xl:grid-cols-6" : "md:grid-cols-3 xl:grid-cols-5",
       )}>
-        <Metric label="Cups poured" value={totals.totalCups.toString()} subtext={`${totals.byItem.length} menu items`} />
+        <Metric
+          label="Cups poured"
+          value={totals.cupsPoured.toString()}
+          subtext="drinks (oz)"
+        />
+        <Metric
+          label="Pastries served"
+          value={totals.pastriesServed.toString()}
+        />
         <Metric
           label="Revenue (paid)"
           value={formatMoney(totals.revenuePaid)}
@@ -546,7 +554,8 @@ function buildCsv(
   // Totals
   rows.push(["Totals"]);
   rows.push(["Total Orders", String(totals.totalOrders)]);
-  rows.push(["Cups Poured", String(totals.totalCups)]);
+  rows.push(["Cups Poured", String(totals.cupsPoured)]);
+  rows.push(["Pastries Served", String(totals.pastriesServed)]);
   rows.push(["Revenue", totals.revenuePaid.toFixed(2)]);
   rows.push(["Gross (before discounts)", totals.revenueGross.toFixed(2)]);
   rows.push(["Ingredient Cost", totals.ingredientCost.toFixed(2)]);
@@ -620,6 +629,8 @@ type AggregatedItem = {
 type AllEventsAggregate = {
   eventCount: number;
   totalCups: number;
+  totalCupsPoured: number;
+  totalPastriesServed: number;
   totalRevenue: number;
   totalCost: number;
   totalProfit: number;
@@ -642,6 +653,8 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
   const events = [...state.events].sort((a, b) => a.date.localeCompare(b.date));
 
   let totalCups = 0;
+  let totalCupsPoured = 0;
+  let totalPastriesServed = 0;
   let totalRevenue = 0;
   let totalCost = 0;
   let totalProfit = 0;
@@ -659,6 +672,8 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
     const t = computeEventTotals(snap, evt.fixedCosts, eventOrders);
 
     totalCups += t.totalCups;
+    totalCupsPoured += t.cupsPoured;
+    totalPastriesServed += t.pastriesServed;
     totalRevenue += t.revenuePaid;
     totalCost += t.totalCost;
     totalProfit += t.profit;
@@ -716,6 +731,8 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
   return {
     eventCount: events.length,
     totalCups,
+    totalCupsPoured,
+    totalPastriesServed,
     totalRevenue,
     totalCost,
     totalProfit,
@@ -771,8 +788,16 @@ function AllEventsView({
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Metric label="Cups poured" value={aggregate.totalCups.toString()} subtext={`${aggregate.eventCount} events`} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-7">
+        <Metric
+          label="Cups poured"
+          value={aggregate.totalCupsPoured.toString()}
+          subtext={`${aggregate.eventCount} events`}
+        />
+        <Metric
+          label="Pastries served"
+          value={aggregate.totalPastriesServed.toString()}
+        />
         <Metric label="Total revenue" value={formatMoney(aggregate.totalRevenue)} />
         <Metric
           label="Event costs"

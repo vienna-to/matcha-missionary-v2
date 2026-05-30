@@ -8,6 +8,7 @@ import {
   ChevronUp,
   Pencil,
   RotateCcw,
+  StickyNote,
   Trash2,
   Volume2,
 } from "lucide-react";
@@ -15,7 +16,7 @@ import { Button, Card, EmptyState } from "@/components/ui";
 import { DiscountRow } from "@/components/DiscountRow";
 import { useActiveEvent, useStore } from "@/lib/store";
 import { playPing, unlockAudio } from "@/lib/audio";
-import { cn, formatTime, minutesAgo } from "@/lib/utils";
+import { cn, formatMoney, formatTime, minutesAgo } from "@/lib/utils";
 import type {
   Ingredient,
   MenuSnapshot,
@@ -287,6 +288,8 @@ function OrderCard({
     return () => clearInterval(t);
   }, []);
   const elapsed = minutesAgo(order.submittedAt, now);
+  const { total, totalGross } = computeOrderTotals(order);
+  const totalDiscount = totalGross - total;
 
   return (
     <Card
@@ -329,6 +332,17 @@ function OrderCard({
         </div>
       </div>
 
+      {/* Notes surface immediately under the header so the barista sees
+          them when scanning, without scrolling past the items list. The
+          actual note text is the dominant element — no "NOTE" header to
+          compete for attention. */}
+      {order.notes ? (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+          <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+          <div className="min-w-0 whitespace-pre-wrap break-words">{order.notes}</div>
+        </div>
+      ) : null}
+
       <div className="mt-3 space-y-2">
         {order.items.map((it) => (
           <OrderItemRow
@@ -342,11 +356,19 @@ function OrderCard({
         ))}
       </div>
 
-      {order.notes ? (
-        <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          Note: {order.notes}
+      <div className="mt-3 flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2">
+        <div className="t-display text-[11px] text-matcha-700">Order total</div>
+        <div className="text-right">
+          <div className="text-base font-semibold tabular-nums text-matcha-900">
+            {formatMoney(total)}
+          </div>
+          {totalDiscount > 0 ? (
+            <div className="t-caption text-[11px] text-matcha-700">
+              −{formatMoney(totalDiscount)} discount
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </Card>
   );
 }
@@ -390,13 +412,39 @@ function CompletedOrderCard({
         </div>
       </div>
 
+      {order.notes ? (
+        <div className="mt-2 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-950">
+          <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
+          <div className="min-w-0 whitespace-pre-wrap break-words">{order.notes}</div>
+        </div>
+      ) : null}
+
       <div className="mt-2 space-y-1">
         {order.items.map((it) => (
           <OrderItemRow key={it.id} item={it} snapshot={snapshot} compact />
         ))}
       </div>
+
+      <div className="t-caption mt-2 flex items-center justify-between text-xs text-matcha-900/70">
+        <span>Total</span>
+        <span className="tabular-nums">{formatMoney(computeOrderTotals(order).total)}</span>
+      </div>
     </Card>
   );
+}
+
+/** Live order total — accounts for combo bundle price and per-item discount.
+ *  Reads `priceSnap` (= original unit price for both combos and singles). */
+function computeOrderTotals(order: Order): { total: number; totalGross: number } {
+  let total = 0;
+  let totalGross = 0;
+  for (const it of order.items) {
+    const unit = it.priceSnap;
+    const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
+    total += unit * factor * it.quantity;
+    totalGross += unit * it.quantity;
+  }
+  return { total, totalGross };
 }
 
 function timerLabel(min: number): string {

@@ -147,6 +147,10 @@ export function computeItemTotals(
 export type EventTotals = {
   totalOrders: number;
   totalCups: number;
+  /** Items with oz sizes (8/10/12/16 oz, or "other"). Combos count too. */
+  cupsPoured: number;
+  /** Items with size "pastry_count". Combos count too (drink + pastry). */
+  pastriesServed: number;
   /** Effective revenue (after per-item discount). */
   revenuePaid: number;
   /** Gross before discount — useful for "total discounts given" math. */
@@ -169,6 +173,27 @@ export function computeEventTotals(
   const live = orders.filter((o) => o.status !== "cancelled");
   const totalOrders = live.length;
   const totalCups = byItem.reduce((s, t) => s + t.qty, 0);
+
+  // Split cups/pastries by walking the same items list. Combos contribute one
+  // of each (since they bundle a drink with a pastry). Bare items look up the
+  // snapshot's size: "pastry_count" → pastry, else (oz / "other") → cup.
+  let cupsPoured = 0;
+  let pastriesServed = 0;
+  for (const o of live) {
+    for (const it of o.items) {
+      if (it.isCombo) {
+        cupsPoured += it.quantity;
+        pastriesServed += it.quantity;
+      } else {
+        const mi = snapshot.menuItems.find((m) => m.id === it.menuItemId);
+        if (mi?.size === "pastry_count") {
+          pastriesServed += it.quantity;
+        } else {
+          cupsPoured += it.quantity;
+        }
+      }
+    }
+  }
   const revenuePaid = byItem.reduce((s, t) => s + t.revenuePaid, 0);
   const revenueGross = byItem.reduce((s, t) => s + t.revenueGross, 0);
   const ingredientCost = byItem.reduce((s, t) => s + t.totalCost, 0);
@@ -179,6 +204,8 @@ export function computeEventTotals(
   return {
     totalOrders,
     totalCups,
+    cupsPoured,
+    pastriesServed,
     revenuePaid,
     revenueGross,
     ingredientCost,

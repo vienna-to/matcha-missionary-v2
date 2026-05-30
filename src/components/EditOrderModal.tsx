@@ -74,10 +74,21 @@ export default function EditOrderModal({
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
 
-  const total = items.reduce((sum, it) => {
-    const mi = snapshot.menuItems.find((m) => m.id === it.menuItemId);
-    return sum + (mi?.price ?? 0) * it.quantity;
-  }, 0);
+  // Live total — accounts for combos (fixed bundle price) and per-item
+  // discount. Recomputes on every keystroke in the DiscountRow / qty stepper.
+  const { total, totalGross } = items.reduce(
+    (acc, it) => {
+      const unit = it.isCombo
+        ? COMBO_PRICE
+        : snapshot.menuItems.find((m) => m.id === it.menuItemId)?.price ?? 0;
+      const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
+      acc.total += unit * factor * it.quantity;
+      acc.totalGross += unit * it.quantity;
+      return acc;
+    },
+    { total: 0, totalGross: 0 },
+  );
+  const totalDiscount = totalGross - total;
 
   function updateItem(id: string, patch: Partial<DraftItem>) {
     setItems((arr) => arr.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -188,9 +199,17 @@ export default function EditOrderModal({
           )}
         </div>
 
-        <div className="flex items-center justify-between rounded-xl bg-matcha-50 p-3">
-          <span className="text-xs uppercase tracking-wide text-matcha-700">Total</span>
-          <span className="text-lg font-semibold tabular-nums">{formatMoney(total)}</span>
+        <div className="rounded-xl bg-matcha-50 p-3">
+          <div className="flex items-center justify-between">
+            <span className="t-display text-xs text-matcha-700">Total</span>
+            <span className="text-lg font-semibold tabular-nums">{formatMoney(total)}</span>
+          </div>
+          {totalDiscount > 0 ? (
+            <div className="t-caption mt-1 flex items-center justify-between text-[11px] text-matcha-700">
+              <span>discount applied</span>
+              <span className="tabular-nums">−{formatMoney(totalDiscount)}</span>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap justify-between gap-2 pt-2">

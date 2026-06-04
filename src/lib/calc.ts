@@ -7,6 +7,7 @@ import {
   type MenuItem,
   type MenuSnapshot,
   type Order,
+  type OrderItem,
 } from "./types";
 import { sameCategory, toCanonical } from "./units";
 
@@ -118,14 +119,40 @@ export function computeItemTotals(
     return fresh;
   }
 
+  // Lazy-init a bucket for an order item whose menuItemId wasn't in the
+  // snapshot — e.g. a menu item added in Menu Manager after this event's
+  // snapshot was taken. Pulls display fields from the item's snap captured
+  // at sale time so the row renders sensibly.
+  function ensureItemBucket(menuItemId: string, oi: OrderItem): ItemTotals {
+    const existing = result.get(menuItemId);
+    if (existing) return existing;
+    const fresh: ItemTotals = {
+      menuItemId,
+      name: oi.menuItemNameSnap || "Unknown item",
+      category: "other",
+      sortOrder: Number.POSITIVE_INFINITY,
+      qty: 0,
+      priceSnap: oi.priceSnap,
+      costSnapAvg: 0,
+      revenuePaid: 0,
+      revenueGross: 0,
+      totalCost: 0,
+      profit: 0,
+      margin: null,
+    };
+    result.set(menuItemId, fresh);
+    return fresh;
+  }
+
   for (const order of orders) {
     // Legacy: skip cancelled orders if the field is still present in old data.
     if (order.status === "cancelled") continue;
     for (const oi of order.items) {
       // Combos bucket together so the underlying drink and pastry don't get
-      // double-counted as individual sales.
-      const t = oi.isCombo ? ensureCombo() : result.get(oi.menuItemId);
-      if (!t) continue;
+      // double-counted as individual sales. Non-combo items use ensureItemBucket
+      // so a menu item added after this event's snapshot was taken still gets
+      // aggregated correctly.
+      const t = oi.isCombo ? ensureCombo() : ensureItemBucket(oi.menuItemId, oi);
       const discountFraction = Math.min(1, Math.max(0, (oi.discountPct ?? 0) / 100));
       const effectivePrice = oi.priceSnap * (1 - discountFraction);
       t.qty += oi.quantity;

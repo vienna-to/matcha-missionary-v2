@@ -61,10 +61,21 @@ export default function LiveOrders() {
   const event = useActiveEvent();
   const { state, dispatch } = useStore();
 
-  const snapshot: MenuSnapshot | undefined = useMemo(
-    () => (event ? state.menuSnapshots.find((s) => s.id === event.menuSnapshotId) : undefined),
-    [event, state.menuSnapshots],
-  );
+  // Live Orders draws from the *current* master menu (state.menuItems +
+  // state.ingredients) — not the per-event frozen snapshot — so MenuManager
+  // edits (add/edit/archive/reorder) show up here immediately. The order item
+  // captures priceSnap/costSnap/menuItemNameSnap at submission time, which is
+  // what preserves historical fidelity, so the picker doesn't need a frozen
+  // copy. Past events keep their persisted snapshot untouched.
+  const snapshot: MenuSnapshot | undefined = useMemo(() => {
+    if (!event) return undefined;
+    return {
+      id: event.menuSnapshotId,
+      menuItems: state.menuItems,
+      ingredients: state.ingredients,
+      createdAt: event.createdAt,
+    };
+  }, [event, state.menuItems, state.ingredients]);
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
@@ -389,8 +400,8 @@ function ItemGrid({
   if (items.length === 0) {
     return (
       <EmptyState
-        title="No items in this event's menu"
-        description="Add menu items in Menu Manager, then create a new event to snapshot them."
+        title="No active menu items"
+        description="Add (or unarchive) a menu item in Menu Manager — it'll show up here immediately."
       />
     );
   }

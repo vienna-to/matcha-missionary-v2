@@ -17,7 +17,7 @@ import {
 import { AlertTriangle, Download, Target, Trash2 } from "lucide-react";
 import { Badge, Button, Card, EmptyState, Select } from "@/components/ui";
 import { useActiveEvent, useStore } from "@/lib/store";
-import { computeEventTotals } from "@/lib/calc";
+import { computeEventTotals, expandCombosInByItem } from "@/lib/calc";
 import type { Event, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
 
@@ -107,6 +107,20 @@ export default function EventSummary() {
   const itemsSorted = [...totals.byItem]
     .filter((t) => t.qty > 0)
     .sort((a, b) => b.qty - a.qty);
+
+  // Chart-only view: combo sales are split into their drink + pastry rows
+  // (proportional to individual menu prices). Everything else — best-seller,
+  // per-item table, CSV export — keeps the original aggregated Combo bucket.
+  const chartItems = expandCombosInByItem(totals.byItem, snapshot, orders)
+    .filter((t) => t.qty > 0)
+    .sort((a, b) => b.qty - a.qty);
+
+  // Pastry detection runs off the menu item's size (not category) since the
+  // user can label a pastry under any category. Built from the frozen snapshot
+  // so historical events bucket the right way.
+  const pastryIds = new Set(
+    snapshot.menuItems.filter((m) => m.size === "pastry_count").map((m) => m.id),
+  );
 
   const bestSeller = itemsSorted[0];
   const mostProfitable = [...totals.byItem]
@@ -281,21 +295,26 @@ export default function EventSummary() {
       {/* Chart 1: Quantity by item */}
       <Card>
         <h2 className="t-display mb-3 text-sm">Quantity sold by item</h2>
-        {itemsSorted.length === 0 ? (
+        {chartItems.length === 0 ? (
           <p className="text-sm text-matcha-900/60">No sales yet.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={Math.max(220, itemsSorted.length * 36)}>
-            <BarChart data={itemsSorted} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
+          <ResponsiveContainer width="100%" height={Math.max(220, chartItems.length * 36)}>
+            <BarChart data={chartItems} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis type="number" stroke="#6B7280" fontSize={11} />
               <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} tickFormatter={(v: string) => v.toLowerCase()} />
               <Tooltip
-                formatter={(v: number) => [`${v} cups`, "Quantity"]}
+                formatter={(v: number, _name: string, item: { payload?: { menuItemId?: string } }) => {
+                  const id = item?.payload?.menuItemId;
+                  const isPastry = id ? pastryIds.has(id) : false;
+                  const unit = isPastry ? (v === 1 ? "pastry" : "pastries") : v === 1 ? "cup" : "cups";
+                  return [`${v} ${unit}`, "Quantity"];
+                }}
                 labelFormatter={(label) => String(label).toLowerCase()}
                 contentStyle={tooltipStyle}
               />
               <Bar dataKey="qty" fill="#7A9C5E" radius={[0, 6, 6, 0]}>
-                {itemsSorted.map((it) => (
+                {chartItems.map((it) => (
                   <Cell key={it.menuItemId} fill="#7A9C5E" />
                 ))}
               </Bar>
@@ -307,11 +326,11 @@ export default function EventSummary() {
       {/* Chart 2: Revenue & profit by item, grouped */}
       <Card>
         <h2 className="t-display mb-3 text-sm">Revenue & profit by item</h2>
-        {itemsSorted.length === 0 ? (
+        {chartItems.length === 0 ? (
           <p className="text-sm text-matcha-900/60">No sales yet.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={Math.max(240, itemsSorted.length * 44)}>
-            <BarChart data={itemsSorted} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
+          <ResponsiveContainer width="100%" height={Math.max(240, chartItems.length * 44)}>
+            <BarChart data={chartItems} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis type="number" stroke="#6B7280" fontSize={11} tickFormatter={(v: number) => `$${v}`} />
               <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} tickFormatter={(v: string) => v.toLowerCase()} />

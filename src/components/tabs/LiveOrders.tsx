@@ -41,6 +41,29 @@ import { newId, nowIso } from "@/lib/id";
 import { DiscountRow } from "@/components/DiscountRow";
 import { cn, formatMoney } from "@/lib/utils";
 
+// Canonical milk options offered in Live Orders. The chips always render with
+// these labels. `match` is used to resolve the choice to a real ingredient ID
+// in the workspace (so cost calc picks up milk cost); if no ingredient matches,
+// we fall back to the synthetic `id` here and display the label via
+// `milkLabelForId`.
+const MILK_CHOICES: Array<{ id: string; name: string; match: RegExp }> = [
+  { id: "__milk_whole", name: "Whole milk", match: /whole/i },
+  { id: "__milk_lactose", name: "Lactose free milk", match: /lactose/i },
+];
+
+function resolveMilkChoices(ingredients: Ingredient[]) {
+  return MILK_CHOICES.map((c) => {
+    const ing = ingredients.find(
+      (i) => /milk/i.test(i.name) && c.match.test(i.name),
+    );
+    return { id: ing?.id ?? c.id, name: c.name };
+  });
+}
+
+function milkLabelForId(id: string): string | undefined {
+  return MILK_CHOICES.find((c) => c.id === id)?.name;
+}
+
 type CartLine = {
   cid: string;
   menuItemId: string;
@@ -554,6 +577,7 @@ function CartLineRow({
   if (!item) return null;
   const milk = line.milkChoiceId
     ? snapshot.ingredients.find((i) => i.id === line.milkChoiceId)?.name
+        ?? milkLabelForId(line.milkChoiceId)
     : item.defaultMilkId
     ? snapshot.ingredients.find((i) => i.id === item.defaultMilkId)?.name
     : undefined;
@@ -675,20 +699,17 @@ function CustomizeModal({
   const [draft, setDraft] = useState<CartLine>(line);
   const [showCustomize, setShowCustomize] = useState(false);
 
-  const milks = item.allowedMilkIds
-    .map((id) => ingredients.find((i) => i.id === id))
-    .filter((i): i is Ingredient => Boolean(i));
-  const creams = item.allowedCreamIds
-    .map((id) => ingredients.find((i) => i.id === id))
-    .filter((i): i is Ingredient => Boolean(i));
+  // Milk picker is hardcoded to Whole / Lactose-free. We resolve to real
+  // ingredient IDs by name (regardless of `pool` flag, which isn't reliable
+  // on legacy/user-added ingredients) so cost calc still picks up milk cost
+  // when those ingredients exist. Chips always render either way.
+  const milks = resolveMilkChoices(ingredients);
 
   function patch<K extends keyof CartLine>(k: K, v: CartLine[K]) {
     setDraft((d) => ({ ...d, [k]: v }));
   }
 
   const selectedMilkId = draft.milkChoiceId ?? item.defaultMilkId;
-  const selectedCreamId =
-    draft.creamChoiceId === undefined ? item.defaultCreamId : draft.creamChoiceId;
 
   return (
     <Modal open onClose={onClose} title={item.name}>
@@ -706,29 +727,6 @@ function CustomizeModal({
                   {m.name}
                 </Chip>
               ))}
-            </div>
-          </div>
-        ) : null}
-
-        {creams.length > 0 ? (
-          <div>
-            <Label>Cream</Label>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {creams.map((m) => (
-                <Chip
-                  key={m.id}
-                  active={selectedCreamId === m.id}
-                  onClick={() => patch("creamChoiceId", m.id)}
-                >
-                  {m.name}
-                </Chip>
-              ))}
-              <Chip
-                active={selectedCreamId === "none" || (selectedCreamId === undefined && !item.defaultCreamId)}
-                onClick={() => patch("creamChoiceId", "none")}
-              >
-                No cream
-              </Chip>
             </div>
           </div>
         ) : null}

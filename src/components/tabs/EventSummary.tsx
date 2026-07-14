@@ -14,12 +14,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, Download, Target, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, Pencil, Target, Trash2 } from "lucide-react";
 import { Badge, Button, Card, EmptyState, Select } from "@/components/ui";
 import { useActiveEvent, useStore } from "@/lib/store";
 import { computeEventTotals, expandCombosInByItem } from "@/lib/calc";
 import type { Event, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
+import ContractResultsDialog from "@/components/ContractResultsDialog";
 
 const ALL_EVENTS = "__all__";
 
@@ -97,6 +98,36 @@ export default function EventSummary() {
         selectedEventId={ALL_EVENTS}
         onSelectEvent={setSelectedEventId}
         threshold={state.settings.lowMarginThresholdPct / 100}
+      />
+    );
+  }
+
+  if (event.eventType === "contract") {
+    return (
+      <ContractView
+        event={event}
+        snapshot={snapshot}
+        orders={orders}
+        totals={totals}
+        sortedEvents={sortedEvents}
+        selectedEventId={selectedEventId}
+        onSelectEvent={setSelectedEventId}
+        deleting={deleting}
+        onDelete={() => {
+          if (
+            !confirm(
+              `Delete "${event.name}" and all ${orders.length} of its orders? This cannot be undone.`,
+            )
+          ) {
+            return;
+          }
+          const idToDelete = event.id;
+          const remaining = sortedEvents.filter((e) => e.id !== idToDelete);
+          if (remaining.length > 0) setSelectedEventId(remaining[0].id);
+          startDelete(() => {
+            dispatch({ type: "DELETE_EVENT", id: idToDelete });
+          });
+        }}
       />
     );
   }
@@ -690,13 +721,24 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
     const eventOrders = state.orders.filter((o) => o.eventId === evt.id);
     const t = computeEventTotals(snap, evt.fixedCosts, eventOrders);
 
+    // Contract events: fixed contractPayout is the "revenue" side; profit is
+    // payout − ingredient cost. Per-drink revenue is meaningless (no per-drink
+    // price), so per-drink revenue rolls up as 0 and margin comes from the
+    // event-level payout.
+    const isContract = evt.eventType === "contract";
+    const contractPayout = evt.contractPayout ?? 0;
+    const effRevenue = isContract ? contractPayout : t.revenuePaid;
+    const effProfit = isContract ? contractPayout - t.totalCost : t.profit;
+
     totalCups += t.totalCups;
     totalCupsPoured += t.cupsPoured;
     totalPastriesServed += t.pastriesServed;
-    totalRevenue += t.revenuePaid;
+    totalRevenue += effRevenue;
     totalCost += t.totalCost;
-    totalProfit += t.profit;
-    if (evt.donationPct && evt.donationPct > 0) {
+    totalProfit += effProfit;
+    // Contract events never donate — donationPct is hidden in the UI when
+    // Contract is selected — so skip the donation math for them.
+    if (!isContract && evt.donationPct && evt.donationPct > 0) {
       totalDonations += t.revenuePaid * (evt.donationPct / 100);
     }
 
@@ -711,9 +753,13 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
         margin: null,
       };
       existing.qty += it.qty;
-      existing.revenue += it.revenuePaid;
+      // Contract events have no per-drink price → contribute qty and cost
+      // only; revenue/profit stay at the contract level (out of this row).
+      if (!isContract) {
+        existing.revenue += it.revenuePaid;
+        existing.profit += it.profit;
+      }
       existing.cost += it.totalCost;
-      existing.profit += it.profit;
       byName.set(it.name, existing);
     }
 
@@ -723,9 +769,9 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
       date: evt.date,
       shortLabel:
         evt.name.length > 16 ? `${evt.name.slice(0, 14)}…` : evt.name,
-      revenue: t.revenuePaid,
+      revenue: effRevenue,
       cost: t.totalCost,
-      profit: t.profit,
+      profit: effProfit,
       cups: t.totalCups,
     });
   }
@@ -996,4 +1042,289 @@ function AllEventsView({
       </Card>
     </div>
   );
+}
+
+// ============================================================
+// Contract event view
+// ============================================================
+
+function ContractView({
+  event,
+  snapshot,
+  orders,
+  totals,
+  sortedEvents,
+  selectedEventId,
+  onSelectEvent,
+  deleting,
+  onDelete,
+}: {
+  event: Event;
+  snapshot: MenuSnapshot;
+  orders: Order[];
+  totals: ReturnType<typeof computeEventTotals>;
+  sortedEvents: Event[];
+  selectedEventId: string;
+  onSelectEvent: (id: string) => void;
+  deleting: boolean;
+  onDelete: () => void;
+}) {
+  const [resultsOpen, setResultsOpen] = useState(false);
+
+  const payout = event.contractPayout ?? 0;
+  // Only drink rows matter for a contract event (pastries aren't part of the
+  // contracted drink lineup). Filter to non-pastry byItem rows with sales.
+  const drinkRows = useMemo(() => {
+    const pastryIds = new Set(
+      snapshot.menuItems.filter((m) => m.size === "pastry_count").map((m) => m.id),
+    );
+    return totals.byItem
+      .filter((t) => t.qty > 0 && !pastryIds.has(t.menuItemId))
+      .sort((a, b) => b.qty - a.qty);
+  }, [snapshot, totals]);
+
+  const totalDrinks = drinkRows.reduce((s, r) => s + r.qty, 0);
+  const totalIngredientCost = drinkRows.reduce((s, r) => s + r.totalCost, 0);
+  const totalMargin = payout - totalIngredientCost;
+  const avgMarginPerDrink = totalDrinks > 0 ? totalMargin / totalDrinks : null;
+
+  const handleExport = () => {
+    const csv = buildContractCsv(event, drinkRows, {
+      payout,
+      totalDrinks,
+      totalIngredientCost,
+      totalMargin,
+      avgMarginPerDrink,
+    });
+    downloadCsv(csv, `${event.name.replace(/\s+/g, "-")}_${event.date}.csv`);
+  };
+
+  return (
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="t-display text-xl">Event Summary</h1>
+          <p className="t-caption mt-0.5 text-sm text-matcha-900/60">
+            {event.name} · {event.date} · Contract
+            {event.clientName ? ` · ${event.clientName}` : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select
+            value={selectedEventId}
+            onChange={(e) => onSelectEvent(e.target.value)}
+            className="text-sm"
+          >
+            <option value={ALL_EVENTS}>All events ({sortedEvents.length})</option>
+            {sortedEvents.map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {ev.name} · {ev.date}
+              </option>
+            ))}
+          </Select>
+          <Button variant="outline" size="sm" onClick={() => setResultsOpen(true)}>
+            <Pencil className="h-3.5 w-3.5" />{" "}
+            {orders.length > 0 ? "Edit results" : "Enter results"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExport}>
+            <Download className="h-3.5 w-3.5" /> Export CSV
+          </Button>
+          <Button variant="danger" size="sm" onClick={onDelete} disabled={deleting}>
+            <Trash2 className="h-3.5 w-3.5" /> {deleting ? "deleting…" : "Delete event"}
+          </Button>
+        </div>
+      </header>
+
+      {event.notes ? (
+        <div className="t-caption rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {event.notes}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Metric label="Client" value={event.clientName ?? "—"} />
+        <Metric
+          label="Contracted payout"
+          value={formatMoney(payout)}
+          subtext="fixed fee"
+        />
+        <Metric
+          label="Drinks served"
+          value={totalDrinks.toString()}
+          subtext={`${event.cupSizeOz ?? 16}oz cup`}
+        />
+        <Metric
+          label="Total ingredient cost"
+          value={formatMoney(totalIngredientCost)}
+        />
+        <Metric
+          label="Total event margin"
+          value={formatMoney(totalMargin)}
+          subtext="payout − ingredients"
+        />
+        <Metric
+          label="Avg margin / drink"
+          value={
+            avgMarginPerDrink !== null ? formatMoney(avgMarginPerDrink) : "—"
+          }
+          subtext={totalDrinks > 0 ? `${totalDrinks} drinks` : "no drinks yet"}
+        />
+      </div>
+
+      <Card>
+        <h2 className="t-display mb-3 text-sm">Ingredient cost by drink</h2>
+        {drinkRows.length === 0 ? (
+          <p className="text-sm text-matcha-900/60">
+            No drinks recorded yet. Click &quot;Enter results&quot; to log quantities.
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(220, drinkRows.length * 40)}>
+            <BarChart
+              data={drinkRows}
+              layout="vertical"
+              margin={{ left: 24, right: 16, top: 8, bottom: 8 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
+              <XAxis
+                type="number"
+                stroke="#6B7280"
+                fontSize={11}
+                tickFormatter={(v: number) => `$${v}`}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                stroke="#374151"
+                fontSize={11}
+                width={130}
+                tickFormatter={(v: string) => v.toLowerCase()}
+              />
+              <Tooltip
+                formatter={(v: number) => [formatMoney(v as number), "Ingredient cost"]}
+                labelFormatter={(label) => String(label).toLowerCase()}
+                contentStyle={tooltipStyle}
+              />
+              <Bar dataKey="totalCost" name="Ingredient cost" fill="#C7A86B" radius={[0, 6, 6, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      <Card>
+        <h2 className="t-display mb-3 text-sm">Per-drink breakdown</h2>
+        {drinkRows.length === 0 ? (
+          <p className="text-sm text-matcha-900/60">No drinks recorded yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="t-display text-left text-xs text-matcha-900/60">
+                  <th className="py-2 pr-4">Drink</th>
+                  <th className="py-2 pr-4 text-right">Qty</th>
+                  <th className="py-2 pr-4 text-right">Cost / cup</th>
+                  <th className="py-2 pr-4 text-right">Total ingredient cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {drinkRows.map((t) => (
+                  <tr key={t.menuItemId} className="border-t border-cream-100">
+                    <td className="py-2 pr-4 font-medium lowercase">{t.name}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums">{t.qty}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums">
+                      {formatMoney(t.costSnapAvg)}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums">
+                      {formatMoney(t.totalCost)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-cream-200">
+                  <td className="py-2 pr-4 font-semibold">Totals</td>
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                    {totalDrinks}
+                  </td>
+                  <td />
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                    {formatMoney(totalIngredientCost)}
+                  </td>
+                </tr>
+                <tr className="border-t border-cream-100 text-matcha-900/70">
+                  <td className="py-2 pr-4">Contracted payout</td>
+                  <td />
+                  <td />
+                  <td className="py-2 pr-4 text-right tabular-nums">
+                    {formatMoney(payout)}
+                  </td>
+                </tr>
+                <tr className="border-t-2 border-cream-200">
+                  <td className="py-2 pr-4 font-semibold">Total event margin</td>
+                  <td />
+                  <td />
+                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                    {formatMoney(totalMargin)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-xs text-matcha-900/60">
+          Ingredient cost uses each drink&apos;s recipe at the event&apos;s
+          {" "}{event.cupSizeOz ?? 16}oz cup size. No per-drink profit shown —
+          contract payout is a fixed fee, so only total event margin is a real
+          number.
+        </p>
+      </Card>
+
+      <ContractResultsDialog
+        open={resultsOpen}
+        onClose={() => setResultsOpen(false)}
+        event={event}
+      />
+    </div>
+  );
+}
+
+function buildContractCsv(
+  event: Event,
+  drinkRows: Array<{ name: string; qty: number; costSnapAvg: number; totalCost: number }>,
+  summary: {
+    payout: number;
+    totalDrinks: number;
+    totalIngredientCost: number;
+    totalMargin: number;
+    avgMarginPerDrink: number | null;
+  },
+): string {
+  const rows: string[][] = [];
+  rows.push(["Event Name", event.name]);
+  rows.push(["Event Date", event.date]);
+  rows.push(["Event Type", "Contract"]);
+  if (event.clientName) rows.push(["Client", event.clientName]);
+  rows.push(["Cup Size (oz)", String(event.cupSizeOz ?? 16)]);
+  rows.push(["Contracted Payout", summary.payout.toFixed(2)]);
+  rows.push([]);
+
+  rows.push(["Drink", "Quantity", "Cost per Cup", "Total Ingredient Cost"]);
+  for (const r of drinkRows) {
+    rows.push([
+      r.name,
+      String(r.qty),
+      r.costSnapAvg.toFixed(4),
+      r.totalCost.toFixed(2),
+    ]);
+  }
+  rows.push([]);
+
+  rows.push(["Total Drinks Served", String(summary.totalDrinks)]);
+  rows.push(["Total Ingredient Cost", summary.totalIngredientCost.toFixed(2)]);
+  rows.push(["Total Event Margin", summary.totalMargin.toFixed(2)]);
+  rows.push([
+    "Avg Margin / Drink",
+    summary.avgMarginPerDrink !== null ? summary.avgMarginPerDrink.toFixed(2) : "",
+  ]);
+
+  return rows.map(toCsvRow).join("\r\n");
 }

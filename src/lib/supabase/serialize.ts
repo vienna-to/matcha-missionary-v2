@@ -62,6 +62,10 @@ export type DbEvent = {
   donation_pct: number | null;
   is_active: boolean;
   kind: Event["kind"];
+  event_type: Event["eventType"];
+  cup_size_oz: number | null;
+  client_name: string | null;
+  contract_payout: number | null;
   menu_snapshot: MenuSnapshot;
   fixed_costs: Event["fixedCosts"];
   notes: string | null;
@@ -170,6 +174,11 @@ export function fromEvent(r: DbEvent): Event {
     fixedCosts: r.fixed_costs ?? [],
     isActive: r.is_active,
     kind: r.kind ?? "live",
+    eventType: r.event_type ?? "standard",
+    cupSizeOz: r.cup_size_oz == null ? undefined : Number(r.cup_size_oz),
+    clientName: r.client_name ?? undefined,
+    contractPayout:
+      r.contract_payout == null ? undefined : Number(r.contract_payout),
     notes: r.notes ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -344,6 +353,10 @@ export function toEventInsert(
     donation_pct: nul(evt.donationPct),
     is_active: evt.isActive,
     kind: evt.kind ?? "live",
+    event_type: evt.eventType ?? "standard",
+    cup_size_oz: nul(evt.cupSizeOz),
+    client_name: nul(evt.clientName),
+    contract_payout: nul(evt.contractPayout),
     menu_snapshot: snapshot,
     fixed_costs: evt.fixedCosts,
     notes: nul(evt.notes),
@@ -360,6 +373,10 @@ export function toEventPatch(patch: Partial<Event>): Partial<DbEvent> {
   if (patch.donationPct !== undefined) r.donation_pct = nul(patch.donationPct);
   if (patch.fixedCosts !== undefined) r.fixed_costs = patch.fixedCosts;
   if (patch.isActive !== undefined) r.is_active = patch.isActive;
+  if (patch.eventType !== undefined) r.event_type = patch.eventType;
+  if (patch.cupSizeOz !== undefined) r.cup_size_oz = nul(patch.cupSizeOz);
+  if (patch.clientName !== undefined) r.client_name = nul(patch.clientName);
+  if (patch.contractPayout !== undefined) r.contract_payout = nul(patch.contractPayout);
   if (patch.notes !== undefined) r.notes = nul(patch.notes);
   return r;
 }

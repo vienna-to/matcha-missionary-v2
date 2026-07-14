@@ -1,6 +1,7 @@
 import {
   COMBO_BUCKET_ID,
   COMBO_PRICE,
+  REFERENCE_CUP_OZ,
   type FixedCost,
   type Ingredient,
   type IngredientLine,
@@ -24,6 +25,12 @@ export function lineCost(line: IngredientLine, ing: Ingredient): number {
  * Compute the cost of one unit of a menu item, with optional modifier swaps
  * for milk and cream pools. If a line points to a pool ingredient, the
  * provided choice (or the item's default) is substituted at calc time.
+ *
+ * `cupSizeOz` scales every ingredient line by cupSizeOz / REFERENCE_CUP_OZ,
+ * on the assumption that recipes are authored at the reference size. Pastries
+ * (size === "pastry_count") never scale — they're per-piece, not per-oz.
+ * Undefined `cupSizeOz` skips scaling entirely, preserving legacy behaviour
+ * for callers that don't have an event context (Menu Manager, seed).
  */
 export function computeItemCost(
   item: MenuItem,
@@ -31,8 +38,13 @@ export function computeItemCost(
   opts: {
     milkChoiceId?: string;
     creamChoiceId?: string | "none";
+    cupSizeOz?: number;
   } = {},
 ): number {
+  const scale =
+    opts.cupSizeOz !== undefined && item.size !== "pastry_count"
+      ? opts.cupSizeOz / REFERENCE_CUP_OZ
+      : 1;
   const map = new Map(ingredients.map((i) => [i.id, i]));
   let total = 0;
   for (const line of item.ingredientLines) {
@@ -49,7 +61,9 @@ export function computeItemCost(
       use = id ? map.get(id) : undefined;
       if (!use) continue;
     }
-    const c = lineCost(line, use);
+    const scaledLine =
+      scale === 1 ? line : { ...line, amount: line.amount * scale };
+    const c = lineCost(scaledLine, use);
     if (Number.isFinite(c)) total += c;
   }
   return total;

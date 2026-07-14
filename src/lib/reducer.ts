@@ -105,20 +105,26 @@ export function deriveOrderItem(
   },
   orderId: string,
   snapshot: MenuSnapshot,
+  cupSizeOz?: number,
 ): OrderItem {
   const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
   const drinkCost = mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
         creamChoiceId: raw.creamChoiceId,
+        cupSizeOz,
       })
     : 0;
 
   // Combo deal: bundle drink + pastry at the fixed bundle price. costSnap is
-  // the *total* cost (drink + pastry) so margin math stays accurate.
+  // the *total* cost (drink + pastry) so margin math stays accurate. Pastry
+  // cost is per-piece (size === "pastry_count" auto-skips cup scaling inside
+  // computeItemCost), so passing cupSizeOz through is safe.
   if (raw.isCombo && raw.comboPastryId) {
     const pastry = snapshot.menuItems.find((m) => m.id === raw.comboPastryId);
-    const pastryCost = pastry ? computeItemCost(pastry, snapshot.ingredients, {}) : 0;
+    const pastryCost = pastry
+      ? computeItemCost(pastry, snapshot.ingredients, { cupSizeOz })
+      : 0;
     return {
       id: newId("oi"),
       orderId,
@@ -380,7 +386,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const snap = findSnapshot(state, evt.menuSnapshotId);
       if (!snap) return state;
       const items: OrderItem[] = action.items.map((raw) =>
-        deriveOrderItem(raw, order.id, snap),
+        deriveOrderItem(raw, order.id, snap, evt.cupSizeOz),
       );
       return {
         ...state,

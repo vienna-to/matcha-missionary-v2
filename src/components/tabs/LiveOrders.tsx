@@ -195,6 +195,7 @@ export default function LiveOrders() {
         },
         orderId,
         snap,
+        activeEvent_.cupSizeOz,
       ),
     );
     const order: Order = {

@@ -3,6 +3,7 @@ import { newId } from "./id";
 import type {
   AppState,
   Event,
+  EventType,
   MenuSnapshot,
   Order,
   OrderItem,
@@ -30,6 +31,10 @@ export function buildQuickAddEvent({
   donationPct,
   itemQuantities,
   paymentMethod = "cash",
+  cupSizeOz,
+  eventType,
+  clientName,
+  contractPayout,
 }: {
   state: AppState;
   name: string;
@@ -40,6 +45,12 @@ export function buildQuickAddEvent({
   donationPct?: number;
   itemQuantities: Record<string, number>;
   paymentMethod?: PaymentMethod;
+  /** Per-event cup size (oz). Scales ingredient amounts in cost stamping. */
+  cupSizeOz?: number;
+  /** Defaults to "standard". Pass "contract" to persist contract fields. */
+  eventType?: EventType;
+  clientName?: string;
+  contractPayout?: number;
 }): { event: Event; snapshot: MenuSnapshot; orders: Order[] } {
   const now = new Date().toISOString();
 
@@ -73,6 +84,10 @@ export function buildQuickAddEvent({
     fixedCosts: [],
     isActive: false, // past event — don't steal active from current live event
     kind: "past",
+    eventType,
+    cupSizeOz,
+    clientName,
+    contractPayout,
     notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
     createdAt: now,
     updatedAt: now,
@@ -105,7 +120,7 @@ export function buildQuickAddEvent({
   const orders: Order[] = cupQueue.map((miId, idx) => {
     const mi = itemById.get(miId);
     if (!mi) throw new Error(`Quick-add: unknown menu item id ${miId}`);
-    const cost = computeItemCost(mi, snapshot.ingredients, {});
+    const cost = computeItemCost(mi, snapshot.ingredients, { cupSizeOz });
     const t =
       cupQueue.length === 1
         ? startMs + window / 2

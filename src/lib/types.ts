@@ -135,6 +135,21 @@ export type FixedCost = {
  */
 export type EventKind = "live" | "past";
 
+/**
+ * "standard" = normal event; revenue = sum of drinks sold at menu prices.
+ * "contract" = fixed-fee event; client pays contractPayout regardless of
+ *              how many drinks are served. No overage tracking.
+ * Undefined on legacy rows → treated as "standard".
+ */
+export type EventType = "standard" | "contract";
+
+/** Cup size (oz) the master recipe ingredient amounts are authored for.
+ *  A per-event cupSizeOz scales each ingredient line by
+ *  cupSizeOz / REFERENCE_CUP_OZ at cost-stamp time. */
+export const REFERENCE_CUP_OZ = 16;
+/** Default cup size shown in New Event dialog. */
+export const DEFAULT_CUP_OZ = 16;
+
 export type Event = {
   id: string;
   name: string;
@@ -149,6 +164,15 @@ export type Event = {
   fixedCosts: FixedCost[];
   isActive: boolean;
   kind?: EventKind;
+  /** Undefined on legacy rows → treated as "standard". */
+  eventType?: EventType;
+  /** Per-event cup size. Undefined on legacy rows → cost calc doesn't
+   *  scale (so old stamped costSnaps stay meaningful in aggregates). */
+  cupSizeOz?: number;
+  /** Contract-only: client this event was booked for. */
+  clientName?: string;
+  /** Contract-only: fixed fee paid regardless of drinks served. */
+  contractPayout?: number;
   notes?: string;
   createdAt: string;
   updatedAt: string;

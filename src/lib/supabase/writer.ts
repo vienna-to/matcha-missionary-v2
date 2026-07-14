@@ -92,7 +92,16 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
 
   // ---------- events ----------
   async createEvent(evt: Event, snapshot: MenuSnapshot) {
-    const { error } = await supabase.from("events").insert(toEventInsert(workspaceId, evt, snapshot));
+    // Upsert (INSERT ... ON CONFLICT DO NOTHING) so a caller that already
+    // upserted the same event row defensively (e.g. ContractResultsDialog,
+    // which needs the FK target to exist before writing orders) doesn't get
+    // followed by a noisy unique-violation from this fire-and-forget writer.
+    const { error } = await supabase
+      .from("events")
+      .upsert(toEventInsert(workspaceId, evt, snapshot), {
+        onConflict: "id",
+        ignoreDuplicates: true,
+      });
     tag("createEvent")(error);
   },
   async updateEvent(id: string, patch: Partial<Event>) {

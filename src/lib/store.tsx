@@ -133,7 +133,7 @@ function LocalStoreProvider({ children }: { children: React.ReactNode }) {
 
 type PairingStatus =
   | { phase: "checking" }
-  | { phase: "needs-pairing" }
+  | { phase: "needs-pairing"; error?: string }
   | { phase: "loading"; workspaceId: string }
   | { phase: "ready"; workspaceId: string; code: string }
   | { phase: "error"; message: string };
@@ -145,6 +145,30 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
 
   // Restore prior pairing if present
   useEffect(() => {
+    // ?workspace=CODE takes precedence over any cached pairing — a shared link
+    // is an explicit request to open that workspace.
+    const urlCode =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("workspace")?.trim().toUpperCase() || null
+        : null;
+
+    if (urlCode) {
+      (async () => {
+        try {
+          const { id, code } = await joinWorkspace(supabase, urlCode);
+          savePairing({ workspaceId: id, code });
+          // Strip the param so refreshes don't re-run this branch.
+          const url = new URL(window.location.href);
+          url.searchParams.delete("workspace");
+          window.history.replaceState(null, "", url.toString());
+          setPairing({ phase: "loading", workspaceId: id });
+        } catch {
+          setPairing({ phase: "needs-pairing", error: "Workspace not found." });
+        }
+      })();
+      return;
+    }
+
     const existing = loadPairing();
     if (!existing) {
       setPairing({ phase: "needs-pairing" });
@@ -375,6 +399,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
   if (pairing.phase === "needs-pairing") {
     return (
       <WorkspacePairing
+        initialError={pairing.error}
         onPaired={(p) => {
           savePairing(p);
           setPairing({ phase: "loading", workspaceId: p.workspaceId });
@@ -406,14 +431,18 @@ import { createWorkspace, joinWorkspace as joinWs } from "./supabase/sync";
 
 function WorkspacePairing({
   onPaired,
+  initialError,
 }: {
   onPaired: (p: { workspaceId: string; code: string }) => void;
+  initialError?: string;
 }) {
   const supabase = getClient()!;
-  const [mode, setMode] = useState<"join" | "create">("create");
+  // When we arrived here from a failed ?workspace= join, default to the join
+  // tab so the user can immediately correct the code.
+  const [mode, setMode] = useState<"join" | "create">(initialError ? "join" : "create");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
 
   function newCode(): string {
     const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

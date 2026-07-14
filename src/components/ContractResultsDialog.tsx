@@ -49,16 +49,14 @@ export default function ContractResultsDialog({
     [state.orders, event.id],
   );
 
-  const drinks = useMemo(() => {
+  const items = useMemo(() => {
     if (!snapshot) return [];
-    return [...snapshot.menuItems]
-      .filter((m) => m.size !== "pastry_count")
-      .sort(
-        (a, b) =>
-          (a.sortOrder ?? Number.POSITIVE_INFINITY) -
-            (b.sortOrder ?? Number.POSITIVE_INFINITY) ||
-          a.name.localeCompare(b.name),
-      );
+    return [...snapshot.menuItems].sort(
+      (a, b) =>
+        (a.sortOrder ?? Number.POSITIVE_INFINITY) -
+          (b.sortOrder ?? Number.POSITIVE_INFINITY) ||
+        a.name.localeCompare(b.name),
+    );
   }, [snapshot]);
 
   // Seed the quantity map from existing synthetic orders so re-opening the
@@ -77,7 +75,7 @@ export default function ContractResultsDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const totalCups = Object.values(qty).reduce((s, n) => s + (n || 0), 0);
+  const totalItems = Object.values(qty).reduce((s, n) => s + (n || 0), 0);
 
   async function save() {
     if (!snapshot) return;
@@ -218,14 +216,14 @@ export default function ContractResultsDialog({
           previously entered results.
         </p>
 
-        <Field label={`quantity sold per drink · ${totalCups} cup${totalCups === 1 ? "" : "s"}`}>
+        <Field label={`quantity sold per item · ${totalItems} item${totalItems === 1 ? "" : "s"}`}>
           <div className="max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-cream-200 p-3">
-            {drinks.length === 0 ? (
+            {items.length === 0 ? (
               <p className="t-caption text-xs text-matcha-900/60">
-                no drink items in this event&apos;s menu snapshot.
+                no items in this event&apos;s menu snapshot.
               </p>
             ) : (
-              drinks.map((mi) => {
+              items.map((mi) => {
                 const n = qty[mi.id] ?? 0;
                 return (
                   <div

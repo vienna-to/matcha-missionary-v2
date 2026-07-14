@@ -1072,29 +1072,51 @@ function ContractView({
   const [resultsOpen, setResultsOpen] = useState(false);
 
   const payout = event.contractPayout ?? 0;
-  // Only drink rows matter for a contract event (pastries aren't part of the
-  // contracted drink lineup). Filter to non-pastry byItem rows with sales.
-  const drinkRows = useMemo(() => {
+  // Split byItem rows into drinks (cups) and pastries. Both count toward the
+  // event's total ingredient cost / margin; the per-drink avg margin uses
+  // cups only (spec: "avg margin per drink"), while per-item uses everything.
+  const { drinkRows, pastryRows } = useMemo(() => {
     const pastryIds = new Set(
       snapshot.menuItems.filter((m) => m.size === "pastry_count").map((m) => m.id),
     );
-    return totals.byItem
-      .filter((t) => t.qty > 0 && !pastryIds.has(t.menuItemId))
-      .sort((a, b) => b.qty - a.qty);
+    const drinks: typeof totals.byItem = [];
+    const pastries: typeof totals.byItem = [];
+    for (const t of totals.byItem) {
+      if (t.qty === 0) continue;
+      (pastryIds.has(t.menuItemId) ? pastries : drinks).push(t);
+    }
+    drinks.sort((a, b) => b.qty - a.qty);
+    pastries.sort((a, b) => b.qty - a.qty);
+    return { drinkRows: drinks, pastryRows: pastries };
   }, [snapshot, totals]);
 
   const totalDrinks = drinkRows.reduce((s, r) => s + r.qty, 0);
-  const totalIngredientCost = drinkRows.reduce((s, r) => s + r.totalCost, 0);
+  const totalPastries = pastryRows.reduce((s, r) => s + r.qty, 0);
+  const drinkIngredientCost = drinkRows.reduce((s, r) => s + r.totalCost, 0);
+  const pastryIngredientCost = pastryRows.reduce((s, r) => s + r.totalCost, 0);
+  const totalIngredientCost = drinkIngredientCost + pastryIngredientCost;
   const totalMargin = payout - totalIngredientCost;
   const avgMarginPerDrink = totalDrinks > 0 ? totalMargin / totalDrinks : null;
+  const totalItems = totalDrinks + totalPastries;
+  const avgMarginPerItem = totalItems > 0 ? totalMargin / totalItems : null;
+
+  // Unified qty-sorted view of every recorded item (drinks + pastries) —
+  // drives the single "Ingredient cost by item" chart and "Per-item
+  // breakdown" table. The underlying split above stays for the totals math.
+  const itemRows = useMemo(
+    () => [...drinkRows, ...pastryRows].sort((a, b) => b.qty - a.qty),
+    [drinkRows, pastryRows],
+  );
 
   const handleExport = () => {
-    const csv = buildContractCsv(event, drinkRows, {
+    const csv = buildContractCsv(event, itemRows, {
       payout,
       totalDrinks,
+      totalPastries,
       totalIngredientCost,
       totalMargin,
       avgMarginPerDrink,
+      avgMarginPerItem,
     });
     downloadCsv(csv, `${event.name.replace(/\s+/g, "-")}_${event.date}.csv`);
   };
@@ -1141,7 +1163,7 @@ function ContractView({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="Client" value={event.clientName ?? "—"} />
         <Metric
           label="Contracted payout"
@@ -1154,8 +1176,17 @@ function ContractView({
           subtext={`${event.cupSizeOz ?? 16}oz cup`}
         />
         <Metric
+          label="Pastries served"
+          value={totalPastries.toString()}
+        />
+        <Metric
           label="Total ingredient cost"
           value={formatMoney(totalIngredientCost)}
+          subtext={
+            totalPastries > 0
+              ? `${formatMoney(drinkIngredientCost)} drinks · ${formatMoney(pastryIngredientCost)} pastries`
+              : undefined
+          }
         />
         <Metric
           label="Total event margin"
@@ -1167,20 +1198,37 @@ function ContractView({
           value={
             avgMarginPerDrink !== null ? formatMoney(avgMarginPerDrink) : "—"
           }
-          subtext={totalDrinks > 0 ? `${totalDrinks} drinks` : "no drinks yet"}
+          subtext={
+            totalPastries > 0
+              ? `÷ ${totalDrinks} drinks (incl. pastry margin)`
+              : totalDrinks > 0
+                ? `${totalDrinks} drinks`
+                : "no drinks yet"
+          }
+        />
+        <Metric
+          label="Avg margin / item"
+          value={
+            avgMarginPerItem !== null ? formatMoney(avgMarginPerItem) : "—"
+          }
+          subtext={
+            totalItems > 0
+              ? `÷ ${totalItems} items (drinks + pastries)`
+              : "no items yet"
+          }
         />
       </div>
 
       <Card>
-        <h2 className="t-display mb-3 text-sm">Ingredient cost by drink</h2>
-        {drinkRows.length === 0 ? (
+        <h2 className="t-display mb-3 text-sm">Ingredient cost by item</h2>
+        {itemRows.length === 0 ? (
           <p className="text-sm text-matcha-900/60">
-            No drinks recorded yet. Click &quot;Enter results&quot; to log quantities.
+            No items recorded yet. Click &quot;Enter results&quot; to log quantities.
           </p>
         ) : (
-          <ResponsiveContainer width="100%" height={Math.max(220, drinkRows.length * 40)}>
+          <ResponsiveContainer width="100%" height={Math.max(220, itemRows.length * 40)}>
             <BarChart
-              data={drinkRows}
+              data={itemRows}
               layout="vertical"
               margin={{ left: 24, right: 16, top: 8, bottom: 8 }}
             >
@@ -1211,22 +1259,22 @@ function ContractView({
       </Card>
 
       <Card>
-        <h2 className="t-display mb-3 text-sm">Per-drink breakdown</h2>
-        {drinkRows.length === 0 ? (
-          <p className="text-sm text-matcha-900/60">No drinks recorded yet.</p>
+        <h2 className="t-display mb-3 text-sm">Per-item breakdown</h2>
+        {itemRows.length === 0 ? (
+          <p className="text-sm text-matcha-900/60">No items recorded yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="t-display text-left text-xs text-matcha-900/60">
-                  <th className="py-2 pr-4">Drink</th>
+                  <th className="py-2 pr-4">Item</th>
                   <th className="py-2 pr-4 text-right">Qty</th>
-                  <th className="py-2 pr-4 text-right">Cost / cup</th>
+                  <th className="py-2 pr-4 text-right">Avg unit cost</th>
                   <th className="py-2 pr-4 text-right">Total ingredient cost</th>
                 </tr>
               </thead>
               <tbody>
-                {drinkRows.map((t) => (
+                {itemRows.map((t) => (
                   <tr key={t.menuItemId} className="border-t border-cream-100">
                     <td className="py-2 pr-4 font-medium lowercase">{t.name}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{t.qty}</td>
@@ -1241,29 +1289,13 @@ function ContractView({
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-cream-200">
-                  <td className="py-2 pr-4 font-semibold">Totals</td>
+                  <td className="py-2 pr-4 font-semibold">Item totals</td>
                   <td className="py-2 pr-4 text-right font-semibold tabular-nums">
-                    {totalDrinks}
+                    {totalItems}
                   </td>
                   <td />
                   <td className="py-2 pr-4 text-right font-semibold tabular-nums">
                     {formatMoney(totalIngredientCost)}
-                  </td>
-                </tr>
-                <tr className="border-t border-cream-100 text-matcha-900/70">
-                  <td className="py-2 pr-4">Contracted payout</td>
-                  <td />
-                  <td />
-                  <td className="py-2 pr-4 text-right tabular-nums">
-                    {formatMoney(payout)}
-                  </td>
-                </tr>
-                <tr className="border-t-2 border-cream-200">
-                  <td className="py-2 pr-4 font-semibold">Total event margin</td>
-                  <td />
-                  <td />
-                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">
-                    {formatMoney(totalMargin)}
                   </td>
                 </tr>
               </tfoot>
@@ -1271,11 +1303,62 @@ function ContractView({
           </div>
         )}
         <p className="mt-2 text-xs text-matcha-900/60">
-          Ingredient cost uses each drink&apos;s recipe at the event&apos;s
-          {" "}{event.cupSizeOz ?? 16}oz cup size. No per-drink profit shown —
-          contract payout is a fixed fee, so only total event margin is a real
-          number.
+          Drink ingredient cost uses each recipe at the event&apos;s
+          {" "}{event.cupSizeOz ?? 16}oz cup size. Pastry cost is per-piece —
+          cup size doesn&apos;t scale it.
         </p>
+      </Card>
+
+      <Card>
+        <h2 className="t-display mb-3 text-sm">Event margin</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <tbody>
+              <tr>
+                <td className="py-2 pr-4">Contracted payout</td>
+                <td className="py-2 pr-4 text-right tabular-nums">
+                  {formatMoney(payout)}
+                </td>
+              </tr>
+              <tr className="text-matcha-900/70">
+                <td className="py-2 pr-4">− Drink ingredient cost</td>
+                <td className="py-2 pr-4 text-right tabular-nums">
+                  −{formatMoney(drinkIngredientCost)}
+                </td>
+              </tr>
+              {pastryRows.length > 0 ? (
+                <tr className="text-matcha-900/70">
+                  <td className="py-2 pr-4">− Pastry ingredient cost</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">
+                    −{formatMoney(pastryIngredientCost)}
+                  </td>
+                </tr>
+              ) : null}
+              <tr className="border-t-2 border-cream-200">
+                <td className="py-2 pr-4 font-semibold">Total event margin</td>
+                <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                  {formatMoney(totalMargin)}
+                </td>
+              </tr>
+              <tr className="border-t border-cream-100 text-matcha-900/70">
+                <td className="py-2 pr-4">
+                  Avg margin / drink · ÷ {totalDrinks} drink{totalDrinks === 1 ? "" : "s"}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">
+                  {avgMarginPerDrink !== null ? formatMoney(avgMarginPerDrink) : "—"}
+                </td>
+              </tr>
+              <tr className="text-matcha-900/70">
+                <td className="py-2 pr-4">
+                  Avg margin / item · ÷ {totalItems} item{totalItems === 1 ? "" : "s"}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">
+                  {avgMarginPerItem !== null ? formatMoney(avgMarginPerItem) : "—"}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       <ContractResultsDialog
@@ -1289,13 +1372,15 @@ function ContractView({
 
 function buildContractCsv(
   event: Event,
-  drinkRows: Array<{ name: string; qty: number; costSnapAvg: number; totalCost: number }>,
+  itemRows: Array<{ name: string; qty: number; costSnapAvg: number; totalCost: number }>,
   summary: {
     payout: number;
     totalDrinks: number;
+    totalPastries: number;
     totalIngredientCost: number;
     totalMargin: number;
     avgMarginPerDrink: number | null;
+    avgMarginPerItem: number | null;
   },
 ): string {
   const rows: string[][] = [];
@@ -1307,8 +1392,8 @@ function buildContractCsv(
   rows.push(["Contracted Payout", summary.payout.toFixed(2)]);
   rows.push([]);
 
-  rows.push(["Drink", "Quantity", "Cost per Cup", "Total Ingredient Cost"]);
-  for (const r of drinkRows) {
+  rows.push(["Item", "Quantity", "Avg Unit Cost", "Total Ingredient Cost"]);
+  for (const r of itemRows) {
     rows.push([
       r.name,
       String(r.qty),
@@ -1319,11 +1404,16 @@ function buildContractCsv(
   rows.push([]);
 
   rows.push(["Total Drinks Served", String(summary.totalDrinks)]);
+  rows.push(["Total Pastries Served", String(summary.totalPastries)]);
   rows.push(["Total Ingredient Cost", summary.totalIngredientCost.toFixed(2)]);
   rows.push(["Total Event Margin", summary.totalMargin.toFixed(2)]);
   rows.push([
     "Avg Margin / Drink",
     summary.avgMarginPerDrink !== null ? summary.avgMarginPerDrink.toFixed(2) : "",
+  ]);
+  rows.push([
+    "Avg Margin / Item",
+    summary.avgMarginPerItem !== null ? summary.avgMarginPerItem.toFixed(2) : "",
   ]);
 
   return rows.map(toCsvRow).join("\r\n");

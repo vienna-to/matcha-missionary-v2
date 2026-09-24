@@ -23,6 +23,7 @@ import {
   type IceAdjustment,
 } from "@/lib/types";
 import { DiscountRow } from "@/components/DiscountRow";
+import { useHelperMode } from "@/lib/helper-mode";
 import { newId } from "@/lib/id";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -53,6 +54,7 @@ export default function EditOrderModal({
   onClose: () => void;
 }) {
   const dispatch = useDispatch();
+  const [helperMode] = useHelperMode();
   const [name, setName] = useState(order.customerName);
   const [notes, setNotes] = useState(order.notes ?? "");
   const [items, setItems] = useState<DraftItem[]>(() =>
@@ -193,24 +195,27 @@ export default function EditOrderModal({
                   onSetDiscount={(pct) =>
                     updateItem(it.id, { discountPct: pct > 0 ? pct : undefined })
                   }
+                  helperMode={helperMode}
                 />
               ))}
             </div>
           )}
         </div>
 
-        <div className="rounded-xl bg-matcha-50 p-3">
-          <div className="flex items-center justify-between">
-            <span className="t-display text-xs text-matcha-700">Total</span>
-            <span className="text-lg font-semibold tabular-nums">{formatMoney(total)}</span>
-          </div>
-          {totalDiscount > 0 ? (
-            <div className="t-caption mt-1 flex items-center justify-between text-[11px] text-matcha-700">
-              <span>discount applied</span>
-              <span className="tabular-nums">−{formatMoney(totalDiscount)}</span>
+        {helperMode ? null : (
+          <div className="rounded-xl bg-matcha-50 p-3">
+            <div className="flex items-center justify-between">
+              <span className="t-display text-xs text-matcha-700">Total</span>
+              <span className="text-lg font-semibold tabular-nums">{formatMoney(total)}</span>
             </div>
-          ) : null}
-        </div>
+            {totalDiscount > 0 ? (
+              <div className="t-caption mt-1 flex items-center justify-between text-[11px] text-matcha-700">
+                <span>discount applied</span>
+                <span className="tabular-nums">−{formatMoney(totalDiscount)}</span>
+              </div>
+            ) : null}
+          </div>
+        )}
 
         <div className="flex flex-wrap justify-between gap-2 pt-2">
           <Button variant="danger" onClick={deleteOrder}>
@@ -258,6 +263,7 @@ function DraftItemRow({
   onRemove,
   onIncrement,
   onSetDiscount,
+  helperMode,
 }: {
   item: DraftItem;
   snapshot: MenuSnapshot;
@@ -265,6 +271,7 @@ function DraftItemRow({
   onRemove: () => void;
   onIncrement: (d: number) => void;
   onSetDiscount: (pct: number) => void;
+  helperMode: boolean;
 }) {
   // Hook must run before any conditional return.
   const [discountOpen, setDiscountOpen] = useState(false);
@@ -305,7 +312,7 @@ function DraftItemRow({
           {summary.length > 0 ? (
             <div className="mt-0.5 text-xs text-matcha-900/60">{summary.join(" · ")}</div>
           ) : null}
-          {pct > 0 ? (
+          {pct > 0 && !helperMode ? (
             <div className="t-caption mt-0.5 text-[11px] text-matcha-700">
               {pct === 100 ? "FREE" : `${pct}% off`}
             </div>
@@ -320,14 +327,16 @@ function DraftItemRow({
             <Plus className="h-3.5 w-3.5" />
           </Button>
         </div>
-        <Button
-          size="sm"
-          variant={pct > 0 ? "primary" : "ghost"}
-          onClick={() => setDiscountOpen((s) => !s)}
-          title={pct > 0 ? "Edit discount" : "Add discount"}
-        >
-          <span className="t-display text-[11px]">%</span>
-        </Button>
+        {helperMode ? null : (
+          <Button
+            size="sm"
+            variant={pct > 0 ? "primary" : "ghost"}
+            onClick={() => setDiscountOpen((s) => !s)}
+            title={pct > 0 ? "Edit discount" : "Add discount"}
+          >
+            <span className="t-display text-[11px]">%</span>
+          </Button>
+        )}
         <Button size="sm" variant="ghost" onClick={onEdit}>
           <Sliders className="h-3.5 w-3.5" />
         </Button>
@@ -335,7 +344,7 @@ function DraftItemRow({
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
-      {discountOpen ? (
+      {discountOpen && !helperMode ? (
         <DiscountRow
           unitPrice={unitPrice}
           pct={pct}

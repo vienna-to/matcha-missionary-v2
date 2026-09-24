@@ -17,6 +17,7 @@ import {
 import { Button, Card, EmptyState } from "@/components/ui";
 import { DiscountRow } from "@/components/DiscountRow";
 import { useActiveEvent, useStore } from "@/lib/store";
+import { useHelperMode } from "@/lib/helper-mode";
 import { playPing, unlockAudio } from "@/lib/audio";
 import { cn, formatMoney, formatTime, minutesAgo } from "@/lib/utils";
 import type {
@@ -31,6 +32,7 @@ import EditOrderModal from "../EditOrderModal";
 export default function BaristaQueue() {
   const event = useActiveEvent();
   const { state, dispatch } = useStore();
+  const [helperMode] = useHelperMode();
   const snapshot = event
     ? state.menuSnapshots.find((s) => s.id === event.menuSnapshotId)
     : undefined;
@@ -239,12 +241,18 @@ export default function BaristaQueue() {
               pinned={typeof o.queuePriority === "number"}
               onPin={() => pin(o.id, typeof o.queuePriority === "number")}
               onToggleItem={(itemId, status) => toggleItem(o, itemId, status)}
-              onSetItemDiscount={(itemId, pct) => setItemDiscount(o.id, itemId, pct)}
+              // Helpers can toggle item status + mark done, but not touch prices.
+              onSetItemDiscount={
+                helperMode
+                  ? undefined
+                  : (itemId, pct) => setItemDiscount(o.id, itemId, pct)
+              }
               onMarkComplete={() => markComplete(o)}
               onClaim={() => claim(o)}
               onRelease={() => release(o)}
               onEdit={() => setEditingId(o.id)}
               onRemove={() => remove(o.id, o.customerName)}
+              helperMode={helperMode}
             />
           ))}
         </div>
@@ -273,6 +281,7 @@ export default function BaristaQueue() {
                   onReopen={() => reopen(o)}
                   onEdit={() => setEditingId(o.id)}
                   onRemove={() => remove(o.id, o.customerName)}
+                  helperMode={helperMode}
                 />
               ))}
             </div>
@@ -304,6 +313,7 @@ function OrderCard({
   onRelease,
   onEdit,
   onRemove,
+  helperMode,
 }: {
   order: Order;
   snapshot: MenuSnapshot;
@@ -311,12 +321,13 @@ function OrderCard({
   pinned: boolean;
   onPin: () => void;
   onToggleItem: (itemId: string, status: OrderItemStatus) => void;
-  onSetItemDiscount: (itemId: string, pct: number) => void;
+  onSetItemDiscount?: (itemId: string, pct: number) => void;
   onMarkComplete: () => void;
   onClaim: () => void;
   onRelease: () => void;
   onEdit: () => void;
   onRemove: () => void;
+  helperMode: boolean;
 }) {
   // Live timer — tick every 15s.
   const [now, setNow] = useState(() => Date.now());
@@ -412,24 +423,29 @@ function OrderCard({
             snapshot={snapshot}
             interactive
             onToggle={() => onToggleItem(it.id, it.status)}
-            onSetDiscount={(pct) => onSetItemDiscount(it.id, pct)}
+            onSetDiscount={
+              onSetItemDiscount ? (pct) => onSetItemDiscount(it.id, pct) : undefined
+            }
+            hidePrice={helperMode}
           />
         ))}
       </div>
 
-      <div className="mt-3 flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2">
-        <div className="t-display text-[11px] text-matcha-700">Order total</div>
-        <div className="text-right">
-          <div className="text-base font-semibold tabular-nums text-matcha-900">
-            {formatMoney(total)}
-          </div>
-          {totalDiscount > 0 ? (
-            <div className="t-caption text-[11px] text-matcha-700">
-              −{formatMoney(totalDiscount)} discount
+      {helperMode ? null : (
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2">
+          <div className="t-display text-[11px] text-matcha-700">Order total</div>
+          <div className="text-right">
+            <div className="text-base font-semibold tabular-nums text-matcha-900">
+              {formatMoney(total)}
             </div>
-          ) : null}
+            {totalDiscount > 0 ? (
+              <div className="t-caption text-[11px] text-matcha-700">
+                −{formatMoney(totalDiscount)} discount
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
     </Card>
   );
 }
@@ -440,12 +456,14 @@ function CompletedOrderCard({
   onReopen,
   onEdit,
   onRemove,
+  helperMode,
 }: {
   order: Order;
   snapshot: MenuSnapshot;
   onReopen: () => void;
   onEdit: () => void;
   onRemove: () => void;
+  helperMode: boolean;
 }) {
   return (
     <Card className="opacity-80">
@@ -482,14 +500,24 @@ function CompletedOrderCard({
 
       <div className="mt-2 space-y-1">
         {order.items.map((it) => (
-          <OrderItemRow key={it.id} item={it} snapshot={snapshot} compact />
+          <OrderItemRow
+            key={it.id}
+            item={it}
+            snapshot={snapshot}
+            compact
+            hidePrice={helperMode}
+          />
         ))}
       </div>
 
-      <div className="t-caption mt-2 flex items-center justify-between text-xs text-matcha-900/70">
-        <span>Total</span>
-        <span className="tabular-nums">{formatMoney(computeOrderTotals(order).total)}</span>
-      </div>
+      {helperMode ? null : (
+        <div className="t-caption mt-2 flex items-center justify-between text-xs text-matcha-900/70">
+          <span>Total</span>
+          <span className="tabular-nums">
+            {formatMoney(computeOrderTotals(order).total)}
+          </span>
+        </div>
+      )}
     </Card>
   );
 }
@@ -524,6 +552,7 @@ function OrderItemRow({
   compact,
   onToggle,
   onSetDiscount,
+  hidePrice,
 }: {
   item: OrderItem;
   snapshot: MenuSnapshot;
@@ -531,6 +560,8 @@ function OrderItemRow({
   compact?: boolean;
   onToggle?: () => void;
   onSetDiscount?: (pct: number) => void;
+  /** Suppress the FREE / % off text next to the item (helper mode). */
+  hidePrice?: boolean;
 }) {
   // Hook must run before any conditional return.
   const [discountOpen, setDiscountOpen] = useState(false);
@@ -574,7 +605,7 @@ function OrderItemRow({
           <ItemModifiers item={item} snapshot={snapshot} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {pct > 0 ? (
+          {pct > 0 && !hidePrice ? (
             <div className="t-caption text-right text-[11px] text-matcha-700">
               {pct === 100 ? "FREE" : `${pct}% off`}
             </div>

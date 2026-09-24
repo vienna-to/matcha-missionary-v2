@@ -42,6 +42,7 @@ import { computeItemCost } from "@/lib/calc";
 import { deriveOrderItem, nextOrderNumber } from "@/lib/reducer";
 import { newId, nowIso } from "@/lib/id";
 import { DiscountRow } from "@/components/DiscountRow";
+import { useHelperMode } from "@/lib/helper-mode";
 import { cn, formatMoney } from "@/lib/utils";
 
 // Canonical milk options offered in Live Orders. The chips always render with
@@ -112,6 +113,7 @@ export default function LiveOrders() {
   const [editingCid, setEditingCid] = useState<string | null>(null);
   const [cartOpenMobile, setCartOpenMobile] = useState(false);
   const [comboPickerOpen, setComboPickerOpen] = useState(false);
+  const [helperMode] = useHelperMode();
 
   if (!event || !snapshot) {
     return (
@@ -274,6 +276,7 @@ export default function LiveOrders() {
             submittable={submittable}
             onSubmit={submit}
             errors={{ name: !nameOk, payment: !paymentOk }}
+            helperMode={helperMode}
           />
         </div>
       </aside>
@@ -322,6 +325,7 @@ export default function LiveOrders() {
               submittable={submittable}
               onSubmit={() => submit()}
               errors={{ name: !nameOk, payment: !paymentOk }}
+              helperMode={helperMode}
             />
           </div>
         </Sheet>
@@ -491,6 +495,7 @@ function CartPanel({
   submittable,
   onSubmit,
   errors,
+  helperMode,
 }: {
   cart: CartLine[];
   snapshot: MenuSnapshot;
@@ -508,6 +513,7 @@ function CartPanel({
   submittable: boolean;
   onSubmit: () => void;
   errors: { name: boolean; payment: boolean };
+  helperMode: boolean;
 }) {
   return (
     <Card className="space-y-4 p-4">
@@ -531,6 +537,7 @@ function CartPanel({
               onRemove={() => onRemove(line.cid)}
               onIncrement={(delta) => onIncrement(line.cid, delta)}
               onDiscount={(pct) => onDiscount(line.cid, pct)}
+              helperMode={helperMode}
             />
           ))}
         </div>
@@ -607,6 +614,7 @@ function CartLineRow({
   onRemove,
   onIncrement,
   onDiscount,
+  helperMode,
 }: {
   line: CartLine;
   snapshot: MenuSnapshot;
@@ -614,6 +622,7 @@ function CartLineRow({
   onRemove: () => void;
   onIncrement: (delta: number) => void;
   onDiscount: (pct: number | undefined) => void;
+  helperMode: boolean;
 }) {
   // All hooks must run before any conditional early return.
   const [discountOpen, setDiscountOpen] = useState(false);
@@ -686,7 +695,7 @@ function CartLineRow({
           ) : null}
         </div>
       </div>
-      {discountOpen ? (
+      {discountOpen && !helperMode ? (
         <DiscountRow
           unitPrice={lineUnitPrice}
           pct={line.discountPct ?? 0}
@@ -707,14 +716,16 @@ function CartLineRow({
           </Button>
         </div>
         <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setDiscountOpen((s) => !s)}
-            title="Discount"
-          >
-            <span className="t-display text-[11px]">%</span>
-          </Button>
+          {helperMode ? null : (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setDiscountOpen((s) => !s)}
+              title="Discount"
+            >
+              <span className="t-display text-[11px]">%</span>
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={onEdit}>
             <Sliders className="h-3.5 w-3.5" />
           </Button>

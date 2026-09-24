@@ -222,9 +222,6 @@ export default function SettingsTab() {
           <Button variant="outline" size="sm" onClick={copyHelperLink}>
             <Share2 className="h-3.5 w-3.5" /> {helperCopied ? "Copied!" : "Copy helper link"}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setHelperMode(true)}>
-            Preview helper mode on this device
-          </Button>
         </div>
         <p className="t-caption text-[11px] text-matcha-900/50">
           note: this is a UI gate, not a security wall — anyone with the workspace

@@ -78,7 +78,7 @@ export default function AppShell() {
       <aside className="hidden md:flex md:w-64 md:flex-col md:border-r md:border-cream-200 md:bg-white">
         <div className="px-5 py-5">
           <div className="t-brand text-xl">
-            <span className="text-matcha-500">●</span> Matcha Missionary
+            <span className="text-matcha-500">●</span> matcha missionary
             {helperMode ? (
               <span className="t-caption ml-2 rounded-full bg-cream-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-matcha-700">
                 helper
@@ -164,7 +164,7 @@ export default function AppShell() {
         {/* Mobile top bar */}
         <div className="flex items-center justify-between border-b border-cream-200 bg-white px-4 py-3 md:hidden">
           <div className="t-brand text-base">
-            <span className="text-matcha-500">●</span> Matcha Missionary
+            <span className="text-matcha-500">●</span> matcha missionary
             {helperMode ? (
               <span className="t-caption ml-2 rounded-full bg-cream-200 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-matcha-700">
                 helper

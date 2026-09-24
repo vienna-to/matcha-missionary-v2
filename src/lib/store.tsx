@@ -483,7 +483,7 @@ function WorkspacePairing({
       <Card className="w-full max-w-md space-y-5">
         <div>
           <div className="t-brand text-2xl">
-            <span className="text-matcha-500">●</span> Matcha Missionary
+            <span className="text-matcha-500">●</span> matcha missionary
           </div>
           <p className="t-caption mt-1 text-sm text-matcha-900/60">
             create a workspace or join an existing one with a code.

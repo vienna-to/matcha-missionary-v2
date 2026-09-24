@@ -64,10 +64,11 @@ input[type="number"] {
   text-transform: lowercase;
   letter-spacing: 0.01em;
 }
-/* Brand-only: Fraunces, used exclusively for "Matcha Missionary" at top-left. */
+/* Brand-only: Libre Baskerville, used exclusively for "matcha missionary" at top-left.
+   Rendered lowercase per the rebrand. */
 .t-brand {
   font-family: var(--font-brand), Georgia, serif;
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: -0.01em;
-  text-transform: none;
+  text-transform: lowercase;
 }

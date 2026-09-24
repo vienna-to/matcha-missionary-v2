@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Fraunces, Montserrat } from "next/font/google";
+import { Libre_Baskerville, Montserrat } from "next/font/google";
 import "./globals.css";
 
 const montserrat = Montserrat({
@@ -9,10 +9,10 @@ const montserrat = Montserrat({
   display: "swap",
 });
 
-const fraunces = Fraunces({
+const libreBaskerville = Libre_Baskerville({
   subsets: ["latin"],
   variable: "--font-brand",
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "700"],
   display: "swap",
 });
 
@@ -27,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${montserrat.variable} ${fraunces.variable}`}>
+    <html lang="en" className={`${montserrat.variable} ${libreBaskerville.variable}`}>
       <body className="bg-cream-50 text-matcha-900 font-sans">{children}</body>
     </html>
   );

@@ -202,20 +202,20 @@ export default function EditOrderModal({
           )}
         </div>
 
-        {helperMode ? null : (
-          <div className="rounded-xl bg-matcha-50 p-3">
-            <div className="flex items-center justify-between">
-              <span className="t-display text-xs text-matcha-700">Total</span>
-              <span className="text-lg font-semibold tabular-nums">{formatMoney(total)}</span>
-            </div>
-            {totalDiscount > 0 ? (
-              <div className="t-caption mt-1 flex items-center justify-between text-[11px] text-matcha-700">
-                <span>discount applied</span>
-                <span className="tabular-nums">−{formatMoney(totalDiscount)}</span>
-              </div>
-            ) : null}
+        <div className="rounded-xl bg-matcha-50 p-3">
+          <div className="flex items-center justify-between">
+            <span className="t-display text-xs text-matcha-700">Total</span>
+            <span className="text-lg font-semibold tabular-nums">{formatMoney(total)}</span>
           </div>
-        )}
+          {/* Discount origin is hidden for helpers — they see the final total
+              only, no "-$X discount" breakdown. */}
+          {totalDiscount > 0 && !helperMode ? (
+            <div className="t-caption mt-1 flex items-center justify-between text-[11px] text-matcha-700">
+              <span>discount applied</span>
+              <span className="tabular-nums">−{formatMoney(totalDiscount)}</span>
+            </div>
+          ) : null}
+        </div>
 
         <div className="flex flex-wrap justify-between gap-2 pt-2">
           <Button variant="danger" onClick={deleteOrder}>

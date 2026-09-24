@@ -27,6 +27,7 @@ type ItemLine = {
   submittedAt: string;
   customerName: string;
   paymentMethod: string;
+  menuItemId: string;
   menuItemName: string;
   quantity: number;
   unitPrice: number;
@@ -48,6 +49,7 @@ function orderToLines(order: Order): ItemLine[] {
       submittedAt: order.submittedAt,
       customerName: order.customerName,
       paymentMethod: pm,
+      menuItemId: it.menuItemId,
       menuItemName: it.menuItemNameSnap,
       quantity: it.quantity,
       unitPrice: it.priceSnap,
@@ -59,7 +61,7 @@ function orderToLines(order: Order): ItemLine[] {
     // recorded separately with $0 revenue attributed here (revenue lives on
     // the drink row). Kept in the export as a marker so the pastry count
     // matches the physical items served.
-    if (it.isCombo && it.comboPastryNameSnap) {
+    if (it.isCombo && it.comboPastryId) {
       out.push({
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -67,7 +69,8 @@ function orderToLines(order: Order): ItemLine[] {
         submittedAt: order.submittedAt,
         customerName: order.customerName,
         paymentMethod: pm,
-        menuItemName: `${it.comboPastryNameSnap} (combo)`,
+        menuItemId: it.comboPastryId,
+        menuItemName: `${it.comboPastryNameSnap ?? "pastry"} (combo)`,
         quantity: it.quantity,
         unitPrice: 0,
         discountPct: 0,
@@ -87,6 +90,19 @@ function orderToLines(order: Order): ItemLine[] {
  */
 export function buildFullHistoryCsv(state: AppState): string {
   const eventById = new Map(state.events.map((e) => [e.id, e]));
+  // Taxability lives on the current master menu; snapshots don't carry it
+  // because the flag was added later. Look it up by menu_item_id first;
+  // fall back to name-match on the current master menu when an item's snap
+  // id differs from any current row (e.g. long-archived items).
+  const taxableById = new Map(state.menuItems.map((m) => [m.id, m.taxable !== false]));
+  const taxableByName = new Map(
+    state.menuItems.map((m) => [m.name.toLowerCase(), m.taxable !== false]),
+  );
+  function itemTaxable(menuItemId: string, snapName: string): boolean {
+    if (taxableById.has(menuItemId)) return taxableById.get(menuItemId) as boolean;
+    const byName = taxableByName.get(snapName.toLowerCase());
+    return byName ?? true; // default to taxable when unknown
+  }
 
   const rows: unknown[][] = [];
 
@@ -137,6 +153,7 @@ export function buildFullHistoryCsv(state: AppState): string {
     "Submitted at",
     "Payment method",
     "Item",
+    "Taxable",
     "Quantity",
     "Unit price",
     "Discount %",
@@ -149,6 +166,7 @@ export function buildFullHistoryCsv(state: AppState): string {
   for (const o of orders) {
     const evt = eventById.get(o.eventId);
     for (const line of orderToLines(o)) {
+      const tax = itemTaxable(line.menuItemId, line.menuItemName);
       rows.push([
         evt?.name ?? "",
         evt?.date ?? "",
@@ -163,6 +181,7 @@ export function buildFullHistoryCsv(state: AppState): string {
         line.submittedAt,
         line.paymentMethod,
         line.menuItemName,
+        tax ? "yes" : "no",
         line.quantity,
         line.unitPrice.toFixed(2),
         line.discountPct,
@@ -185,6 +204,47 @@ export function buildFullHistoryCsv(state: AppState): string {
       p.amount.toFixed(2),
       p.archived ? "yes" : "no",
       p.notes ?? "",
+    ]);
+  }
+
+  rows.push([]);
+  rows.push(["ORDER EDIT HISTORY (audit trail)"]);
+  rows.push([
+    "Occurred at",
+    "Action",
+    "Event name",
+    "Event date",
+    "Order #",
+    "Customer",
+    "Payment method",
+    "Pre-edit item count",
+    "Pre-edit revenue",
+    "Pre-edit items (name × qty)",
+  ]);
+  const revisions = [...state.orderRevisions].sort((a, b) =>
+    a.occurredAt.localeCompare(b.occurredAt),
+  );
+  for (const rev of revisions) {
+    const snap = rev.snapshot;
+    const evt = rev.eventId ? eventById.get(rev.eventId) : undefined;
+    let preRevenue = 0;
+    const itemBits: string[] = [];
+    for (const it of snap.items) {
+      const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
+      preRevenue += it.priceSnap * factor * it.quantity;
+      itemBits.push(`${it.menuItemNameSnap} ×${it.quantity}`);
+    }
+    rows.push([
+      rev.occurredAt,
+      rev.actionType,
+      evt?.name ?? "",
+      evt?.date ?? "",
+      rev.orderNumber ?? "",
+      snap.customerName,
+      snap.paymentMethod ?? "",
+      snap.items.length,
+      preRevenue.toFixed(2),
+      itemBits.join(", "),
     ]);
   }
 

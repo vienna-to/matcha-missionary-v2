@@ -7,6 +7,8 @@ import type {
   MenuSnapshot,
   Order,
   OrderItem,
+  OrderRevision,
+  OrderRevisionAction,
   Settings,
 } from "@/lib/types";
 
@@ -47,6 +49,7 @@ export type DbMenuItem = {
   allowed_milk_ids: string[];
   allowed_cream_ids: string[];
   sort_order: number | null;
+  taxable: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -91,6 +94,17 @@ export type DbOrder = {
   done_at: string | null;
   updated_at: string;
   queue_priority: number | null;
+};
+
+export type DbOrderRevision = {
+  id: string;
+  workspace_id: string;
+  order_id: string;
+  event_id: string | null;
+  order_number: number | null;
+  action_type: OrderRevisionAction;
+  snapshot: Order;
+  occurred_at: string;
 };
 
 export type DbInventoryPurchase = {
@@ -159,6 +173,7 @@ export function fromMenuItem(r: DbMenuItem): MenuItem {
     allowedMilkIds: r.allowed_milk_ids ?? [],
     allowedCreamIds: r.allowed_cream_ids ?? [],
     sortOrder: r.sort_order ?? undefined,
+    taxable: r.taxable ?? true,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -207,6 +222,32 @@ export function fromOrder(r: DbOrder, items: OrderItem[]): Order {
     doneAt: undef(r.done_at),
     updatedAt: r.updated_at,
     queuePriority: r.queue_priority == null ? undefined : Number(r.queue_priority),
+  };
+}
+
+export function fromOrderRevision(r: DbOrderRevision): OrderRevision {
+  return {
+    id: r.id,
+    orderId: r.order_id,
+    eventId: r.event_id ?? undefined,
+    orderNumber: r.order_number ?? undefined,
+    actionType: r.action_type,
+    snapshot: r.snapshot,
+    occurredAt: r.occurred_at,
+  };
+}
+
+export function toOrderRevisionInsert(
+  workspaceId: string,
+  rev: Omit<OrderRevision, "id" | "occurredAt">,
+): Omit<DbOrderRevision, "id" | "occurred_at"> {
+  return {
+    workspace_id: workspaceId,
+    order_id: rev.orderId,
+    event_id: rev.eventId ?? null,
+    order_number: rev.orderNumber ?? null,
+    action_type: rev.actionType,
+    snapshot: rev.snapshot,
   };
 }
 
@@ -325,6 +366,7 @@ export function toMenuItemInsert(workspaceId: string, m: MenuItem): Omit<DbMenuI
     allowed_milk_ids: m.allowedMilkIds,
     allowed_cream_ids: m.allowedCreamIds,
     sort_order: m.sortOrder ?? null,
+    taxable: m.taxable ?? true,
   };
 }
 
@@ -342,6 +384,7 @@ export function toMenuItemPatch(patch: Partial<MenuItem>): Partial<DbMenuItem> {
   if (patch.allowedMilkIds !== undefined) r.allowed_milk_ids = patch.allowedMilkIds;
   if (patch.allowedCreamIds !== undefined) r.allowed_cream_ids = patch.allowedCreamIds;
   if (patch.sortOrder !== undefined) r.sort_order = patch.sortOrder;
+  if (patch.taxable !== undefined) r.taxable = patch.taxable;
   return r;
 }
 
@@ -485,6 +528,7 @@ export function buildAppState(
   orders: DbOrder[],
   orderItems: DbOrderItem[],
   inventoryPurchases: DbInventoryPurchase[],
+  orderRevisions: DbOrderRevision[] = [],
 ): AppState {
   const tsIngredients = ingredients.map(fromIngredient);
   const tsMenuItems = menuItems.map(fromMenuItem);
@@ -509,5 +553,6 @@ export function buildAppState(
     events: tsEvents,
     orders: tsOrders,
     inventoryPurchases: inventoryPurchases.map(fromInventoryPurchase),
+    orderRevisions: orderRevisions.map(fromOrderRevision),
   };
 }

@@ -12,7 +12,16 @@ import {
 } from "react";
 import { initialSeed } from "./seed";
 import { reducer, renumberAfterDelete, type Action } from "./reducer";
-import type { AppState, Event, MenuSnapshot, Order, OrderItem } from "./types";
+import { newId, nowIso } from "./id";
+import type {
+  AppState,
+  Event,
+  MenuSnapshot,
+  Order,
+  OrderItem,
+  OrderRevision,
+  OrderRevisionAction,
+} from "./types";
 import {
   getClient,
   isSupabaseConfigured,
@@ -42,6 +51,51 @@ import { writer, type Writer } from "./supabase/writer";
 const STORAGE_KEY = "matcha-missionary:state:v1";
 const CHANNEL_NAME = "matcha-missionary";
 
+/** Which UPDATE_ORDER patch keys we don't consider a "real" edit — these
+ *  are barista workflow only (mark done, claim, pin) and shouldn't spam
+ *  the audit trail. */
+const ORDER_WORKFLOW_KEYS = new Set(["status", "doneAt", "queuePriority", "items"]);
+
+/** Inspect a dispatched action and, if it mutates an order in a
+ *  tax-relevant way, produce the snapshot to append to the audit trail.
+ *  Returns null when the action is not audit-worthy or references an
+ *  order we don't know about locally. */
+function deriveOrderRevision(a: Action, state: AppState): OrderRevision | null {
+  let orderId: string | null = null;
+  let actionType: OrderRevisionAction | null = null;
+
+  if (a.type === "UPDATE_ORDER") {
+    const nonWorkflow = Object.keys(a.patch).filter((k) => !ORDER_WORKFLOW_KEYS.has(k));
+    if (nonWorkflow.length === 0) return null;
+    orderId = a.id;
+    actionType = "update";
+  } else if (a.type === "REPLACE_ORDER_ITEMS") {
+    orderId = a.orderId;
+    actionType = "replace_items";
+  } else if (a.type === "UPDATE_ORDER_ITEM") {
+    orderId = a.orderId;
+    actionType = "update_item";
+  } else if (a.type === "DELETE_ORDER") {
+    orderId = a.id;
+    actionType = "delete";
+  }
+  if (!orderId || !actionType) return null;
+
+  const pre = state.orders.find((o) => o.id === orderId);
+  if (!pre) return null;
+  return {
+    id: newId("rev"),
+    orderId: pre.id,
+    eventId: pre.eventId,
+    orderNumber: pre.orderNumber,
+    actionType,
+    // Deep-ish clone so a later reducer mutation to the original order
+    // doesn't rewrite the pre-image we've kept here.
+    snapshot: { ...pre, items: pre.items.map((it) => ({ ...it })) },
+    occurredAt: nowIso(),
+  };
+}
+
 function loadLocalState(): AppState {
   if (typeof window === "undefined") return initialSeed();
   try {
@@ -51,6 +105,7 @@ function loadLocalState(): AppState {
     if (!parsed.settings || !parsed.menuItems) return initialSeed();
     // Backfill fields added in later releases so older payloads still work.
     if (!Array.isArray(parsed.inventoryPurchases)) parsed.inventoryPurchases = [];
+    if (!Array.isArray(parsed.orderRevisions)) parsed.orderRevisions = [];
     return parsed;
   } catch {
     return initialSeed();
@@ -275,9 +330,20 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
 
   const dispatch = useCallback(
     (a: Action) => {
+      // Snapshot BEFORE the mutation lands — the reducer will overwrite the
+      // order in-place, so we have to capture the pre-change state now.
+      // Only tax-relevant edits are recorded. Barista workflow (status /
+      // doneAt / queuePriority / in-progress claim) is noise, so skip it.
+      const revision = w ? deriveOrderRevision(a, stateRef.current) : null;
+
       // Apply locally first (optimistic).
       baseDispatch(a);
       if (!w) return;
+
+      if (revision) {
+        baseDispatch({ type: "APPEND_ORDER_REVISION", revision });
+        w.writeOrderRevision(revision);
+      }
 
       // Mirror to Supabase based on action type.
       switch (a.type) {

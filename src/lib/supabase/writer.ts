@@ -7,6 +7,7 @@ import type {
   MenuSnapshot,
   Order,
   OrderItem,
+  OrderRevision,
   Settings,
 } from "@/lib/types";
 import {
@@ -22,6 +23,7 @@ import {
   toOrderItemInsert,
   toOrderItemPatch,
   toOrderPatch,
+  toOrderRevisionInsert,
 } from "./serialize";
 
 /**
@@ -258,6 +260,17 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .eq("id", id)
       .eq("workspace_id", workspaceId);
     tag("deleteInventoryPurchase")(error);
+  },
+
+  // ---------- order revisions (audit trail, append-only) ----------
+  async writeOrderRevision(rev: Omit<OrderRevision, "occurredAt">) {
+    // Persist the DB-generated id-and-timestamp so the local record matches
+    // what future loads will see. Snapshot writes are best-effort: if the
+    // table doesn't exist yet (migration not run), we warn and continue so
+    // the user's edit still lands locally.
+    const row = { id: rev.id, ...toOrderRevisionInsert(workspaceId, rev) };
+    const { error } = await supabase.from("order_revisions").insert(row);
+    tag("writeOrderRevision")(error);
   },
 });
 

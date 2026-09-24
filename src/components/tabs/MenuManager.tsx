@@ -244,6 +244,7 @@ function ItemsList() {
                 defaultCreamId: patch.defaultCreamId,
                 allowedMilkIds: patch.allowedMilkIds ?? [],
                 allowedCreamIds: patch.allowedCreamIds ?? [],
+                taxable: patch.taxable ?? true,
               },
             });
             setCreating(false);
@@ -395,6 +396,7 @@ function blankItem(): MenuItem {
     defaultCreamId: undefined,
     allowedMilkIds: [],
     allowedCreamIds: [],
+    taxable: true,
     createdAt: "",
     updatedAt: "",
   };
@@ -479,6 +481,17 @@ function ItemEditor({
               value={draft.description ?? ""}
               onChange={(e) => patch("description", e.target.value)}
             />
+          </Field>
+          <Field label="Tax" hint="Uncheck for tax-exempt items." className="col-span-2">
+            <label className="flex h-10 items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={draft.taxable ?? true}
+                onChange={(e) => patch("taxable", e.target.checked)}
+                className="h-4 w-4 accent-matcha-500"
+              />
+              Sales of this item are taxable
+            </label>
           </Field>
         </div>
 

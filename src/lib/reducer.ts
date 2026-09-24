@@ -12,6 +12,7 @@ import {
   type Order,
   type OrderItem,
   type OrderItemStatus,
+  type OrderRevision,
   type OrderStatus,
   type Settings,
 } from "./types";
@@ -77,6 +78,9 @@ export type Action =
   | { type: "DELETE_INVENTORY_PURCHASE"; id: string }
   | { type: "RT_UPSERT_INVENTORY_PURCHASE"; purchase: InventoryPurchase }
   | { type: "RT_DELETE_INVENTORY_PURCHASE"; id: string }
+  /** Local-only insert of an audit snapshot. The Supabase writer mirrors to
+   *  the order_revisions table; the reducer just appends. Never edited. */
+  | { type: "APPEND_ORDER_REVISION"; revision: OrderRevision }
   | { type: "RESET_TO_SEED"; seed: AppState }
   // -- Realtime echoes from Supabase (idempotent upsert/delete) --
   | { type: "RT_UPSERT_INGREDIENT"; ing: Ingredient }
@@ -477,6 +481,16 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         inventoryPurchases: state.inventoryPurchases.filter((p) => p.id !== action.id),
       };
+
+    case "APPEND_ORDER_REVISION": {
+      // Dedupe by id — the reducer is the local optimistic write; a later
+      // realtime echo (if we ever add one) would use the same id.
+      if (state.orderRevisions.some((r) => r.id === action.revision.id)) return state;
+      return {
+        ...state,
+        orderRevisions: [...state.orderRevisions, action.revision],
+      };
+    }
 
     case "RESET_TO_SEED":
       return action.seed;

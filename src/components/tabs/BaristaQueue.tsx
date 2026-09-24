@@ -431,21 +431,21 @@ function OrderCard({
         ))}
       </div>
 
-      {helperMode ? null : (
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2">
-          <div className="t-display text-[11px] text-matcha-700">Order total</div>
-          <div className="text-right">
-            <div className="text-base font-semibold tabular-nums text-matcha-900">
-              {formatMoney(total)}
-            </div>
-            {totalDiscount > 0 ? (
-              <div className="t-caption text-[11px] text-matcha-700">
-                −{formatMoney(totalDiscount)} discount
-              </div>
-            ) : null}
+      <div className="mt-3 flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2">
+        <div className="t-display text-[11px] text-matcha-700">Order total</div>
+        <div className="text-right">
+          <div className="text-base font-semibold tabular-nums text-matcha-900">
+            {formatMoney(total)}
           </div>
+          {/* Discount origin is hidden for helpers — they see the final total
+              only, no "−$X discount" breakdown. */}
+          {totalDiscount > 0 && !helperMode ? (
+            <div className="t-caption text-[11px] text-matcha-700">
+              −{formatMoney(totalDiscount)} discount
+            </div>
+          ) : null}
         </div>
-      )}
+      </div>
     </Card>
   );
 }
@@ -510,14 +510,12 @@ function CompletedOrderCard({
         ))}
       </div>
 
-      {helperMode ? null : (
-        <div className="t-caption mt-2 flex items-center justify-between text-xs text-matcha-900/70">
-          <span>Total</span>
-          <span className="tabular-nums">
-            {formatMoney(computeOrderTotals(order).total)}
-          </span>
-        </div>
-      )}
+      <div className="t-caption mt-2 flex items-center justify-between text-xs text-matcha-900/70">
+        <span>Total</span>
+        <span className="tabular-nums">
+          {formatMoney(computeOrderTotals(order).total)}
+        </span>
+      </div>
     </Card>
   );
 }

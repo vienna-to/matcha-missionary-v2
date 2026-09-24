@@ -14,6 +14,7 @@ import {
   type DbMenuItem,
   type DbOrder,
   type DbOrderItem,
+  type DbOrderRevision,
   type DbWorkspace,
 } from "./serialize";
 
@@ -31,6 +32,7 @@ export async function loadFullState(
     { data: orders, error: ordErr },
     { data: orderItems, error: oiErr },
     { data: invs, error: invErr },
+    revsResult,
   ] = await Promise.all([
     supabase.from("workspaces").select("*").eq("id", workspaceId).single(),
     supabase.from("ingredients").select("*").eq("workspace_id", workspaceId),
@@ -39,11 +41,23 @@ export async function loadFullState(
     supabase.from("orders").select("*").eq("workspace_id", workspaceId),
     supabase.from("order_items").select("*").eq("workspace_id", workspaceId),
     supabase.from("inventory_purchases").select("*").eq("workspace_id", workspaceId),
+    // order_revisions is a new table — tolerate its absence (pre-migration
+    // Supabase deploys) so the app still loads. Only real problems throw.
+    supabase.from("order_revisions").select("*").eq("workspace_id", workspaceId),
   ]);
 
   const err = wsErr || ingErr || miErr || evErr || ordErr || oiErr || invErr;
   if (err) throw err;
   if (!ws) throw new Error("workspace not found");
+
+  // Tolerate a missing order_revisions table (fresh deploy hasn't run the
+  // migration yet) — we log and continue with an empty audit trail.
+  let revs: DbOrderRevision[] = [];
+  if (revsResult.error) {
+    console.warn("[supabase] order_revisions load failed", revsResult.error);
+  } else {
+    revs = (revsResult.data ?? []) as DbOrderRevision[];
+  }
 
   return buildAppState(
     ws as DbWorkspace,
@@ -53,6 +67,7 @@ export async function loadFullState(
     (orders ?? []) as DbOrder[],
     (orderItems ?? []) as DbOrderItem[],
     (invs ?? []) as DbInventoryPurchase[],
+    revs,
   );
 }
 

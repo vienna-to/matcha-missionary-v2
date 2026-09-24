@@ -97,6 +97,10 @@ export type MenuItem = {
   /** Ascending sort key — controls display order in menu/order/finance views.
    *  Missing values are treated as Infinity (sort last). */
   sortOrder?: number;
+  /** Whether sales of this item are taxable. Surfaced per-line in the
+   *  full-history CSV so an accountant can compute owed tax externally.
+   *  Undefined on legacy rows → treated as taxable (safer default). */
+  taxable?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -312,6 +316,26 @@ export type InventoryPurchase = {
   updatedAt: string;
 };
 
+/**
+ * Append-only audit entry — captured BEFORE an order is mutated so we
+ * always have a record of what it looked like pre-edit. Never modified
+ * after write. Loaded once at startup for the CSV export; not realtime
+ * (the log is read-mostly for after-the-fact tax review).
+ */
+export type OrderRevisionAction = "update" | "replace_items" | "update_item" | "delete";
+
+export type OrderRevision = {
+  id: string;
+  orderId: string;
+  eventId?: string;
+  orderNumber?: number;
+  actionType: OrderRevisionAction;
+  /** Full pre-change order shape including items. Stored as the raw
+   *  Order object so the export can render any field the app knew about. */
+  snapshot: Order;
+  occurredAt: string;
+};
+
 export type AppState = {
   settings: Settings;
   ingredients: Ingredient[]; // master
@@ -320,4 +344,5 @@ export type AppState = {
   events: Event[];
   orders: Order[];
   inventoryPurchases: InventoryPurchase[];
+  orderRevisions: OrderRevision[];
 };

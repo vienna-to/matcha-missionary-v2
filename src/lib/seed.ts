@@ -354,6 +354,7 @@ export function initialSeed(): AppState {
       events: [event],
       orders,
       inventoryPurchases: [],
+      orderRevisions: [],
     } satisfies AppState),
   );
 }

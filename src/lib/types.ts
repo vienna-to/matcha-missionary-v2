@@ -173,6 +173,15 @@ export type Event = {
   clientName?: string;
   /** Contract-only: fixed fee paid regardless of drinks served. */
   contractPayout?: number;
+  /** City the event took place in. Used only for the quarterly tax report
+   *  (grouped by city). Free-form text — the report treats blanks as
+   *  "Unspecified". Optional on legacy rows. */
+  city?: string;
+  /** Whether attendees paid an admission fee to enter the event. Surfaced
+   *  on the quarterly tax report so admission-charged vs. free-entry
+   *  revenue can be totalled separately. Optional on legacy rows → treated
+   *  as unknown (rolled up under "not specified" in reports). */
+  admissionCharged?: boolean;
   notes?: string;
   createdAt: string;
   updatedAt: string;

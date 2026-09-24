@@ -35,6 +35,8 @@ export function buildQuickAddEvent({
   eventType,
   clientName,
   contractPayout,
+  city,
+  admissionCharged,
 }: {
   state: AppState;
   name: string;
@@ -51,6 +53,8 @@ export function buildQuickAddEvent({
   eventType?: EventType;
   clientName?: string;
   contractPayout?: number;
+  city?: string;
+  admissionCharged?: boolean;
 }): { event: Event; snapshot: MenuSnapshot; orders: Order[] } {
   const now = new Date().toISOString();
 
@@ -88,6 +92,8 @@ export function buildQuickAddEvent({
     cupSizeOz,
     clientName,
     contractPayout,
+    city: city && city.trim().length > 0 ? city.trim() : undefined,
+    admissionCharged,
     notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
     createdAt: now,
     updatedAt: now,

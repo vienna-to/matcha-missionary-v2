@@ -7,6 +7,7 @@ import {
   Input,
   Modal,
   NumberField,
+  Select,
   Textarea,
 } from "@/components/ui";
 import { useStore } from "@/lib/store";
@@ -58,6 +59,8 @@ export default function QuickAddPastEventDialog({
   const [endTime, setEndTime] = useState("16:00");
   const [donationPct, setDonationPct] = useState(0);
   const [notes, setNotes] = useState("");
+  const [city, setCity] = useState("");
+  const [admissionCharged, setAdmissionCharged] = useState<"" | "yes" | "no">("");
   const [qty, setQty] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +81,8 @@ export default function QuickAddPastEventDialog({
     setEndTime("16:00");
     setDonationPct(0);
     setNotes("");
+    setCity("");
+    setAdmissionCharged("");
     setQty({});
   }
 
@@ -95,6 +100,13 @@ export default function QuickAddPastEventDialog({
         notes,
         donationPct: donationPct > 0 ? donationPct : undefined,
         itemQuantities: qty,
+        city: city.trim() || undefined,
+        admissionCharged:
+          admissionCharged === "yes"
+            ? true
+            : admissionCharged === "no"
+              ? false
+              : undefined,
       });
 
       if (backend === "supabase" && workspaceId) {
@@ -177,6 +189,25 @@ export default function QuickAddPastEventDialog({
               commit="change"
               onChange={setDonationPct}
             />
+          </Field>
+          <Field label="city" hint="used only for tax reports">
+            <Input
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="e.g. Irvine"
+            />
+          </Field>
+          <Field label="admission charged?" hint="yes = attendees paid to enter">
+            <Select
+              value={admissionCharged}
+              onChange={(e) =>
+                setAdmissionCharged(e.target.value as "" | "yes" | "no")
+              }
+            >
+              <option value="">— select —</option>
+              <option value="no">No (free entry)</option>
+              <option value="yes">Yes</option>
+            </Select>
           </Field>
         </div>
 

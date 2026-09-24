@@ -27,11 +27,14 @@ import {
 import { useActiveEvent, useStore } from "@/lib/store";
 import {
   COMBO_PRICE,
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
   compareMenuItems,
   type Ingredient,
   type MenuItem,
   type MenuSnapshot,
   type Order,
+  type PaymentMethod,
   type SugarAdjustment,
   type IceAdjustment,
 } from "@/lib/types";
@@ -103,6 +106,9 @@ export default function LiveOrders() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
   const [notes, setNotes] = useState("");
+  // Payment method is required at submit time — for tax records we need to
+  // know cash/venmo/zelle totals per event, so no silent default.
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
   const [editingCid, setEditingCid] = useState<string | null>(null);
   const [cartOpenMobile, setCartOpenMobile] = useState(false);
   const [comboPickerOpen, setComboPickerOpen] = useState(false);
@@ -165,11 +171,13 @@ export default function LiveOrders() {
     setCart([]);
     setCustomerName("");
     setNotes("");
+    setPaymentMethod("");
     setCartOpenMobile(false);
   }
 
   const nameOk = customerName.trim().length > 0;
-  const submittable = cart.length > 0 && nameOk;
+  const paymentOk = paymentMethod !== "";
+  const submittable = cart.length > 0 && nameOk && paymentOk;
 
   function submit() {
     if (!submittable) return;
@@ -211,6 +219,9 @@ export default function LiveOrders() {
       // order complete. Legacy paymentStatus kept so DB column has a value.
       status: "pending",
       paymentStatus: "paid",
+      // Captured for tax reports. The narrowed type here is safe because
+      // `paymentOk` gates `submittable`.
+      paymentMethod: (paymentMethod || "cash") as PaymentMethod,
     };
     dispatch({ type: "SUBMIT_ORDER", order });
     reset();
@@ -257,10 +268,12 @@ export default function LiveOrders() {
             setCustomerName={setCustomerName}
             notes={notes}
             setNotes={setNotes}
+            paymentMethod={paymentMethod}
+            setPaymentMethod={setPaymentMethod}
             total={total}
             submittable={submittable}
             onSubmit={submit}
-            errors={{ name: !nameOk }}
+            errors={{ name: !nameOk, payment: !paymentOk }}
           />
         </div>
       </aside>
@@ -303,10 +316,12 @@ export default function LiveOrders() {
               setCustomerName={setCustomerName}
               notes={notes}
               setNotes={setNotes}
+              paymentMethod={paymentMethod}
+              setPaymentMethod={setPaymentMethod}
               total={total}
               submittable={submittable}
               onSubmit={() => submit()}
-              errors={{ name: !nameOk }}
+              errors={{ name: !nameOk, payment: !paymentOk }}
             />
           </div>
         </Sheet>
@@ -470,6 +485,8 @@ function CartPanel({
   setCustomerName,
   notes,
   setNotes,
+  paymentMethod,
+  setPaymentMethod,
   total,
   submittable,
   onSubmit,
@@ -485,10 +502,12 @@ function CartPanel({
   setCustomerName: (s: string) => void;
   notes: string;
   setNotes: (s: string) => void;
+  paymentMethod: PaymentMethod | "";
+  setPaymentMethod: (p: PaymentMethod | "") => void;
   total: number;
   submittable: boolean;
   onSubmit: () => void;
-  errors: { name: boolean };
+  errors: { name: boolean; payment: boolean };
 }) {
   return (
     <Card className="space-y-4 p-4">
@@ -533,6 +552,29 @@ function CartPanel({
             onChange={(e) => setNotes(e.target.value)}
           />
         </Field>
+        <Field label="payment method">
+          <div className="flex flex-wrap gap-1.5">
+            {PAYMENT_METHODS.map((m) => {
+              const active = paymentMethod === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setPaymentMethod(m)}
+                  className={cn(
+                    "t-display rounded-full border px-3 py-1.5 text-xs transition-colors",
+                    active
+                      ? "border-matcha-500 bg-matcha-500 text-white"
+                      : "border-cream-300 bg-white text-matcha-900 hover:border-matcha-400",
+                    errors.payment && !active && "border-amber-300",
+                  )}
+                >
+                  {PAYMENT_METHOD_LABELS[m]}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
       </div>
 
       <div className="rounded-xl bg-matcha-50 p-3">
@@ -547,9 +589,10 @@ function CartPanel({
             Submit
           </Button>
         </div>
-        {!submittable && cart.length > 0 && errors.name ? (
+        {!submittable && cart.length > 0 ? (
           <div className="t-caption mt-2 text-[11px] text-amber-700">
-            name required.
+            {errors.name ? "name required. " : ""}
+            {errors.payment ? "pick a payment method." : ""}
           </div>
         ) : null}
       </div>

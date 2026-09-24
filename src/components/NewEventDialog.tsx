@@ -31,6 +31,10 @@ export default function NewEventDialog({
   const [cupSizeOz, setCupSizeOz] = useState<number>(DEFAULT_CUP_OZ);
   const [clientName, setClientName] = useState("");
   const [contractPayout, setContractPayout] = useState<number>(0);
+  const [city, setCity] = useState("");
+  // Tri-state: "" = unspecified, "yes" | "no" — kept as string so the select
+  // can distinguish "not answered yet" from a real answer without needing null.
+  const [admissionCharged, setAdmissionCharged] = useState<"" | "yes" | "no">("");
 
   const isContract = eventType === "contract";
   const placeholder = `Pop-Up ${date}`;
@@ -52,6 +56,8 @@ export default function NewEventDialog({
     setCupSizeOz(DEFAULT_CUP_OZ);
     setClientName("");
     setContractPayout(0);
+    setCity("");
+    setAdmissionCharged("");
   }
 
   function save() {
@@ -75,6 +81,13 @@ export default function NewEventDialog({
         cupSizeOz,
         clientName: isContract ? clientName.trim() : undefined,
         contractPayout: isContract ? contractPayout : undefined,
+        city: city.trim() || undefined,
+        admissionCharged:
+          admissionCharged === "yes"
+            ? true
+            : admissionCharged === "no"
+              ? false
+              : undefined,
       },
     });
     reset();
@@ -118,6 +131,25 @@ export default function NewEventDialog({
           </Field>
           <Field label="End time">
             <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+          </Field>
+          <Field label="City" hint="Used only for tax reports.">
+            <Input
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="e.g. Irvine"
+            />
+          </Field>
+          <Field label="Admission charged?" hint="Yes = attendees paid to enter.">
+            <Select
+              value={admissionCharged}
+              onChange={(e) =>
+                setAdmissionCharged(e.target.value as "" | "yes" | "no")
+              }
+            >
+              <option value="">— select —</option>
+              <option value="no">No (free entry)</option>
+              <option value="yes">Yes</option>
+            </Select>
           </Field>
           {isContract ? (
             <>

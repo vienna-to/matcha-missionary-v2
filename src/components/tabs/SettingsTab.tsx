@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { LogOut, Plus, RefreshCw, Share2, Trash2 } from "lucide-react";
+import { Download, FileText, LogOut, Plus, RefreshCw, Share2, Trash2 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { initialSeed } from "@/lib/seed";
-import { Button, Card, Field, Input, NumberField } from "@/components/ui";
+import { Button, Card, Field, Input, NumberField, Select } from "@/components/ui";
 import { formatWorkspaceCode } from "@/lib/id";
 import NewEventDialog from "@/components/NewEventDialog";
 import QuickAddPastEventDialog from "@/components/QuickAddPastEventDialog";
@@ -14,6 +14,13 @@ import {
   loadSampleDataIntoSupabase,
 } from "@/lib/supabase/seed-supabase";
 import { buildHelperShareUrl, useHelperMode } from "@/lib/helper-mode";
+import {
+  buildFullHistoryCsv,
+  buildQuarterlyReportCsv,
+  downloadCsv,
+  quarterLabel,
+  type QuarterKey,
+} from "@/lib/tax-export";
 
 const SAMPLE_EVENT_ID = "evt_uci_spring";
 const SAMPLE_EVENT_NAME = "UCI Spring Pop-Up";
@@ -28,6 +35,25 @@ export default function SettingsTab() {
   const [seedError, setSeedError] = useState<string | null>(null);
   const [, startClearTransition] = useTransition();
   const [helperMode, setHelperMode] = useHelperMode();
+  const currentYear = new Date().getFullYear();
+  const [reportYear, setReportYear] = useState<number>(currentYear);
+  const [reportQuarter, setReportQuarter] = useState<QuarterKey>(
+    (Math.floor(new Date().getMonth() / 3) + 1) as QuarterKey,
+  );
+
+  function downloadFullHistory() {
+    const csv = buildFullHistoryCsv(state);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCsv(csv, `matcha-missionary_full-history_${stamp}.csv`);
+  }
+
+  function downloadQuarterlyReport() {
+    const csv = buildQuarterlyReportCsv(state, reportYear, reportQuarter);
+    downloadCsv(
+      csv,
+      `matcha-missionary_tax-report_${reportYear}-Q${reportQuarter}.csv`,
+    );
+  }
 
   const isSupabase = backend === "supabase";
   const sampleEventPresent = isSupabase
@@ -227,6 +253,81 @@ export default function SettingsTab() {
           note: this is a UI gate, not a security wall — anyone with the workspace
           code (or the helper link) can still see the underlying data if they know
           how to work around the UI. only share it with people you trust.
+        </p>
+      </Card>
+
+      <Card className="space-y-4">
+        <div>
+          <h2 className="t-display text-sm">Tax records</h2>
+          <p className="text-xs text-matcha-900/60">
+            occasional-use exports for taxes and record-keeping. deliberately
+            kept in settings so they don&apos;t clutter the daily UI.
+          </p>
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-cream-200 bg-cream-50 p-3">
+          <div className="t-display text-xs text-matcha-900">
+            Full-history backup
+          </div>
+          <p className="text-[11px] text-matcha-900/60">
+            every event, itemized sale, and expense — one CSV so 4 years of
+            records don&apos;t depend on Supabase staying alive. Save this
+            somewhere durable (Drive, iCloud, etc.) after each event or at
+            least quarterly.
+          </p>
+          <Button variant="outline" size="sm" onClick={downloadFullHistory}>
+            <Download className="h-3.5 w-3.5" /> Download full history CSV
+          </Button>
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-cream-200 bg-cream-50 p-3">
+          <div className="t-display text-xs text-matcha-900">
+            Quarterly report by city
+          </div>
+          <p className="text-[11px] text-matcha-900/60">
+            events + revenue for one quarter, grouped by city and by
+            admission-charged vs. free-entry. Revenue is also split by
+            payment method so cash / Venmo / Zelle deposits reconcile.
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[100px_140px_auto]">
+            <Field label="year">
+              <NumberField
+                min={2020}
+                max={currentYear + 1}
+                step={1}
+                value={reportYear}
+                commit="change"
+                onChange={setReportYear}
+                className="h-9"
+              />
+            </Field>
+            <Field label="quarter">
+              <Select
+                value={String(reportQuarter)}
+                onChange={(e) =>
+                  setReportQuarter(Number(e.target.value) as QuarterKey)
+                }
+                className="h-9"
+              >
+                <option value="1">Q1 (Jan–Mar)</option>
+                <option value="2">Q2 (Apr–Jun)</option>
+                <option value="3">Q3 (Jul–Sep)</option>
+                <option value="4">Q4 (Oct–Dec)</option>
+              </Select>
+            </Field>
+            <div className="flex items-end">
+              <Button variant="outline" size="sm" onClick={downloadQuarterlyReport}>
+                <FileText className="h-3.5 w-3.5" /> Download{" "}
+                {quarterLabel(reportYear, reportQuarter)}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <p className="t-caption text-[11px] text-matcha-900/50">
+          tip: fill in each event&apos;s city + admission-charged flag when
+          you create it — this report groups by those two fields, and blanks
+          roll up under &quot;Unspecified&quot;.
         </p>
       </Card>
 

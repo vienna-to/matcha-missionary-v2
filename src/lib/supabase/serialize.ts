@@ -66,6 +66,8 @@ export type DbEvent = {
   cup_size_oz: number | null;
   client_name: string | null;
   contract_payout: number | null;
+  city: string | null;
+  admission_charged: boolean | null;
   menu_snapshot: MenuSnapshot;
   fixed_costs: Event["fixedCosts"];
   notes: string | null;
@@ -180,6 +182,8 @@ export function fromEvent(r: DbEvent): Event {
     clientName: r.client_name ?? undefined,
     contractPayout:
       r.contract_payout == null ? undefined : Number(r.contract_payout),
+    city: r.city ?? undefined,
+    admissionCharged: r.admission_charged ?? undefined,
     notes: r.notes ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -361,6 +365,8 @@ export function toEventInsert(
     cup_size_oz: nul(evt.cupSizeOz),
     client_name: nul(evt.clientName),
     contract_payout: nul(evt.contractPayout),
+    city: nul(evt.city),
+    admission_charged: nul(evt.admissionCharged),
     menu_snapshot: snapshot,
     fixed_costs: evt.fixedCosts,
     notes: nul(evt.notes),
@@ -381,6 +387,8 @@ export function toEventPatch(patch: Partial<Event>): Partial<DbEvent> {
   if (patch.cupSizeOz !== undefined) r.cup_size_oz = nul(patch.cupSizeOz);
   if (patch.clientName !== undefined) r.client_name = nul(patch.clientName);
   if (patch.contractPayout !== undefined) r.contract_payout = nul(patch.contractPayout);
+  if (patch.city !== undefined) r.city = nul(patch.city);
+  if (patch.admissionCharged !== undefined) r.admission_charged = nul(patch.admissionCharged);
   if (patch.notes !== undefined) r.notes = nul(patch.notes);
   return r;
 }

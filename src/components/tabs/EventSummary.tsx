@@ -790,7 +790,11 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
       ? [...byItem].filter((i) => i.profit > 0).sort((a, b) => b.profit - a.profit)[0] ?? null
       : null;
 
-  const inventorySpending = state.inventoryPurchases.reduce((s, p) => s + p.amount, 0);
+  // Archived purchases (pre-break-even historical spend) are excluded so the
+  // net-profit view reflects fresh accounting going forward.
+  const inventorySpending = state.inventoryPurchases
+    .filter((p) => !p.archived)
+    .reduce((s, p) => s + p.amount, 0);
   const netProfit = totalRevenue - totalCost - totalDonations - inventorySpending;
 
   return {

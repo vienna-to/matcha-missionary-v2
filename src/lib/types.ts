@@ -295,6 +295,10 @@ export type InventoryPurchase = {
   amount: number;
   date: string; // YYYY-MM-DD
   notes?: string;
+  /** Archived purchases stay visible in Finance for reference but no longer
+   *  count toward the All-Events "Inventory spending" / net-profit aggregate.
+   *  Used to freeze the pre-break-even ledger so we can start tracking fresh. */
+  archived?: boolean;
   createdAt: string;
   updatedAt: string;
 };

@@ -35,6 +35,40 @@ function tag(label: string) {
   };
 }
 
+/**
+ * Retry a Supabase write a few times on transient failure. Only retries when
+ * `.insert()` / `.update()` returned a truthy error — successful writes are
+ * one-shot. Used for high-stakes writes (like order submission) where a
+ * silent drop means a customer walks away without their drink.
+ *
+ * The Postgres client itself does not throw on network hiccups, so this only
+ * catches errors that Supabase surfaces via the `{ error }` return.
+ */
+async function retryWithBackoff<T extends { error: unknown }>(
+  label: string,
+  op: () => PromiseLike<T>,
+  attempts = 3,
+): Promise<T> {
+  let last: T | undefined;
+  let delayMs = 300;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const result = await op();
+      if (!result.error) return result;
+      last = result;
+      console.warn(`[supabase ${label}] attempt ${i + 1}/${attempts} failed`, result.error);
+    } catch (e) {
+      console.warn(`[supabase ${label}] attempt ${i + 1}/${attempts} threw`, e);
+      last = { error: e } as T;
+    }
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+      delayMs *= 2;
+    }
+  }
+  return last!;
+}
+
 export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
   async updateSettings(patch: Partial<Settings>) {
     const r: Record<string, unknown> = {};
@@ -133,13 +167,23 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
 
   // ---------- orders ----------
   async submitOrder(o: Order) {
-    const { error: e1 } = await supabase.from("orders").insert(toOrderInsert(workspaceId, o));
-    tag("submitOrder:order")(e1);
+    // Order submission is the most costly write to lose — a dropped one means
+    // a customer's drink never reaches the barista queue. Retry with backoff
+    // so a single network blip doesn't silently swallow it.
+    const r1 = await retryWithBackoff("submitOrder:order", () =>
+      supabase.from("orders").insert(toOrderInsert(workspaceId, o)),
+    );
+    tag("submitOrder:order")(r1.error);
+    // Don't insert items if the parent order never made it in — the FK would
+    // reject them anyway and we'd log noise.
+    if (r1.error) return;
     if (o.items.length > 0) {
-      const { error: e2 } = await supabase
-        .from("order_items")
-        .insert(o.items.map((it) => toOrderItemInsert(workspaceId, it)));
-      tag("submitOrder:items")(e2);
+      const r2 = await retryWithBackoff("submitOrder:items", () =>
+        supabase
+          .from("order_items")
+          .insert(o.items.map((it) => toOrderItemInsert(workspaceId, it))),
+      );
+      tag("submitOrder:items")(r2.error);
     }
   },
   async updateOrder(id: string, patch: Partial<Order>) {

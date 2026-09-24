@@ -98,6 +98,7 @@ export type DbInventoryPurchase = {
   amount: number;
   date: string;
   notes: string | null;
+  archived: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -212,6 +213,7 @@ export function fromInventoryPurchase(r: DbInventoryPurchase): InventoryPurchase
     amount: Number(r.amount),
     date: r.date,
     notes: r.notes ?? undefined,
+    archived: Boolean(r.archived),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -228,6 +230,7 @@ export function toInventoryPurchaseInsert(
     amount: p.amount,
     date: p.date,
     notes: nul(p.notes),
+    archived: p.archived ?? false,
   };
 }
 
@@ -239,6 +242,7 @@ export function toInventoryPurchasePatch(
   if (patch.amount !== undefined) r.amount = patch.amount;
   if (patch.date !== undefined) r.date = patch.date;
   if (patch.notes !== undefined) r.notes = nul(patch.notes);
+  if (patch.archived !== undefined) r.archived = patch.archived;
   return r;
 }
 

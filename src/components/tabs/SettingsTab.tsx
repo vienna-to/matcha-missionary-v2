@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { LogOut, Plus, RefreshCw, Share2, Trash2 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { initialSeed } from "@/lib/seed";
 import { Button, Card, Field, Input, NumberField } from "@/components/ui";
@@ -13,6 +13,7 @@ import {
   clearSampleEventFromSupabase,
   loadSampleDataIntoSupabase,
 } from "@/lib/supabase/seed-supabase";
+import { buildHelperShareUrl, useHelperMode } from "@/lib/helper-mode";
 
 const SAMPLE_EVENT_ID = "evt_uci_spring";
 const SAMPLE_EVENT_NAME = "UCI Spring Pop-Up";
@@ -22,9 +23,11 @@ export default function SettingsTab() {
   const [newEventOpen, setNewEventOpen] = useState(false);
   const [pastEventOpen, setPastEventOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [helperCopied, setHelperCopied] = useState(false);
   const [seedBusy, setSeedBusy] = useState(false);
   const [seedError, setSeedError] = useState<string | null>(null);
   const [, startClearTransition] = useTransition();
+  const [helperMode, setHelperMode] = useHelperMode();
 
   const isSupabase = backend === "supabase";
   const sampleEventPresent = isSupabase
@@ -36,6 +39,18 @@ export default function SettingsTab() {
     navigator.clipboard?.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  function copyHelperLink() {
+    const url = buildHelperShareUrl(state.settings.workspaceCode);
+    if (!url) return;
+    navigator.clipboard?.writeText(url);
+    setHelperCopied(true);
+    setTimeout(() => setHelperCopied(false), 1500);
+  }
+
+  function exitHelperMode() {
+    setHelperMode(false);
   }
 
   function clearSampleDataLocal() {
@@ -100,6 +115,55 @@ export default function SettingsTab() {
     }
   }
 
+  if (helperMode) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <header>
+          <h1 className="t-display text-xl">Settings</h1>
+          <p className="t-caption mt-1 text-sm text-matcha-900/60">
+            you&apos;re in helper mode — only booth-relevant settings show here.
+          </p>
+        </header>
+
+        <Card className="space-y-4">
+          <h2 className="t-display text-sm">Booth sounds</h2>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={state.settings.baristaPingEnabled}
+              onChange={(e) =>
+                dispatch({
+                  type: "UPDATE_SETTINGS",
+                  patch: { baristaPingEnabled: e.target.checked },
+                })
+              }
+              className="h-4 w-4 accent-matcha-500"
+            />
+            Play a subtle ping in the Barista Queue when a new order arrives
+          </label>
+          {state.settings.audioUnlocked ? (
+            <p className="text-xs text-matcha-700">✓ Audio enabled on this device</p>
+          ) : (
+            <p className="text-xs text-matcha-900/60">
+              Audio is locked. Open the Barista Queue and tap &ldquo;Enable&rdquo; once per device.
+            </p>
+          )}
+        </Card>
+
+        <Card className="space-y-3">
+          <h2 className="t-display text-sm">Exit helper mode</h2>
+          <p className="text-xs text-matcha-900/60">
+            switch this device back to the full Matcha Missionary view. only do this
+            if you&apos;re a team member.
+          </p>
+          <Button variant="outline" size="sm" onClick={exitHelperMode}>
+            <LogOut className="h-3.5 w-3.5" /> Exit helper mode
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <header>
@@ -144,6 +208,29 @@ export default function SettingsTab() {
             {copied ? "Copied!" : "Copy"}
           </Button>
         </div>
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="t-display text-sm">Booth helper access</h2>
+        <p className="text-xs text-matcha-900/60">
+          Send this link to people boothing with you who aren&apos;t on the team.
+          Their device opens Matcha Missionary with only Live Orders and Barista
+          Queue — no menu editing, no finances, no past events. The setting sticks
+          on that device until they exit from Settings.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={copyHelperLink}>
+            <Share2 className="h-3.5 w-3.5" /> {helperCopied ? "Copied!" : "Copy helper link"}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setHelperMode(true)}>
+            Preview helper mode on this device
+          </Button>
+        </div>
+        <p className="t-caption text-[11px] text-matcha-900/50">
+          note: this is a UI gate, not a security wall — anyone with the workspace
+          code (or the helper link) can still see the underlying data if they know
+          how to work around the UI. only share it with people you trust.
+        </p>
       </Card>
 
       <Card className="space-y-4">

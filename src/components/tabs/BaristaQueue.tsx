@@ -6,7 +6,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Hand,
   Pencil,
+  Play,
   RotateCcw,
   StickyNote,
   Trash2,
@@ -33,30 +35,40 @@ export default function BaristaQueue() {
     ? state.menuSnapshots.find((s) => s.id === event.menuSnapshotId)
     : undefined;
 
-  // Two buckets: active (pending) on top, completed at the bottom.
+  // Two buckets: active (pending / in_progress) on top, completed at the bottom.
   // Legacy "cancelled" orders are hidden (we removed that state).
   const { active, completed } = useMemo(() => {
     if (!event) return { active: [] as Order[], completed: [] as Order[] };
     const inEvent = state.orders.filter(
       (o) => o.eventId === event.id && o.status !== "cancelled",
     );
+    const parseTime = (s: string) => {
+      const t = Date.parse(s);
+      return Number.isFinite(t) ? t : 0;
+    };
     const active = inEvent
       .filter((o) => o.status !== "completed")
       .sort((a, b) => {
-        // Pinned (queuePriority set) first, sorted by descending pin time;
-        // unpinned by submittedAt ascending.
+        // Pinned (queuePriority set) first, sorted by descending pin time.
+        // Unpinned: strict chronological by submittedAt with orderNumber as a
+        // deterministic tie-breaker — two rapid submits can share a
+        // millisecond timestamp, and localeCompare on ISO strings can misorder
+        // legacy rows that lack the ".SSS" milliseconds fragment.
         const ap = a.queuePriority ?? -Infinity;
         const bp = b.queuePriority ?? -Infinity;
         if (ap !== bp) return bp - ap;
-        return a.submittedAt.localeCompare(b.submittedAt);
+        const at = parseTime(a.submittedAt);
+        const bt = parseTime(b.submittedAt);
+        if (at !== bt) return at - bt;
+        return a.orderNumber - b.orderNumber;
       });
     const completed = inEvent
       .filter((o) => o.status === "completed")
       .sort((a, b) => {
         // Newest completion first.
-        const ad = a.doneAt ?? a.updatedAt;
-        const bd = b.doneAt ?? b.updatedAt;
-        return bd.localeCompare(ad);
+        const ad = parseTime(a.doneAt ?? a.updatedAt);
+        const bd = parseTime(b.doneAt ?? b.updatedAt);
+        return bd - ad;
       });
     return { active, completed };
   }, [event, state.orders]);
@@ -148,6 +160,25 @@ export default function BaristaQueue() {
     });
   }
 
+  function claim(o: Order) {
+    // Flip pending → in_progress so anyone else at the booth can see it's
+    // being made and doesn't duplicate the drink.
+    dispatch({
+      type: "UPDATE_ORDER",
+      id: o.id,
+      patch: { status: "in_progress" },
+    });
+  }
+
+  function release(o: Order) {
+    // Back to pending so a different barista can grab it.
+    dispatch({
+      type: "UPDATE_ORDER",
+      id: o.id,
+      patch: { status: "pending" },
+    });
+  }
+
   function reopen(o: Order) {
     dispatch({
       type: "UPDATE_ORDER",
@@ -210,6 +241,8 @@ export default function BaristaQueue() {
               onToggleItem={(itemId, status) => toggleItem(o, itemId, status)}
               onSetItemDiscount={(itemId, pct) => setItemDiscount(o.id, itemId, pct)}
               onMarkComplete={() => markComplete(o)}
+              onClaim={() => claim(o)}
+              onRelease={() => release(o)}
               onEdit={() => setEditingId(o.id)}
               onRemove={() => remove(o.id, o.customerName)}
             />
@@ -267,6 +300,8 @@ function OrderCard({
   onToggleItem,
   onSetItemDiscount,
   onMarkComplete,
+  onClaim,
+  onRelease,
   onEdit,
   onRemove,
 }: {
@@ -278,6 +313,8 @@ function OrderCard({
   onToggleItem: (itemId: string, status: OrderItemStatus) => void;
   onSetItemDiscount: (itemId: string, pct: number) => void;
   onMarkComplete: () => void;
+  onClaim: () => void;
+  onRelease: () => void;
   onEdit: () => void;
   onRemove: () => void;
 }) {
@@ -290,6 +327,7 @@ function OrderCard({
   const elapsed = minutesAgo(order.submittedAt, now);
   const { total, totalGross } = computeOrderTotals(order);
   const totalDiscount = totalGross - total;
+  const inProgress = order.status === "in_progress";
 
   return (
     <Card
@@ -297,8 +335,17 @@ function OrderCard({
         "transition-colors",
         fresh && "animate-flash border-matcha-300",
         pinned && "border-amber-300 bg-amber-50/30",
+        // In-progress overrides pinned styling so a claimed order always
+        // reads as "someone's on it" first, then "pinned" second.
+        inProgress && "border-2 border-sky-400 bg-sky-50/60",
       )}
     >
+      {inProgress ? (
+        <div className="mb-2 flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-900">
+          <Hand className="h-3.5 w-3.5" />
+          IN PROGRESS · someone at the booth is making this
+        </div>
+      ) : null}
       {/* Top row — name + timer on the left, buttons on the right. Wraps on
           mobile so the customer name never collides with the button stack. */}
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -320,6 +367,20 @@ function OrderCard({
           >
             <ArrowUp className="h-3.5 w-3.5" />
           </Button>
+          {inProgress ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onRelease}
+              title="Someone else can take this"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Release
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" onClick={onClaim}>
+              <Play className="h-3.5 w-3.5" /> Start
+            </Button>
+          )}
           <Button size="sm" variant="primary" onClick={onMarkComplete}>
             <CheckCircle2 className="h-3.5 w-3.5" /> Mark all done
           </Button>

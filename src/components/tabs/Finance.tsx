@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Card, Field, Input, NumberField, TextField } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { defaultItemCost, defaultItemMargin, ingredientCostPerCanonical } from "@/lib/calc";
@@ -22,26 +22,56 @@ export default function Finance() {
   const threshold = state.settings.lowMarginThresholdPct / 100;
   const activeItems = state.menuItems.filter((m) => m.active).sort(compareMenuItems);
 
-  // Inventory section state — local-only form fields for the new-purchase row.
+  // Expenses section state — local-only form fields for the new-purchase row.
   const [newName, setNewName] = useState("");
   const [newAmount, setNewAmount] = useState(0);
   const [newDate, setNewDate] = useState(todayLocal());
 
-  const sortedPurchases = useMemo(
-    () => [...state.inventoryPurchases].sort((a, b) => b.date.localeCompare(a.date)),
-    [state.inventoryPurchases],
-  );
-  const totalInventory = sortedPurchases.reduce((s, p) => s + p.amount, 0);
+  const { currentPurchases, archivedPurchases } = useMemo(() => {
+    const current: InventoryPurchase[] = [];
+    const archived: InventoryPurchase[] = [];
+    for (const p of state.inventoryPurchases) {
+      (p.archived ? archived : current).push(p);
+    }
+    const byDate = (a: InventoryPurchase, b: InventoryPurchase) =>
+      b.date.localeCompare(a.date);
+    current.sort(byDate);
+    archived.sort(byDate);
+    return { currentPurchases: current, archivedPurchases: archived };
+  }, [state.inventoryPurchases]);
+
+  const currentTotal = currentPurchases.reduce((s, p) => s + p.amount, 0);
+  const archivedTotal = archivedPurchases.reduce((s, p) => s + p.amount, 0);
 
   function addPurchase() {
     if (!newName.trim() || newAmount <= 0 || newDate.length !== 10) return;
     dispatch({
       type: "ADD_INVENTORY_PURCHASE",
-      purchase: { name: newName.trim(), amount: newAmount, date: newDate },
+      purchase: { name: newName.trim(), amount: newAmount, date: newDate, archived: false },
     });
     setNewName("");
     setNewAmount(0);
     setNewDate(todayLocal());
+  }
+
+  function archiveAllCurrent() {
+    if (currentPurchases.length === 0) return;
+    if (
+      !confirm(
+        `Archive all ${currentPurchases.length} current expense${
+          currentPurchases.length === 1 ? "" : "s"
+        }? They'll stay visible below for reference but will stop counting toward net profit going forward.`,
+      )
+    ) {
+      return;
+    }
+    for (const p of currentPurchases) {
+      dispatch({
+        type: "UPDATE_INVENTORY_PURCHASE",
+        id: p.id,
+        patch: { archived: true },
+      });
+    }
   }
 
   return (
@@ -53,7 +83,7 @@ export default function Finance() {
         </p>
       </header>
 
-      <InventoryCard
+      <CurrentExpensesCard
         newName={newName}
         setNewName={setNewName}
         newAmount={newAmount}
@@ -61,8 +91,15 @@ export default function Finance() {
         newDate={newDate}
         setNewDate={setNewDate}
         addPurchase={addPurchase}
-        sortedPurchases={sortedPurchases}
-        totalInventory={totalInventory}
+        purchases={currentPurchases}
+        total={currentTotal}
+        dispatch={dispatch}
+        onArchiveAll={archiveAllCurrent}
+      />
+
+      <ArchivedExpensesCard
+        purchases={archivedPurchases}
+        total={archivedTotal}
         dispatch={dispatch}
       />
 
@@ -161,7 +198,7 @@ export default function Finance() {
   );
 }
 
-function InventoryCard({
+function CurrentExpensesCard({
   newName,
   setNewName,
   newAmount,
@@ -169,9 +206,10 @@ function InventoryCard({
   newDate,
   setNewDate,
   addPurchase,
-  sortedPurchases,
-  totalInventory,
+  purchases,
+  total,
   dispatch,
+  onArchiveAll,
 }: {
   newName: string;
   setNewName: (s: string) => void;
@@ -180,23 +218,31 @@ function InventoryCard({
   newDate: string;
   setNewDate: (s: string) => void;
   addPurchase: () => void;
-  sortedPurchases: InventoryPurchase[];
-  totalInventory: number;
+  purchases: InventoryPurchase[];
+  total: number;
   dispatch: ReturnType<typeof useStore>["dispatch"];
+  onArchiveAll: () => void;
 }) {
   return (
     <Card>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="t-display text-sm">Inventory & supplies</h2>
+          <h2 className="t-display text-sm">Expenses</h2>
           <p className="t-caption mt-0.5 text-[11px] text-matcha-900/60">
             one-off purchases (bulk matcha, cups, signage). subtracted from event profit
             in the All Events summary view.
           </p>
         </div>
-        <div className="text-right">
-          <div className="t-display text-[10px] text-matcha-900/50">Total spent</div>
-          <div className="text-base font-semibold tabular-nums">{formatMoney(totalInventory)}</div>
+        <div className="flex items-end gap-3">
+          {purchases.length > 0 ? (
+            <Button variant="outline" size="sm" onClick={onArchiveAll}>
+              <Archive className="h-3.5 w-3.5" /> Archive all
+            </Button>
+          ) : null}
+          <div className="text-right">
+            <div className="t-display text-[10px] text-matcha-900/50">Total spent</div>
+            <div className="text-base font-semibold tabular-nums">{formatMoney(total)}</div>
+          </div>
         </div>
       </div>
 
@@ -231,9 +277,9 @@ function InventoryCard({
         </div>
       </div>
 
-      {sortedPurchases.length === 0 ? (
+      {purchases.length === 0 ? (
         <p className="t-caption text-xs text-matcha-900/60">
-          no purchases logged yet.
+          no current expenses logged yet.
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -247,12 +293,19 @@ function InventoryCard({
               </tr>
             </thead>
             <tbody>
-              {sortedPurchases.map((p) => (
+              {purchases.map((p) => (
                 <PurchaseRow
                   key={p.id}
                   purchase={p}
                   onPatch={(patch) =>
                     dispatch({ type: "UPDATE_INVENTORY_PURCHASE", id: p.id, patch })
+                  }
+                  onArchiveToggle={() =>
+                    dispatch({
+                      type: "UPDATE_INVENTORY_PURCHASE",
+                      id: p.id,
+                      patch: { archived: true },
+                    })
                   }
                   onDelete={() =>
                     dispatch({ type: "DELETE_INVENTORY_PURCHASE", id: p.id })
@@ -265,7 +318,7 @@ function InventoryCard({
                 <td className="py-2 pr-4 font-semibold">Total</td>
                 <td />
                 <td className="py-2 pr-4 text-right font-semibold tabular-nums">
-                  {formatMoney(totalInventory)}
+                  {formatMoney(total)}
                 </td>
                 <td />
               </tr>
@@ -277,13 +330,105 @@ function InventoryCard({
   );
 }
 
+function ArchivedExpensesCard({
+  purchases,
+  total,
+  dispatch,
+}: {
+  purchases: InventoryPurchase[];
+  total: number;
+  dispatch: ReturnType<typeof useStore>["dispatch"];
+}) {
+  const [open, setOpen] = useState(false);
+  if (purchases.length === 0) return null;
+  return (
+    <Card>
+      <button
+        onClick={() => setOpen((x) => !x)}
+        className="flex w-full items-center justify-between gap-2 text-left"
+      >
+        <div>
+          <h2 className="t-display text-sm">Archived expenses</h2>
+          <p className="t-caption mt-0.5 text-[11px] text-matcha-900/60">
+            kept for reference. does not count toward net profit going forward.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className="t-display text-[10px] text-matcha-900/50">
+              {purchases.length} item{purchases.length === 1 ? "" : "s"}
+            </div>
+            <div className="text-sm font-semibold tabular-nums text-matcha-900/70">
+              {formatMoney(total)}
+            </div>
+          </div>
+          <span className="t-display text-xs text-matcha-700">
+            {open ? "hide" : "show"}
+          </span>
+        </div>
+      </button>
+
+      {open ? (
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="t-display text-left text-xs text-matcha-900/60">
+                <th className="py-2 pr-4">Item</th>
+                <th className="py-2 pr-4">Date</th>
+                <th className="py-2 pr-4 text-right">Amount</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {purchases.map((p) => (
+                <PurchaseRow
+                  key={p.id}
+                  purchase={p}
+                  archived
+                  onPatch={(patch) =>
+                    dispatch({ type: "UPDATE_INVENTORY_PURCHASE", id: p.id, patch })
+                  }
+                  onArchiveToggle={() =>
+                    dispatch({
+                      type: "UPDATE_INVENTORY_PURCHASE",
+                      id: p.id,
+                      patch: { archived: false },
+                    })
+                  }
+                  onDelete={() =>
+                    dispatch({ type: "DELETE_INVENTORY_PURCHASE", id: p.id })
+                  }
+                />
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-cream-200">
+                <td className="py-2 pr-4 font-semibold">Total</td>
+                <td />
+                <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                  {formatMoney(total)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 function PurchaseRow({
   purchase,
+  archived = false,
   onPatch,
+  onArchiveToggle,
   onDelete,
 }: {
   purchase: InventoryPurchase;
+  archived?: boolean;
   onPatch: (patch: Partial<InventoryPurchase>) => void;
+  onArchiveToggle: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -313,15 +458,32 @@ function PurchaseRow({
         />
       </td>
       <td className="py-1.5">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            if (confirm(`Delete "${purchase.name}"?`)) onDelete();
-          }}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onArchiveToggle}
+            aria-label={archived ? "Unarchive" : "Archive"}
+            title={archived ? "Unarchive" : "Archive"}
+          >
+            {archived ? (
+              <ArchiveRestore className="h-3.5 w-3.5" />
+            ) : (
+              <Archive className="h-3.5 w-3.5" />
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              if (confirm(`Delete "${purchase.name}"?`)) onDelete();
+            }}
+            aria-label="Delete"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </td>
     </tr>
   );

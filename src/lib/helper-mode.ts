@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 /**
  * "Helper mode" restricts the UI to the tabs a booth helper actually needs
@@ -14,12 +14,28 @@ import { useEffect, useState } from "react";
  * The flag is per-device (localStorage) and is *not* synced across the
  * workspace. A helper enters via a share link (`?helper=1`) generated in
  * Settings; the param is stripped after read so refreshes preserve state.
+ *
+ * All consumers subscribe to a shared listener set so a toggle in Settings
+ * updates every mounted component (AppShell, BaristaQueue, LiveOrders, …)
+ * without a manual page reload.
  */
 const STORAGE_KEY = "matcha-missionary:helper-mode:v1";
 const URL_PARAM = "helper";
 
-export function readInitialHelperMode(): boolean {
-  if (typeof window === "undefined") return false;
+// Fan-out subscription list — every mounted useHelperMode() adds itself here
+// and gets notified when writeHelperMode() runs.
+const listeners = new Set<() => void>();
+
+function notify() {
+  for (const l of listeners) l();
+}
+
+// URL-param handling runs once per tab, on first hook mount. Idempotent so
+// repeated calls (React strict-mode double-invoke, remounts) are harmless.
+let urlProcessed = false;
+function ensureUrlProcessed() {
+  if (urlProcessed || typeof window === "undefined") return;
+  urlProcessed = true;
   try {
     const params = new URLSearchParams(window.location.search);
     const raw = params.get(URL_PARAM);
@@ -33,10 +49,15 @@ export function readInitialHelperMode(): boolean {
       window.history.replaceState(null, "", url.toString());
       if (on) {
         window.localStorage.setItem(STORAGE_KEY, "1");
-        return true;
+        notify();
       }
-      // Fall through — leave whatever was cached in place.
     }
+  } catch {}
+}
+
+function readCurrent(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
     return window.localStorage.getItem(STORAGE_KEY) === "1";
   } catch {
     return false;
@@ -48,6 +69,15 @@ export function writeHelperMode(on: boolean) {
   try {
     window.localStorage.setItem(STORAGE_KEY, on ? "1" : "0");
   } catch {}
+  notify();
+}
+
+function subscribe(cb: () => void): () => void {
+  ensureUrlProcessed();
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
 }
 
 /** URL a full-mode user can share so their helper opens the app in
@@ -61,13 +91,16 @@ export function buildHelperShareUrl(workspaceCode: string): string {
 }
 
 export function useHelperMode(): [boolean, (on: boolean) => void] {
-  const [on, setOn] = useState(false);
-  useEffect(() => {
-    setOn(readInitialHelperMode());
-  }, []);
-  const set = (next: boolean) => {
+  // useSyncExternalStore keeps every mounted consumer in sync with the shared
+  // localStorage flag — a toggle in Settings re-renders AppShell, BaristaQueue,
+  // LiveOrders, EditOrderModal, etc. in the same tick, no reload needed.
+  const on = useSyncExternalStore(
+    subscribe,
+    readCurrent,
+    () => false, // server / SSR default
+  );
+  const set = useCallback((next: boolean) => {
     writeHelperMode(next);
-    setOn(next);
-  };
+  }, []);
   return [on, set];
 }

@@ -26,7 +26,7 @@ const SAMPLE_EVENT_ID = "evt_uci_spring";
 const SAMPLE_EVENT_NAME = "UCI Spring Pop-Up";
 
 export default function SettingsTab() {
-  const { state, dispatch, backend, workspaceId } = useStore();
+  const { state, dispatch, backend, workspaceId, unpair } = useStore();
   const [newEventOpen, setNewEventOpen] = useState(false);
   const [pastEventOpen, setPastEventOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -226,13 +226,30 @@ export default function SettingsTab() {
           tabs on this device). Save it somewhere — if all devices lose it, the data is
           unrecoverable.
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <code className="rounded-lg bg-cream-100 px-3 py-2 text-sm font-mono">
             {formatWorkspaceCode(state.settings.workspaceCode)}
           </code>
           <Button variant="outline" size="sm" onClick={copyCode}>
             {copied ? "Copied!" : "Copy"}
           </Button>
+          {unpair ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (
+                  confirm(
+                    "Sign out of this workspace on this device? You'll go back to the join / create screen. Your data in Supabase is not affected.",
+                  )
+                ) {
+                  unpair();
+                }
+              }}
+            >
+              Switch workspace
+            </Button>
+          ) : null}
         </div>
       </Card>
 

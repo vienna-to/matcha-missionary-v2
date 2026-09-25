@@ -244,7 +244,7 @@ function ItemsList() {
                 defaultCreamId: patch.defaultCreamId,
                 allowedMilkIds: patch.allowedMilkIds ?? [],
                 allowedCreamIds: patch.allowedCreamIds ?? [],
-                taxable: patch.taxable ?? true,
+                taxable: patch.taxable ?? false,
               },
             });
             setCreating(false);
@@ -396,7 +396,7 @@ function blankItem(): MenuItem {
     defaultCreamId: undefined,
     allowedMilkIds: [],
     allowedCreamIds: [],
-    taxable: true,
+    taxable: false,
     createdAt: "",
     updatedAt: "",
   };

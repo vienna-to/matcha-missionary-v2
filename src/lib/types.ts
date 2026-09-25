@@ -99,7 +99,8 @@ export type MenuItem = {
   sortOrder?: number;
   /** Whether sales of this item are taxable. Surfaced per-line in the
    *  full-history CSV so an accountant can compute owed tax externally.
-   *  Undefined on legacy rows → treated as taxable (safer default). */
+   *  Undefined on legacy rows → treated as non-taxable; user opts in per
+   *  item in Menu Manager. */
   taxable?: boolean;
   createdAt: string;
   updatedAt: string;

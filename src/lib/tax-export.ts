@@ -93,15 +93,16 @@ export function buildFullHistoryCsv(state: AppState): string {
   // Taxability lives on the current master menu; snapshots don't carry it
   // because the flag was added later. Look it up by menu_item_id first;
   // fall back to name-match on the current master menu when an item's snap
-  // id differs from any current row (e.g. long-archived items).
-  const taxableById = new Map(state.menuItems.map((m) => [m.id, m.taxable !== false]));
+  // id differs from any current row (e.g. long-archived items). Unknown
+  // items default to NOT taxable — the user opts items in per row.
+  const taxableById = new Map(state.menuItems.map((m) => [m.id, m.taxable === true]));
   const taxableByName = new Map(
-    state.menuItems.map((m) => [m.name.toLowerCase(), m.taxable !== false]),
+    state.menuItems.map((m) => [m.name.toLowerCase(), m.taxable === true]),
   );
   function itemTaxable(menuItemId: string, snapName: string): boolean {
     if (taxableById.has(menuItemId)) return taxableById.get(menuItemId) as boolean;
     const byName = taxableByName.get(snapName.toLowerCase());
-    return byName ?? true; // default to taxable when unknown
+    return byName ?? false;
   }
 
   const rows: unknown[][] = [];

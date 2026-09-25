@@ -25,11 +25,17 @@ export function readInitialHelperMode(): boolean {
     const raw = params.get(URL_PARAM);
     if (raw !== null) {
       const on = raw === "1" || raw === "true";
-      window.localStorage.setItem(STORAGE_KEY, on ? "1" : "0");
+      // URL can only ENABLE helper mode — turning it off requires the
+      // workspace code via Settings, so a helper can't sneak out by typing
+      // ?helper=0 into the address bar.
       const url = new URL(window.location.href);
       url.searchParams.delete(URL_PARAM);
       window.history.replaceState(null, "", url.toString());
-      return on;
+      if (on) {
+        window.localStorage.setItem(STORAGE_KEY, "1");
+        return true;
+      }
+      // Fall through — leave whatever was cached in place.
     }
     return window.localStorage.getItem(STORAGE_KEY) === "1";
   } catch {

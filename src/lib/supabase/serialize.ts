@@ -173,7 +173,7 @@ export function fromMenuItem(r: DbMenuItem): MenuItem {
     allowedMilkIds: r.allowed_milk_ids ?? [],
     allowedCreamIds: r.allowed_cream_ids ?? [],
     sortOrder: r.sort_order ?? undefined,
-    taxable: r.taxable ?? true,
+    taxable: r.taxable ?? false,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -366,7 +366,7 @@ export function toMenuItemInsert(workspaceId: string, m: MenuItem): Omit<DbMenuI
     allowed_milk_ids: m.allowedMilkIds,
     allowed_cream_ids: m.allowedCreamIds,
     sort_order: m.sortOrder ?? null,
-    taxable: m.taxable ?? true,
+    taxable: m.taxable ?? false,
   };
 }
 

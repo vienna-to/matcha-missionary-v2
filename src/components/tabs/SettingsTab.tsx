@@ -35,6 +35,10 @@ export default function SettingsTab() {
   const [seedError, setSeedError] = useState<string | null>(null);
   const [, startClearTransition] = useTransition();
   const [helperMode, setHelperMode] = useHelperMode();
+  // Guarded exit: helper mode can only be dropped by someone who knows the
+  // workspace code (matches what the owner would use to pair a new device).
+  const [exitCodeInput, setExitCodeInput] = useState("");
+  const [exitCodeError, setExitCodeError] = useState<string | null>(null);
   const currentYear = new Date().getFullYear();
   const [reportYear, setReportYear] = useState<number>(currentYear);
   const [reportQuarter, setReportQuarter] = useState<QuarterKey>(
@@ -75,7 +79,21 @@ export default function SettingsTab() {
     setTimeout(() => setHelperCopied(false), 1500);
   }
 
-  function exitHelperMode() {
+  function attemptExitHelperMode() {
+    const entered = exitCodeInput.trim().toUpperCase();
+    // Codes are stored uppercase; allow the user to type the "MATCHA-" prefix
+    // that's shown on the workspace-code chip in full mode, or omit it.
+    const bare = entered.startsWith("MATCHA-") ? entered.slice("MATCHA-".length) : entered;
+    if (!bare) {
+      setExitCodeError("enter the workspace code to exit.");
+      return;
+    }
+    if (bare !== state.settings.workspaceCode.toUpperCase()) {
+      setExitCodeError("that's not the workspace code. ask the owner.");
+      return;
+    }
+    setExitCodeError(null);
+    setExitCodeInput("");
     setHelperMode(false);
   }
 
@@ -179,12 +197,38 @@ export default function SettingsTab() {
         <Card className="space-y-3">
           <h2 className="t-display text-sm">Exit helper mode</h2>
           <p className="text-xs text-matcha-900/60">
-            switch this device back to the full Matcha Missionary view. only do this
-            if you&apos;re a team member.
+            switch this device back to the full Matcha Missionary view. requires
+            the workspace code — ask the owner if you don&apos;t have it.
           </p>
-          <Button variant="outline" size="sm" onClick={exitHelperMode}>
+          <Field label="workspace code">
+            <Input
+              value={exitCodeInput}
+              onChange={(e) => {
+                setExitCodeInput(e.target.value);
+                if (exitCodeError) setExitCodeError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") attemptExitHelperMode();
+              }}
+              placeholder="e.g. MATCHA-ABC123"
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={attemptExitHelperMode}
+            disabled={exitCodeInput.trim().length === 0}
+          >
             <LogOut className="h-3.5 w-3.5" /> Exit helper mode
           </Button>
+          {exitCodeError ? (
+            <div className="t-caption rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {exitCodeError}
+            </div>
+          ) : null}
         </Card>
       </div>
     );
@@ -258,8 +302,9 @@ export default function SettingsTab() {
         <p className="text-xs text-matcha-900/60">
           Send this link to people boothing with you who aren&apos;t on the team.
           Their device opens Matcha Missionary with only Live Orders and Barista
-          Queue — no menu editing, no finances, no past events. The setting sticks
-          on that device until they exit from Settings.
+          Queue — no menu editing, no finances, no past events. Exiting helper
+          mode requires the workspace code, so a helper can&apos;t flip it off
+          on their own.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={copyHelperLink}>

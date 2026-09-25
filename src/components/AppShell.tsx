@@ -82,8 +82,10 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen bg-cream-50 md:flex">
-      {/* Sidebar (tablet+) */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:border-r md:border-cream-200 md:bg-white">
+      {/* Sidebar (tablet+) — sticky so Settings stays reachable when the
+          main content scrolls past viewport height (Menu Manager, Finance,
+          etc. can get long). */}
+      <aside className="hidden md:sticky md:top-0 md:flex md:h-screen md:w-64 md:flex-col md:overflow-y-auto md:border-r md:border-cream-200 md:bg-white">
         <div className="px-5 py-5">
           <div className="t-brand text-xl">
             <span className="text-matcha-500">●</span> matcha missionary
@@ -239,11 +241,14 @@ export default function AppShell() {
         onCreated={() => setTab("summary")}
       />
 
-      {/* Bottom tabs (mobile) */}
+      {/* Bottom tabs (mobile). Settings gets a permanent cell on the right
+          so it's always reachable — the mobile top bar scrolls away on long
+          content (Menu Manager, Finance) which was hiding it before. */}
       <nav
         className={cn(
           "fixed bottom-0 left-0 right-0 z-30 grid border-t border-cream-200 bg-white md:hidden",
-          visibleTabs.length === 2 ? "grid-cols-2" : "grid-cols-5",
+          // +1 for the Settings cell on the right.
+          visibleTabs.length === 2 ? "grid-cols-3" : "grid-cols-6",
         )}
       >
         {visibleTabs.map((t) => {
@@ -263,6 +268,18 @@ export default function AppShell() {
             </button>
           );
         })}
+        <button
+          onClick={() => setTab("settings")}
+          className={cn(
+            "flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] transition-colors",
+            tab === "settings" ? "text-matcha-600" : "text-matcha-900/60",
+          )}
+        >
+          <SettingsIcon
+            className={cn("h-5 w-5", tab === "settings" && "text-matcha-600")}
+          />
+          <span className="t-display text-[10px]">Settings</span>
+        </button>
       </nav>
     </div>
   );

@@ -176,9 +176,18 @@ export function nextOrderNumber(state: AppState, eventId: string): number {
   return ns.length === 0 ? 1 : Math.max(...ns) + 1;
 }
 
-function deriveOrderStatusFromItems(items: OrderItem[]): OrderStatus | null {
+function deriveOrderStatusFromItems(
+  items: OrderItem[],
+  current: OrderStatus,
+): OrderStatus | null {
   if (items.length === 0) return null;
-  return items.every((it) => it.status === "done") ? "completed" : "pending";
+  if (items.every((it) => it.status === "done")) return "completed";
+  // Preserve an "in_progress" claim across item-by-item checkoffs. Otherwise
+  // the moment a barista ticks off the first drink, the IN PROGRESS banner
+  // would vanish and a second barista could grab the same order — the exact
+  // duplicate-drink scenario helper mode is trying to prevent.
+  if (current === "in_progress") return "in_progress";
+  return "pending";
 }
 
 /** Reassign sequential 1..N order numbers to all remaining orders in an event
@@ -408,7 +417,7 @@ export function reducer(state: AppState, action: Action): AppState {
           const items = o.items.map((it) =>
             it.id === action.orderItemId ? { ...it, status: action.status } : it,
           );
-          const derived = deriveOrderStatusFromItems(items);
+          const derived = deriveOrderStatusFromItems(items, o.status);
           const status: OrderStatus =
             o.status === "cancelled"
               ? "cancelled"

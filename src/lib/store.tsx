@@ -397,10 +397,31 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
         case "SUBMIT_ORDER":
           // Use the action's order directly (no setTimeout/stateRef lookup) so
           // two rapid submits don't race and write the same "latest" order twice.
-          w.submitOrder(a.order);
+          // The writer may bump orderNumber on a unique-constraint collision;
+          // reflect that locally so the submitter's device and the RT echoes
+          // to other devices agree on the final number.
+          w.submitOrder(a.order).then((result) => {
+            if ("finalOrderNumber" in result && result.finalOrderNumber !== a.order.orderNumber) {
+              baseDispatch({
+                type: "UPDATE_ORDER",
+                id: a.order.id,
+                patch: { orderNumber: result.finalOrderNumber },
+              });
+            }
+          });
           break;
         case "UPDATE_ORDER":
           w.updateOrder(a.id, a.patch);
+          // Bulk item-status changes (markComplete flips everything to "done",
+          // reopen flips everything to "pending") arrive on the order-level
+          // patch. toOrderPatch drops the items array, so per-item statuses
+          // never reach Supabase without this fan-out. Only status is worth
+          // syncing — other item fields aren't touched by these bulk ops.
+          if (a.patch.items) {
+            for (const it of a.patch.items) {
+              w.updateOrderItemStatus(it.id, it.status);
+            }
+          }
           break;
         case "DELETE_ORDER": {
           // Use the pre-delete state to compute renumbering for the remaining
@@ -418,9 +439,32 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
             if (o) w.replaceOrderItems(a.orderId, o.items);
           }, 0);
           break;
-        case "SET_ORDER_ITEM_STATUS":
+        case "SET_ORDER_ITEM_STATUS": {
           w.updateOrderItemStatus(a.orderItemId, a.status);
+          // Mirror any derived order-level status change (pending → completed
+          // when all items done, or completed → pending when reopened) to
+          // Supabase so both devices agree. Without this, the DB status
+          // drifts and a refresh restores the wrong queue state.
+          const preOrder = stateRef.current.orders.find((o) => o.id === a.orderId);
+          if (preOrder && preOrder.status !== "cancelled") {
+            const nextItems = preOrder.items.map((it) =>
+              it.id === a.orderItemId ? { ...it, status: a.status } : it,
+            );
+            const allDone = nextItems.length > 0 && nextItems.every((it) => it.status === "done");
+            const nextStatus = allDone
+              ? "completed"
+              : preOrder.status === "in_progress"
+                ? "in_progress"
+                : "pending";
+            if (nextStatus !== preOrder.status) {
+              const patch: Parameters<typeof w.updateOrder>[1] = { status: nextStatus };
+              if (nextStatus === "completed") patch.doneAt = new Date().toISOString();
+              if (nextStatus !== "completed" && preOrder.doneAt) patch.doneAt = undefined;
+              w.updateOrder(a.orderId, patch);
+            }
+          }
           break;
+        }
         case "UPDATE_ORDER_ITEM":
           w.updateOrderItem(a.orderItemId, a.patch);
           break;

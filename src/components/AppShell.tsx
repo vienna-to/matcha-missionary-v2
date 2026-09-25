@@ -54,8 +54,16 @@ export default function AppShell() {
 
   // If helper mode is enabled and the current tab isn't in the allowed set
   // (e.g. flag was flipped while user was on Finance), snap back to Orders.
+  // Settings is a special case — always reachable (even in helper mode) so
+  // helpers can exit helper mode from there. It's not in `visibleTabs` on
+  // purpose (it renders as its own icon at the bottom of the sidebar), but
+  // navigating to it must not trigger the snap-back.
   useEffect(() => {
-    if (helperMode && !visibleTabs.some((t) => t.id === tab)) {
+    if (
+      helperMode &&
+      tab !== "settings" &&
+      !visibleTabs.some((t) => t.id === tab)
+    ) {
       setTab("orders");
     }
   }, [helperMode, tab, visibleTabs]);

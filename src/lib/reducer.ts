@@ -236,9 +236,14 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, settings: { ...state.settings, ...action.patch } };
 
     case "ADD_INGREDIENT": {
+      const maxIngOrder = state.ingredients.reduce(
+        (m, x) => Math.max(m, x.sortOrder ?? -1),
+        -1,
+      );
       const ing: Ingredient = {
         ...action.ing,
         id: newId("ing"),
+        sortOrder: action.ing.sortOrder ?? maxIngOrder + 1,
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };

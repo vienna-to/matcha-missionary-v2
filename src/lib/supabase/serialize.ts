@@ -30,6 +30,7 @@ export type DbIngredient = {
   package_amount: number;
   unit: Ingredient["unit"];
   pool: Ingredient["pool"] | null;
+  sort_order: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -153,6 +154,7 @@ export function fromIngredient(r: DbIngredient): Ingredient {
     packageAmount: Number(r.package_amount),
     unit: r.unit,
     pool: r.pool ?? null,
+    sortOrder: r.sort_order ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -337,6 +339,7 @@ export function toIngredientInsert(workspaceId: string, ing: Ingredient): Omit<D
     package_amount: ing.packageAmount,
     unit: ing.unit,
     pool: ing.pool ?? null,
+    sort_order: ing.sortOrder ?? null,
   };
 }
 
@@ -347,6 +350,7 @@ export function toIngredientPatch(patch: Partial<Ingredient>): Partial<DbIngredi
   if (patch.packageAmount !== undefined) r.package_amount = patch.packageAmount;
   if (patch.unit !== undefined) r.unit = patch.unit;
   if (patch.pool !== undefined) r.pool = patch.pool ?? null;
+  if (patch.sortOrder !== undefined) r.sort_order = patch.sortOrder;
   return r;
 }
 

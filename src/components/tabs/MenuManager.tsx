@@ -728,54 +728,199 @@ function LineRow({
   );
 }
 
+type IngSort =
+  | "manual"
+  | "name_asc"
+  | "name_desc"
+  | "price_desc"
+  | "price_asc"
+  | "unit_cost_desc"
+  | "unit_cost_asc"
+  | "qty_desc"
+  | "qty_asc"
+  | "edited_desc"
+  | "added_desc"
+  | "added_asc";
+
+const ING_SORT_LABELS: Record<IngSort, string> = {
+  manual: "Manual (drag to reorder)",
+  name_asc: "Name A → Z",
+  name_desc: "Name Z → A",
+  price_desc: "Package price: high → low",
+  price_asc: "Package price: low → high",
+  unit_cost_desc: "$/unit: high → low",
+  unit_cost_asc: "$/unit: low → high",
+  qty_desc: "Package amount: high → low",
+  qty_asc: "Package amount: low → high",
+  edited_desc: "Recently edited",
+  added_desc: "Newest added",
+  added_asc: "Oldest added",
+};
+
+const unitCost = (i: Ingredient) =>
+  i.packageAmount > 0 ? i.packagePrice / i.packageAmount : 0;
+const ts = (s: string) => (s ? Date.parse(s) || 0 : 0);
+
+function sortIngredients(list: Ingredient[], mode: IngSort): Ingredient[] {
+  // Array.prototype.sort is stable, so ties keep their manual order.
+  const manual = [...list].sort(
+    (a, b) =>
+      (a.sortOrder ?? Number.POSITIVE_INFINITY) -
+        (b.sortOrder ?? Number.POSITIVE_INFINITY) || 0,
+  );
+  const by = (fn: (i: Ingredient) => number, dir: 1 | -1) =>
+    manual.sort((a, b) => dir * (fn(a) - fn(b)));
+  switch (mode) {
+    case "manual":
+      return manual;
+    case "name_asc":
+      return manual.sort((a, b) => a.name.localeCompare(b.name));
+    case "name_desc":
+      return manual.sort((a, b) => b.name.localeCompare(a.name));
+    case "price_desc":
+      return by((i) => i.packagePrice, -1);
+    case "price_asc":
+      return by((i) => i.packagePrice, 1);
+    case "unit_cost_desc":
+      return by(unitCost, -1);
+    case "unit_cost_asc":
+      return by(unitCost, 1);
+    case "qty_desc":
+      return by((i) => i.packageAmount, -1);
+    case "qty_asc":
+      return by((i) => i.packageAmount, 1);
+    case "edited_desc":
+      return by((i) => ts(i.updatedAt), -1);
+    case "added_desc":
+      return by((i) => ts(i.createdAt), -1);
+    case "added_asc":
+      return by((i) => ts(i.createdAt), 1);
+  }
+}
+
 function IngredientsList() {
   const { state, dispatch } = useStore();
   const [creating, setCreating] = useState(false);
+  const [sortMode, setSortMode] = useState<IngSort>("manual");
+
+  const sorted = useMemo(
+    () => sortIngredients(state.ingredients, sortMode),
+    [state.ingredients, sortMode],
+  );
+  const dragEnabled = sortMode === "manual";
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    if (!e.over || e.active.id === e.over.id) return;
+    const from = sorted.findIndex((i) => i.id === e.active.id);
+    const to = sorted.findIndex((i) => i.id === e.over!.id);
+    if (from === -1 || to === -1) return;
+    arrayMove(sorted, from, to).forEach((ing, idx) => {
+      if (ing.sortOrder !== idx) {
+        dispatch({ type: "UPDATE_INGREDIENT", id: ing.id, patch: { sortOrder: idx } });
+      }
+    });
+  }
+
+  /** Make the current sorted view the new manual order. */
+  function applyAsManualOrder() {
+    sorted.forEach((ing, idx) => {
+      if (ing.sortOrder !== idx) {
+        dispatch({ type: "UPDATE_INGREDIENT", id: ing.id, patch: { sortOrder: idx } });
+      }
+    });
+    setSortMode("manual");
+  }
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="t-display text-xs text-matcha-900/60" htmlFor="ing-sort">
+            Sort by
+          </label>
+          <Select
+            id="ing-sort"
+            className="h-9 w-auto"
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as IngSort)}
+          >
+            {(Object.keys(ING_SORT_LABELS) as IngSort[]).map((k) => (
+              <option key={k} value={k}>
+                {ING_SORT_LABELS[k]}
+              </option>
+            ))}
+          </Select>
+          {!dragEnabled ? (
+            <Button size="sm" variant="outline" onClick={applyAsManualOrder}>
+              Save this order as manual
+            </Button>
+          ) : null}
+        </div>
         <Button onClick={() => setCreating(true)}>
           <Plus className="h-4 w-4" /> New ingredient
         </Button>
       </div>
+      {!dragEnabled ? (
+        <p className="t-caption text-xs text-matcha-900/60">
+          Drag-to-reorder is available in Manual mode.
+        </p>
+      ) : null}
       <Card>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="t-display text-left text-xs text-matcha-900/60">
-                <th className="py-2 pr-3">Name</th>
-                <th className="py-2 pr-3">Package $</th>
-                <th className="py-2 pr-3">Package amount</th>
-                <th className="py-2 pr-3">Unit</th>
-                <th className="py-2 pr-3 text-right">$/unit</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {state.ingredients.map((ing) => (
-                <IngredientRow
-                  key={ing.id}
-                  ing={ing}
-                  onChange={(patch) =>
-                    dispatch({ type: "UPDATE_INGREDIENT", id: ing.id, patch })
-                  }
-                  onDelete={() => {
-                    const used = state.menuItems.some((m) =>
-                      m.ingredientLines.some((l) => l.ingredientId === ing.id),
-                    );
-                    if (used) {
-                      alert("Used by a menu item — remove from items first.");
-                      return;
-                    }
-                    if (confirm(`Delete ingredient "${ing.name}"?`)) {
-                      dispatch({ type: "DELETE_INGREDIENT", id: ing.id });
-                    }
-                  }}
-                />
-              ))}
-            </tbody>
-          </table>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="t-display text-left text-xs text-matcha-900/60">
+                  <th className="w-6 py-2" />
+                  <th className="py-2 pr-3">Name</th>
+                  <th className="py-2 pr-3">Package $</th>
+                  <th className="py-2 pr-3">Package amount</th>
+                  <th className="py-2 pr-3">Unit</th>
+                  <th className="py-2 pr-3 text-right">$/unit</th>
+                  <th />
+                </tr>
+              </thead>
+              <SortableContext
+                items={sorted.map((i) => i.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <tbody>
+                  {sorted.map((ing) => (
+                    <IngredientRow
+                      key={ing.id}
+                      ing={ing}
+                      dragEnabled={dragEnabled}
+                      onChange={(patch) =>
+                        dispatch({ type: "UPDATE_INGREDIENT", id: ing.id, patch })
+                      }
+                      onDelete={() => {
+                        const used = state.menuItems.some((m) =>
+                          m.ingredientLines.some((l) => l.ingredientId === ing.id),
+                        );
+                        if (used) {
+                          alert("Used by a menu item — remove from items first.");
+                          return;
+                        }
+                        if (confirm(`Delete ingredient "${ing.name}"?`)) {
+                          dispatch({ type: "DELETE_INGREDIENT", id: ing.id });
+                        }
+                      }}
+                    />
+                  ))}
+                </tbody>
+              </SortableContext>
+            </table>
+          </DndContext>
         </div>
       </Card>
 
@@ -796,17 +941,41 @@ function IngredientsList() {
 
 function IngredientRow({
   ing,
+  dragEnabled,
   onChange,
   onDelete,
 }: {
   ing: Ingredient;
+  dragEnabled: boolean;
   onChange: (patch: Partial<Ingredient>) => void;
   onDelete: () => void;
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: ing.id, disabled: !dragEnabled });
   const perUnit =
     ing.packageAmount > 0 ? ing.packagePrice / ing.packageAmount : 0;
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    position: "relative",
+    zIndex: isDragging ? 20 : undefined,
+  };
   return (
-    <tr className="border-t border-cream-100">
+    <tr ref={setNodeRef} style={style} className="border-t border-cream-100 bg-white">
+      <td className="py-1.5 pr-1">
+        <button
+          type="button"
+          {...attributes}
+          {...(dragEnabled ? listeners : {})}
+          disabled={!dragEnabled}
+          aria-label="Drag to reorder"
+          title={dragEnabled ? "Drag to reorder" : "Switch to Manual sort to reorder"}
+          className="flex h-8 w-6 cursor-grab touch-none items-center justify-center rounded-md text-matcha-900/40 hover:bg-cream-100 hover:text-matcha-900 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      </td>
       <td className="py-1.5 pr-3">
         <TextField
           className="h-8"

@@ -77,6 +77,8 @@ export type Ingredient = {
   packageAmount: number;
   unit: Unit;
   pool?: Pool;
+  /** Ascending manual sort key for the Ingredients list. Missing = sort last. */
+  sortOrder?: number;
   createdAt: string;
   updatedAt: string;
 };

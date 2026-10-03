@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Archive, Trash2, AlertTriangle, GripVertical } from "lucide-react";
+import { Plus, Pencil, Archive, Trash2, AlertTriangle, GripVertical, ArrowUpDown } from "lucide-react";
 import {
   DndContext,
   KeyboardSensor,
@@ -728,73 +728,72 @@ function LineRow({
   );
 }
 
-type IngSort =
-  | "manual"
-  | "name_asc"
-  | "name_desc"
-  | "price_desc"
-  | "price_asc"
-  | "unit_cost_desc"
-  | "unit_cost_asc"
-  | "qty_desc"
-  | "qty_asc"
-  | "edited_desc"
-  | "added_desc"
-  | "added_asc";
+type IngSort = "manual" | "name" | "price" | "unit_cost" | "qty" | "edited" | "added";
+type SortDir = "asc" | "desc";
 
 const ING_SORT_LABELS: Record<IngSort, string> = {
   manual: "Manual (drag to reorder)",
-  name_asc: "Name A → Z",
-  name_desc: "Name Z → A",
-  price_desc: "Package price: high → low",
-  price_asc: "Package price: low → high",
-  unit_cost_desc: "$/unit: high → low",
-  unit_cost_asc: "$/unit: low → high",
-  qty_desc: "Package amount: high → low",
-  qty_asc: "Package amount: low → high",
-  edited_desc: "Recently edited",
-  added_desc: "Newest added",
-  added_asc: "Oldest added",
+  name: "Name",
+  price: "Package price",
+  unit_cost: "$/unit",
+  qty: "Package amount",
+  edited: "Last edited",
+  added: "Date added",
 };
+
+/** Direction that makes the most sense the first time a sort is picked. */
+const ING_SORT_DEFAULT_DIR: Record<IngSort, SortDir> = {
+  manual: "asc",
+  name: "asc",
+  price: "desc",
+  unit_cost: "desc",
+  qty: "desc",
+  edited: "desc",
+  added: "desc",
+};
+
+/** Human-readable label for the direction toggle, per sort field. */
+function dirLabel(mode: IngSort, dir: SortDir): string {
+  const lowHigh = dir === "asc" ? "Low → High" : "High → Low";
+  switch (mode) {
+    case "name":
+      return dir === "asc" ? "A → Z" : "Z → A";
+    case "edited":
+    case "added":
+      return dir === "asc" ? "Oldest first" : "Newest first";
+    default:
+      return lowHigh;
+  }
+}
 
 const unitCost = (i: Ingredient) =>
   i.packageAmount > 0 ? i.packagePrice / i.packageAmount : 0;
 const ts = (s: string) => (s ? Date.parse(s) || 0 : 0);
 
-function sortIngredients(list: Ingredient[], mode: IngSort): Ingredient[] {
+function sortIngredients(list: Ingredient[], mode: IngSort, dir: SortDir): Ingredient[] {
   // Array.prototype.sort is stable, so ties keep their manual order.
   const manual = [...list].sort(
     (a, b) =>
       (a.sortOrder ?? Number.POSITIVE_INFINITY) -
         (b.sortOrder ?? Number.POSITIVE_INFINITY) || 0,
   );
-  const by = (fn: (i: Ingredient) => number, dir: 1 | -1) =>
-    manual.sort((a, b) => dir * (fn(a) - fn(b)));
+  if (mode === "manual") return manual;
+  const sign = dir === "asc" ? 1 : -1;
+  const num = (fn: (i: Ingredient) => number) =>
+    manual.sort((a, b) => sign * (fn(a) - fn(b)));
   switch (mode) {
-    case "manual":
-      return manual;
-    case "name_asc":
-      return manual.sort((a, b) => a.name.localeCompare(b.name));
-    case "name_desc":
-      return manual.sort((a, b) => b.name.localeCompare(a.name));
-    case "price_desc":
-      return by((i) => i.packagePrice, -1);
-    case "price_asc":
-      return by((i) => i.packagePrice, 1);
-    case "unit_cost_desc":
-      return by(unitCost, -1);
-    case "unit_cost_asc":
-      return by(unitCost, 1);
-    case "qty_desc":
-      return by((i) => i.packageAmount, -1);
-    case "qty_asc":
-      return by((i) => i.packageAmount, 1);
-    case "edited_desc":
-      return by((i) => ts(i.updatedAt), -1);
-    case "added_desc":
-      return by((i) => ts(i.createdAt), -1);
-    case "added_asc":
-      return by((i) => ts(i.createdAt), 1);
+    case "name":
+      return manual.sort((a, b) => sign * a.name.localeCompare(b.name));
+    case "price":
+      return num((i) => i.packagePrice);
+    case "unit_cost":
+      return num(unitCost);
+    case "qty":
+      return num((i) => i.packageAmount);
+    case "edited":
+      return num((i) => ts(i.updatedAt));
+    case "added":
+      return num((i) => ts(i.createdAt));
   }
 }
 
@@ -802,10 +801,11 @@ function IngredientsList() {
   const { state, dispatch } = useStore();
   const [creating, setCreating] = useState(false);
   const [sortMode, setSortMode] = useState<IngSort>("manual");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const sorted = useMemo(
-    () => sortIngredients(state.ingredients, sortMode),
-    [state.ingredients, sortMode],
+    () => sortIngredients(state.ingredients, sortMode, sortDir),
+    [state.ingredients, sortMode, sortDir],
   );
   const dragEnabled = sortMode === "manual";
 
@@ -848,7 +848,11 @@ function IngredientsList() {
             id="ing-sort"
             className="h-9 w-auto"
             value={sortMode}
-            onChange={(e) => setSortMode(e.target.value as IngSort)}
+            onChange={(e) => {
+              const m = e.target.value as IngSort;
+              setSortMode(m);
+              setSortDir(ING_SORT_DEFAULT_DIR[m]);
+            }}
           >
             {(Object.keys(ING_SORT_LABELS) as IngSort[]).map((k) => (
               <option key={k} value={k}>
@@ -856,6 +860,16 @@ function IngredientsList() {
               </option>
             ))}
           </Select>
+          {!dragEnabled ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+              title="Reverse sort order"
+            >
+              <ArrowUpDown className="h-3.5 w-3.5" /> {dirLabel(sortMode, sortDir)}
+            </Button>
+          ) : null}
           {!dragEnabled ? (
             <Button size="sm" variant="outline" onClick={applyAsManualOrder}>
               Save this order as manual

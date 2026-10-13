@@ -72,11 +72,22 @@ export function orderCardIssue(
 }
 
 /**
+ * Whether an item is a pastry. Menu Manager has no Category control (new
+ * items are saved as "other"); the "Pastry" an owner picks there is the Size
+ * option (`pastry_count`). So either signal counts: category "pastry" or
+ * size "pastry_count".
+ */
+export function isPastry(item: Pick<MenuItem, "category" | "size"> | undefined): boolean {
+  return item?.category === "pastry" || item?.size === "pastry_count";
+}
+
+/**
  * Whether an item takes drink adjustments (milk / cream / sugar / ice).
- * Driven purely by category: anything in the pastry category (now or added
- * later) gets only a special-requests box. Unknown items default to "yes" so
+ * Pastries get only a special-requests box. Unknown items default to "yes" so
  * a lookup miss never silently hides drink options.
  */
-export function hasDrinkAdjustments(item: Pick<MenuItem, "category"> | undefined): boolean {
-  return item?.category !== "pastry";
+export function hasDrinkAdjustments(
+  item: Pick<MenuItem, "category" | "size"> | undefined,
+): boolean {
+  return !isPastry(item);
 }

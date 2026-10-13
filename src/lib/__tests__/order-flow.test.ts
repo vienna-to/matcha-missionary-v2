@@ -46,11 +46,26 @@ const draft = (over: Partial<OrderDraft> = {}): OrderDraft => ({
 });
 
 describe("pastries take no drink adjustments", () => {
-  it("is driven by category, not name", () => {
+  it("is driven by category or Pastry size, never by name", () => {
+    const namedPastry: MenuItem = { ...MATCHA_LATTE, name: "Pastry Latte" };
     expect(hasDrinkAdjustments(CHEESECAKE)).toBe(false);
     expect(hasDrinkAdjustments({ ...MATCHA_LATTE, category: "pastry" })).toBe(false);
     expect(hasDrinkAdjustments(MATCHA_LATTE)).toBe(true);
-    expect(hasDrinkAdjustments({ ...CHEESECAKE, category: "matcha" })).toBe(true);
+    expect(hasDrinkAdjustments(namedPastry)).toBe(true);
+  });
+
+  it("an item set to the Pastry size in Menu Manager counts, even with category 'other'", () => {
+    // This is how real pastries are stored: Menu Manager only sets size.
+    const real = { ...CHEESECAKE, category: "other" as const, size: "pastry_count" as const };
+    expect(hasDrinkAdjustments(real)).toBe(false);
+    const item = deriveOrderItem(
+      { menuItemId: real.id, quantity: 1, sugarAdjustment: "less", specialRequests: "warm" },
+      "ord-1",
+      { ...SNAP, menuItems: [MATCHA_LATTE, real] },
+    );
+    expect(item.sugarAdjustment).toBeUndefined();
+    expect(item.milkNameSnap).toBeUndefined();
+    expect(item.specialRequests).toBe("warm");
   });
 
   it("saves a pastry with no milk/cream/sugar/ice but keeps its special request", () => {

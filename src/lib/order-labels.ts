@@ -70,3 +70,13 @@ export function orderCardIssue(
   if (order.items.some((it) => itemDrinkName(it, snapshot) === null)) return "partial";
   return "ok";
 }
+
+/**
+ * Whether an item takes drink adjustments (milk / cream / sugar / ice).
+ * Driven purely by category: anything in the pastry category (now or added
+ * later) gets only a special-requests box. Unknown items default to "yes" so
+ * a lookup miss never silently hides drink options.
+ */
+export function hasDrinkAdjustments(item: Pick<MenuItem, "category"> | undefined): boolean {
+  return item?.category !== "pastry";
+}

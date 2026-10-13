@@ -25,6 +25,7 @@ import {
 import { DiscountRow } from "@/components/DiscountRow";
 import { useHelperMode } from "@/lib/helper-mode";
 import { newId } from "@/lib/id";
+import { hasDrinkAdjustments } from "@/lib/order-labels";
 import { cn, formatMoney } from "@/lib/utils";
 
 type DraftItem = {
@@ -278,12 +279,15 @@ function DraftItemRow({
   const mi = snapshot.menuItems.find((m) => m.id === item.menuItemId);
   if (!mi) return null;
   const summary: string[] = [];
+  const drinkOptions = hasDrinkAdjustments(mi);
   const milk = item.milkChoiceId ?? mi.defaultMilkId;
-  if (milk) {
+  if (drinkOptions && milk) {
     const ing = snapshot.ingredients.find((i) => i.id === milk);
     if (ing) summary.push(ing.name);
   }
-  if (item.creamChoiceId === "none") summary.push("no cream");
+  if (!drinkOptions) {
+    // pastry: no cream / sugar / ice in the summary
+  } else if (item.creamChoiceId === "none") summary.push("no cream");
   else {
     const cream = item.creamChoiceId ?? mi.defaultCreamId;
     if (cream) {
@@ -291,8 +295,8 @@ function DraftItemRow({
       if (ing) summary.push(ing.name);
     }
   }
-  if (item.sugarAdjustment && item.sugarAdjustment !== "normal") summary.push(item.sugarAdjustment);
-  if (item.iceAdjustment && item.iceAdjustment !== "normal") summary.push(`${item.iceAdjustment} ice`);
+  if (drinkOptions && item.sugarAdjustment && item.sugarAdjustment !== "normal") summary.push(item.sugarAdjustment);
+  if (drinkOptions && item.iceAdjustment && item.iceAdjustment !== "normal") summary.push(`${item.iceAdjustment} ice`);
   if (item.specialRequests) summary.push(`"${item.specialRequests}"`);
 
   const pastry = item.isCombo && item.comboPastryId
@@ -371,6 +375,7 @@ function CustomizeItemModal({
 }) {
   const [local, setLocal] = useState<DraftItem>(draft);
   const [showCustomize, setShowCustomize] = useState(false);
+  const drinkOptions = hasDrinkAdjustments(item);
 
   const milks = item.allowedMilkIds
     .map((id) => ingredients.find((i) => i.id === id))
@@ -390,7 +395,7 @@ function CustomizeItemModal({
   return (
     <Modal open onClose={onClose} title={item.name}>
       <div className="space-y-4">
-        {milks.length > 0 ? (
+        {drinkOptions && milks.length > 0 ? (
           <div>
             <Label>Milk</Label>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -407,7 +412,7 @@ function CustomizeItemModal({
           </div>
         ) : null}
 
-        {creams.length > 0 ? (
+        {drinkOptions && creams.length > 0 ? (
           <div>
             <Label>Cream</Label>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -434,11 +439,14 @@ function CustomizeItemModal({
           onClick={() => setShowCustomize((s) => !s)}
           className="w-full rounded-xl bg-cream-100 px-3 py-2 text-left text-xs font-medium text-matcha-900/70 hover:bg-cream-200"
         >
-          {showCustomize ? "Hide customize" : "Customize"} · sugar, ice, special requests
+          {showCustomize ? "Hide customize" : "Customize"} ·{" "}
+          {drinkOptions ? "sugar, ice, special requests" : "special requests"}
         </button>
 
         {showCustomize ? (
           <div className="space-y-3 rounded-xl border border-cream-200 p-3">
+            {drinkOptions ? (
+            <>
             <div>
               <Label>Sugar</Label>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -459,6 +467,8 @@ function CustomizeItemModal({
                 ))}
               </div>
             </div>
+            </>
+            ) : null}
             <Field label="Special requests">
               <Input
                 value={local.specialRequests ?? ""}

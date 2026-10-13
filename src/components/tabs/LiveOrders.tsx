@@ -3,17 +3,24 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Check, Plus, ShoppingBag, X } from "lucide-react";
 import { Button, EmptyState, Field, Modal, Select, Sheet } from "@/components/ui";
-import OrderFlow, { stepIndex, type CartLine, type Step } from "@/components/OrderFlow";
+import OrderFlow from "@/components/OrderFlow";
+import {
+  buildOrder,
+  cartTotal,
+  stepChecks,
+  validateSubmit,
+  type CartLine,
+  type Step,
+} from "@/lib/order-steps";
 import { useActiveEvent, useStore } from "@/lib/store";
 import {
   COMBO_PRICE,
   compareMenuItems,
   type MenuItem,
   type MenuSnapshot,
-  type Order,
   type PaymentMethod,
 } from "@/lib/types";
-import { deriveOrderItem, nextOrderNumber } from "@/lib/reducer";
+import { nextOrderNumber } from "@/lib/reducer";
 import { newId, nowIso } from "@/lib/id";
 import { useHelperMode } from "@/lib/helper-mode";
 import { formatMoney } from "@/lib/utils";
@@ -60,7 +67,7 @@ export default function LiveOrders() {
   // know cash/venmo/zelle totals per event, so no silent default.
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
   const [step, setStep] = useState<Step>("items");
-  const [maxStepIdx, setMaxStepIdx] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [comboPickerOpen, setComboPickerOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -70,14 +77,6 @@ export default function LiveOrders() {
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(confirmTimer.current), []);
-
-  // Removing the last item while on a later step would strand the flow.
-  useEffect(() => {
-    if (cart.length === 0 && step !== "items") {
-      setStep("items");
-      setMaxStepIdx(0);
-    }
-  }, [cart.length, step]);
 
   if (!event || !snapshot) {
     return (
@@ -93,21 +92,17 @@ export default function LiveOrders() {
   // don't lose the non-undefined narrowing TS gave us via the early return.
   const snap = snapshot;
   const activeItems = snap.menuItems.filter((m) => m.active).sort(compareMenuItems);
-  const total = cart.reduce((sum, line) => {
-    const unit = line.isCombo
-      ? COMBO_PRICE
-      : snap.menuItems.find((m) => m.id === line.menuItemId)?.price ?? 0;
-    const factor = 1 - Math.min(1, Math.max(0, (line.discountPct ?? 0) / 100));
-    return sum + unit * factor * line.quantity;
-  }, 0);
+  const total = cartTotal(cart, snap);
+  const checks = stepChecks({ cart, snapshot: snap, customerName, notes, paymentMethod });
   const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
 
   function goStep(next: Step) {
     setStep(next);
-    setMaxStepIdx((m) => Math.max(m, stepIndex(next)));
+    setNotice(null);
   }
 
   function addLine(item: MenuItem) {
+    setNotice(null);
     setCart((c) => [...c, { cid: newId("cart"), menuItemId: item.id, quantity: 1 }]);
   }
 
@@ -144,59 +139,32 @@ export default function LiveOrders() {
     setNotes("");
     setPaymentMethod("");
     setStep("items");
-    setMaxStepIdx(0);
+    setNotice(null);
     setSheetOpen(false);
     gridRef.current?.scrollIntoView({ block: "start" });
     gridRef.current?.focus({ preventScroll: true });
   }
 
-  const nameOk = customerName.trim().length > 0;
-  const submittable = cart.length > 0 && nameOk && paymentMethod !== "";
-
   function submit() {
-    if (!submittable) return;
+    // Only an item and a payment method are required; name and adjustments
+    // are optional. If one is missing, say so and jump to that step.
+    const check = validateSubmit({ cart, paymentMethod });
+    if (!check.ok) {
+      setStep(check.step);
+      setNotice(check.message);
+      return;
+    }
     // Build the full Order in the caller so the dispatch wrapper can write to
     // Supabase without re-reading stateRef (which races on rapid submits).
-    const orderId = newId("ord");
-    const orderNumber = nextOrderNumber(state, activeEvent_.id);
-    const submittedAt = nowIso();
-    const items = cart.map((l) =>
-      deriveOrderItem(
-        {
-          menuItemId: l.menuItemId,
-          quantity: l.quantity,
-          milkChoiceId: l.milkChoiceId,
-          creamChoiceId: l.creamChoiceId,
-          sugarAdjustment: l.sugarAdjustment,
-          iceAdjustment: l.iceAdjustment,
-          specialRequests: l.specialRequests,
-          discountPct: l.discountPct,
-          isCombo: l.isCombo,
-          comboPastryId: l.comboPastryId,
-          status: "pending",
-        },
-        orderId,
-        snap,
-        activeEvent_.cupSizeOz,
-      ),
+    const order = buildOrder(
+      { cart, snapshot: snap, customerName, notes, paymentMethod: paymentMethod as PaymentMethod },
+      {
+        orderId: newId("ord"),
+        orderNumber: nextOrderNumber(state, activeEvent_.id),
+        submittedAt: nowIso(),
+        event: activeEvent_,
+      },
     );
-    const order: Order = {
-      id: orderId,
-      eventId: activeEvent_.id,
-      orderNumber,
-      customerName: customerName.trim(),
-      items,
-      notes: notes.trim() || undefined,
-      submittedAt,
-      updatedAt: submittedAt,
-      // Orders are pending until the barista checks all items off / marks the
-      // order complete. Legacy paymentStatus kept so DB column has a value.
-      status: "pending",
-      paymentStatus: "paid",
-      // Captured for tax reports. The narrowed type here is safe because
-      // `submittable` requires a payment method.
-      paymentMethod: paymentMethod as PaymentMethod,
-    };
     dispatch({ type: "SUBMIT_ORDER", order });
 
     setConfirmation(`Order sent · ${order.customerName} · ${formatMoney(total)}`);
@@ -212,14 +180,18 @@ export default function LiveOrders() {
       snapshot={snap}
       total={total}
       step={step}
-      maxStepIdx={maxStepIdx}
+      checks={checks}
+      notice={notice}
       onStep={goStep}
       customerName={customerName}
       setCustomerName={setCustomerName}
       notes={notes}
       setNotes={setNotes}
       paymentMethod={paymentMethod}
-      setPaymentMethod={setPaymentMethod}
+      setPaymentMethod={(m) => {
+        setNotice(null);
+        setPaymentMethod(m);
+      }}
       onUpdateLine={updateLine}
       onRemoveLine={removeLine}
       onIncrement={incrementLine}

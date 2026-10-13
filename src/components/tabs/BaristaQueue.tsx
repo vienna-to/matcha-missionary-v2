@@ -22,6 +22,7 @@ import { useHelperMode } from "@/lib/helper-mode";
 import { playPing, unlockAudio } from "@/lib/audio";
 import { cn, formatMoney, formatTime, minutesAgo } from "@/lib/utils";
 import {
+  hasDrinkAdjustments,
   itemDrinkName,
   orderCardIssue,
   resolveCreamName,
@@ -731,6 +732,8 @@ function ItemModifiers({
   const ingredients: Ingredient[] = snapshot.ingredients;
 
   const mods: string[] = [];
+  // Pastries show only their special request: no milk / cream / sugar / ice.
+  const drinkOptions = hasDrinkAdjustments(drink);
 
   // Always show the milk — fall back to the menu item's default if the
   // customer didn't pick one. This is what the barista actually needs.
@@ -738,13 +741,13 @@ function ItemModifiers({
   // fallback for orders placed before snapshots existed.
   const milkName =
     item.milkNameSnap ?? resolveMilkName(item.milkChoiceId, drink, ingredients);
-  if (milkName) mods.push(milkName);
+  if (drinkOptions && milkName) mods.push(milkName);
 
   const creamName =
     item.creamNameSnap ?? resolveCreamName(item.creamChoiceId, drink, ingredients);
-  if (creamName) mods.push(creamName);
+  if (drinkOptions && creamName) mods.push(creamName);
 
-  if (item.sugarAdjustment && item.sugarAdjustment !== "normal") {
+  if (drinkOptions && item.sugarAdjustment && item.sugarAdjustment !== "normal") {
     mods.push(
       item.sugarAdjustment === "less"
         ? "less sweet"
@@ -753,7 +756,7 @@ function ItemModifiers({
         : "no agave",
     );
   }
-  if (item.iceAdjustment && item.iceAdjustment !== "normal") {
+  if (drinkOptions && item.iceAdjustment && item.iceAdjustment !== "normal") {
     mods.push(item.iceAdjustment === "light" ? "light ice" : "extra ice");
   }
   if (item.specialRequests) mods.push(`"${item.specialRequests}"`);

@@ -14,35 +14,17 @@ import {
   type PaymentMethod,
   type SugarAdjustment,
 } from "@/lib/types";
-import { resolveCreamName, resolveMilkChoices, resolveMilkName } from "@/lib/order-labels";
+import {
+  hasDrinkAdjustments,
+  resolveCreamName,
+  resolveMilkChoices,
+  resolveMilkName,
+} from "@/lib/order-labels";
+import { STEPS, stepIndex, type CartLine, type Step } from "@/lib/order-steps";
 import { cn, formatMoney } from "@/lib/utils";
 
-export type CartLine = {
-  cid: string;
-  menuItemId: string;
-  quantity: number;
-  milkChoiceId?: string;
-  creamChoiceId?: string; // "none" means no cream; undefined means use default
-  sugarAdjustment?: SugarAdjustment;
-  iceAdjustment?: IceAdjustment;
-  specialRequests?: string;
-  /** Per-item discount as a percent (0–100). 100 = free. */
-  discountPct?: number;
-  /** Combo deal: priced at COMBO_PRICE, bundles drink (menuItemId) + pastry. */
-  isCombo?: boolean;
-  comboPastryId?: string;
-};
-
-/** Items › Adjustments › Name › Payment — the order is always taken in this
- *  sequence, so the whole UI is one linear flow. */
-export type Step = "items" | "adjust" | "name" | "payment";
-export const STEPS: Array<{ id: Step; label: string }> = [
-  { id: "items", label: "Items" },
-  { id: "adjust", label: "Adjustments" },
-  { id: "name", label: "Name" },
-  { id: "payment", label: "Payment" },
-];
-export const stepIndex = (s: Step) => STEPS.findIndex((x) => x.id === s);
+export { STEPS, stepIndex };
+export type { CartLine, Step };
 
 const SUGAR_OPTIONS: Array<[SugarAdjustment, string]> = [
   ["less", "Less sweet"],
@@ -61,8 +43,10 @@ type Props = {
   snapshot: MenuSnapshot;
   total: number;
   step: Step;
-  /** Furthest step reached; steps up to here are tappable in the indicator. */
-  maxStepIdx: number;
+  /** Per-step "has real input" flags that drive the checkmarks. */
+  checks: Record<Step, boolean>;
+  /** Inline validation message (e.g. missing item / payment), or null. */
+  notice: string | null;
   onStep: (s: Step) => void;
   customerName: string;
   setCustomerName: (s: string) => void;
@@ -83,7 +67,6 @@ export default function OrderFlow(p: Props) {
   const { step, cart } = p;
   const nameRef = useRef<HTMLInputElement>(null);
   const idx = stepIndex(step);
-  const nameOk = p.customerName.trim().length > 0;
 
   // Raise the keyboard as soon as the Name step appears. A layout effect runs
   // inside the same event turn as the tap that triggered the step change,
@@ -92,17 +75,19 @@ export default function OrderFlow(p: Props) {
     if (step === "name") nameRef.current?.focus();
   }, [step]);
 
-  const hasAdjustments =
-    p.notes.trim().length > 0 ||
-    cart.some(
-      (l) => l.milkChoiceId || l.sugarAdjustment || l.iceAdjustment || l.specialRequests?.trim(),
-    );
-
   return (
     <div className={cn("flex flex-col rounded-2xl border border-cream-200 bg-white shadow-sm", p.className)}>
-      <StepBar step={step} maxStepIdx={p.maxStepIdx} cartEmpty={cart.length === 0} onStep={p.onStep} />
+      <StepBar step={step} checks={p.checks} onStep={p.onStep} />
 
       <div className="flex-1 space-y-3 p-4">
+        {p.notice ? (
+          <div
+            role="alert"
+            className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+          >
+            {p.notice}
+          </div>
+        ) : null}
         {step === "items" && <ItemsStep {...p} />}
         {step === "adjust" && <AdjustStep {...p} />}
         {step === "name" && (
@@ -115,7 +100,7 @@ export default function OrderFlow(p: Props) {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                     e.preventDefault();
-                    if (nameOk) p.onStep("payment");
+                    p.onStep("payment");
                   }
                 }}
                 enterKeyHint="next"
@@ -131,7 +116,7 @@ export default function OrderFlow(p: Props) {
         {step === "payment" && (
           <div className="space-y-4">
             <div className="rounded-xl bg-cream-100 px-4 py-3">
-              <div className="t-display text-base">{p.customerName.trim()}</div>
+              <div className="t-display text-base">{p.customerName.trim() || "No name"}</div>
               <div className="t-caption text-sm text-matcha-900/70">
                 {cart.reduce((s, l) => s + l.quantity, 0)} item
                 {cart.reduce((s, l) => s + l.quantity, 0) === 1 ? "" : "s"} ·{" "}
@@ -194,18 +179,16 @@ export default function OrderFlow(p: Props) {
           {step === "adjust" && (
             <Button
               size="lg"
-              variant={hasAdjustments ? "primary" : "secondary"}
               className="h-14 w-full text-base"
               onClick={() => p.onStep("name")}
             >
-              {hasAdjustments ? "Done" : "Skip"} <ChevronRight className="h-5 w-5" />
+              Next: Name <ChevronRight className="h-5 w-5" />
             </Button>
           )}
           {step === "name" && (
             <Button
               size="lg"
               className="h-14 w-full text-base"
-              disabled={!nameOk}
               onClick={() => p.onStep("payment")}
             >
               Next: Payment <ChevronRight className="h-5 w-5" />
@@ -215,7 +198,6 @@ export default function OrderFlow(p: Props) {
             <Button
               size="lg"
               className="h-14 w-full text-base"
-              disabled={p.paymentMethod === "" || !nameOk || cart.length === 0}
               onClick={p.onSubmit}
             >
               <Check className="h-5 w-5" /> Confirm order
@@ -229,48 +211,45 @@ export default function OrderFlow(p: Props) {
 
 function StepBar({
   step,
-  maxStepIdx,
-  cartEmpty,
+  checks,
   onStep,
 }: {
   step: Step;
-  maxStepIdx: number;
-  cartEmpty: boolean;
+  checks: Record<Step, boolean>;
   onStep: (s: Step) => void;
 }) {
-  const current = stepIndex(step);
   return (
     <ol className="sticky top-0 z-10 flex rounded-t-2xl border-b border-cream-200 bg-white p-1.5">
       {STEPS.map((s, i) => {
-        const done = i < current;
-        const active = i === current;
-        // Back to any earlier step, or forward to any step already reached.
-        const reachable = i === 0 || (!cartEmpty && i <= maxStepIdx);
+        const active = s.id === step;
+        // A check means the step holds real input — not that it was viewed.
+        const checked = checks[s.id];
         return (
           <li key={s.id} className="flex-1">
             <button
               type="button"
-              disabled={!reachable}
               onClick={() => onStep(s.id)}
               aria-current={active ? "step" : undefined}
               className={cn(
                 "t-display flex min-h-12 w-full flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[11px] transition-colors",
                 active
                   ? "bg-matcha-500 text-white"
-                  : done
-                    ? "text-matcha-700 hover:bg-cream-100"
-                    : reachable
-                      ? "text-matcha-900 hover:bg-cream-100"
-                      : "text-matcha-900/30",
+                  : "text-matcha-900 hover:bg-cream-100",
               )}
             >
               <span
                 className={cn(
                   "flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
-                  active ? "bg-white/25" : done ? "bg-matcha-100" : "bg-cream-200",
+                  checked
+                    ? active
+                      ? "bg-white text-matcha-600"
+                      : "bg-matcha-500 text-white"
+                    : active
+                      ? "bg-white/25"
+                      : "bg-cream-200",
                 )}
               >
-                {done ? <Check className="h-3 w-3" /> : i + 1}
+                {checked ? <Check className="h-3 w-3" /> : i + 1}
               </span>
               {s.label}
             </button>
@@ -287,13 +266,13 @@ function StepBar({
 
 function lineMods(line: CartLine, item: MenuItem, snapshot: MenuSnapshot): string[] {
   const mods: string[] = [];
-  if (item.category !== "pastry") {
+  if (hasDrinkAdjustments(item)) {
     const milk = resolveMilkName(line.milkChoiceId, item, snapshot.ingredients);
     if (milk) mods.push(milk);
     const cream = resolveCreamName(line.creamChoiceId, item, snapshot.ingredients);
     if (cream) mods.push(cream);
   }
-  if (line.sugarAdjustment && line.sugarAdjustment !== "normal") {
+  if (hasDrinkAdjustments(item) && line.sugarAdjustment && line.sugarAdjustment !== "normal") {
     mods.push(
       line.sugarAdjustment === "less"
         ? "less sweet"
@@ -302,7 +281,7 @@ function lineMods(line: CartLine, item: MenuItem, snapshot: MenuSnapshot): strin
           : "no agave",
     );
   }
-  if (line.iceAdjustment && line.iceAdjustment !== "normal") {
+  if (hasDrinkAdjustments(item) && line.iceAdjustment && line.iceAdjustment !== "normal") {
     mods.push(line.iceAdjustment === "light" ? "light ice" : "extra ice");
   }
   if (line.specialRequests?.trim()) mods.push(`"${line.specialRequests.trim()}"`);
@@ -466,10 +445,15 @@ function AdjustStep(p: Props) {
   const milks = resolveMilkChoices(p.snapshot.ingredients);
   return (
     <div className="space-y-3">
+      {p.cart.length === 0 ? (
+        <div className="t-caption rounded-xl border border-dashed border-cream-300 px-4 py-6 text-center text-sm text-matcha-900/60">
+          no items yet. add some on the Items step; adjustments will show up here.
+        </div>
+      ) : null}
       {p.cart.map((line) => {
         const item = p.snapshot.menuItems.find((m) => m.id === line.menuItemId);
         if (!item) return null;
-        const isPastry = item.category === "pastry";
+        const isPastry = !hasDrinkAdjustments(item);
         const selectedMilk = line.milkChoiceId ?? item.defaultMilkId;
         return (
           <div key={line.cid} className="space-y-3 rounded-xl border border-cream-200 bg-cream-50/50 p-3">

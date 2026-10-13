@@ -1,6 +1,6 @@
 import { computeItemCost } from "./calc";
 import { newId, nowIso } from "./id";
-import { resolveCreamName, resolveMilkName } from "./order-labels";
+import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
 import {
   COMBO_PRICE,
   type AppState,
@@ -120,10 +120,27 @@ export function deriveOrderItem(
   cupSizeOz?: number,
 ): OrderItem {
   const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
+  // Pastries take no milk / cream / sugar / ice: drop them (and skip the
+  // default-milk snapshot) so nothing drink-related is ever saved on them.
+  // Special requests are kept.
+  if (!hasDrinkAdjustments(mi)) {
+    raw = {
+      ...raw,
+      milkChoiceId: undefined,
+      creamChoiceId: undefined,
+      sugarAdjustment: undefined,
+      iceAdjustment: undefined,
+    };
+  }
+  const drinkOptions = hasDrinkAdjustments(mi);
   // Snapshot the human-readable milk / cream now, so the barista card doesn't
   // depend on an ingredient lookup that can miss later.
-  const milkNameSnap = resolveMilkName(raw.milkChoiceId, mi, snapshot.ingredients);
-  const creamNameSnap = resolveCreamName(raw.creamChoiceId, mi, snapshot.ingredients);
+  const milkNameSnap = drinkOptions
+    ? resolveMilkName(raw.milkChoiceId, mi, snapshot.ingredients)
+    : undefined;
+  const creamNameSnap = drinkOptions
+    ? resolveCreamName(raw.creamChoiceId, mi, snapshot.ingredients)
+    : undefined;
   const drinkCost = mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,

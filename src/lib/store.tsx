@@ -45,7 +45,15 @@ import {
   type DbOrderItem,
   type DbWorkspace,
 } from "./supabase/serialize";
-import { joinWorkspace, loadFullState, subscribeAll } from "./supabase/sync";
+import {
+  fetchActiveEventId,
+  fetchEventOrders,
+  fetchOrderWithItems,
+  joinWorkspace,
+  loadFullState,
+  subscribeAll,
+} from "./supabase/sync";
+import { resetSyncStatus, setSyncStatus } from "./supabase/sync-status";
 import { writer, type Writer } from "./supabase/writer";
 
 const STORAGE_KEY = "matcha-missionary:state:v1";
@@ -122,7 +130,21 @@ type StoreCtx = {
   unpair?: () => void;
   /** Current Supabase workspace UUID (Supabase mode only). */
   workspaceId?: string;
+  /** Re-read one order (with its items) from the server. Resolves true if the
+   *  order exists and has items. Supabase mode only. */
+  refreshOrder?: (orderId: string) => Promise<boolean>;
+  /** Rebuild the realtime connection and do a full refetch right now. */
+  syncNow?: () => void;
 };
+
+const POLL_MS = 5_000;
+const FULL_RESYNC_EVERY_TICKS = 12; // ~60s safety net on top of the 5s poll
+const UNSYNCED_RETRY_EVERY_TICKS = 6; // ~30s
+/** A poll/refetch result is discarded if we wrote locally this recently: the
+ *  write may still be in flight and the read could predate it. */
+const WRITE_GUARD_MS = 2_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const StoreContext = createContext<StoreCtx | null>(null);
 
@@ -259,10 +281,128 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [pairing.phase, pairing, supabase]);
 
+  // Track the state across dispatches to look up data the writer needs.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // ---- sync bookkeeping ----
+  const lastWriteAtRef = useRef(0);
+  /** Orders submitted here whose write isn't confirmed yet. A refetch must
+   *  not drop them. */
+  const pendingOrdersRef = useRef(new Set<string>());
+  /** Subset that failed every retry; re-attempted periodically. */
+  const unsyncedRef = useRef(new Map<string, Order>());
+  const submittingRef = useRef(new Set<string>());
+  const fetchingOrdersRef = useRef(new Set<string>());
+  const syncingRef = useRef(false);
+  const lastFullAtRef = useRef(0);
+  const flushUnsyncedRef = useRef<() => void>(() => {});
+  const [channelNonce, setChannelNonce] = useState(0);
+
+  const workspaceIdForSync = pairing.phase === "ready" ? pairing.workspaceId : null;
+
+  /** Read the full order (with items) and put it in state. Used whenever an
+   *  order or item event references an order we don't hold yet, so a card is
+   *  only ever created from a complete read, never as an empty shell. */
+  const fetchFullOrder = useCallback(
+    async (orderId: string): Promise<boolean> => {
+      if (!workspaceIdForSync) return false;
+      if (fetchingOrdersRef.current.has(orderId)) return false;
+      fetchingOrdersRef.current.add(orderId);
+      try {
+        for (let i = 0; i < 3; i++) {
+          try {
+            const o = await fetchOrderWithItems(supabase, workspaceIdForSync, orderId);
+            setSyncStatus({ lastOkAt: Date.now() });
+            if (!o) return false; // deleted meanwhile
+            baseDispatch({ type: "RT_SET_ORDER", order: o });
+            if (o.items.length > 0) return true;
+          } catch (e) {
+            console.warn("[sync] fetchFullOrder failed", orderId, e);
+          }
+          await sleep(600 * (i + 1));
+        }
+        return false;
+      } finally {
+        fetchingOrdersRef.current.delete(orderId);
+      }
+    },
+    [supabase, workspaceIdForSync],
+  );
+
+  /** "poll": the active event's orders + items (cheap, every 5s).
+   *  "full": everything (wake / focus / reconnect / every ~60s). */
+  const resync = useCallback(
+    async (mode: "poll" | "full") => {
+      if (!workspaceIdForSync) return;
+      if (syncingRef.current) return;
+      syncingRef.current = true;
+      const startedAt = Date.now();
+      const stale = () => lastWriteAtRef.current > startedAt - WRITE_GUARD_MS;
+      try {
+        if (mode === "poll") {
+          const local = stateRef.current.events.find((e) => e.isActive);
+          const serverActiveId = await fetchActiveEventId(supabase, workspaceIdForSync);
+          if (serverActiveId !== (local?.id ?? null)) {
+            // Active event changed on another device: pull everything.
+            const snap = await loadFullState(supabase, workspaceIdForSync);
+            setSyncStatus({ lastOkAt: Date.now() });
+            lastFullAtRef.current = Date.now();
+            if (!stale()) {
+              baseDispatch({
+                type: "RT_SYNC_FULL",
+                state: snap,
+                keepIds: [...pendingOrdersRef.current],
+              });
+            }
+            return;
+          }
+          if (!local) {
+            setSyncStatus({ lastOkAt: Date.now() });
+            return;
+          }
+          const orders = await fetchEventOrders(supabase, workspaceIdForSync, local.id);
+          setSyncStatus({ lastOkAt: Date.now() });
+          if (stale()) return;
+          baseDispatch({
+            type: "RT_SYNC_ORDERS",
+            orders,
+            scopeEventId: local.id,
+            keepIds: [...pendingOrdersRef.current],
+          });
+        } else {
+          const snap = await loadFullState(supabase, workspaceIdForSync);
+          setSyncStatus({ lastOkAt: Date.now() });
+          lastFullAtRef.current = Date.now();
+          if (stale()) return;
+          baseDispatch({
+            type: "RT_SYNC_FULL",
+            state: snap,
+            keepIds: [...pendingOrdersRef.current],
+          });
+        }
+      } catch (e) {
+        console.warn(`[sync] ${mode} resync failed`, e);
+      } finally {
+        syncingRef.current = false;
+      }
+    },
+    [supabase, workspaceIdForSync],
+  );
+  const resyncRef = useRef(resync);
+  resyncRef.current = resync;
+
+  const syncNow = useCallback(() => {
+    setChannelNonce((n) => n + 1);
+    void resyncRef.current("full");
+  }, []);
+
   // Subscribe to realtime once ready
   useEffect(() => {
     if (pairing.phase !== "ready") return;
     const wid = pairing.workspaceId;
+    let disposed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     const unsub = subscribeAll(supabase, wid, {
       onIngredient: (kind, row) => {
         if (kind === "DELETE") baseDispatch({ type: "RT_DELETE_INGREDIENT", id: row.id });
@@ -287,7 +427,13 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         const r = row as DbOrder;
-        // Build an Order shell without items; items arrive via order_items channel.
+        if (!stateRef.current.orders.some((o) => o.id === r.id)) {
+          // New to this device: never build an item-less shell (that was the
+          // blank barista card). Read the order together with its items.
+          void fetchFullOrder(r.id);
+          return;
+        }
+        // Known order: only order-level fields changed; keep our items.
         const shell = fromOrder(r, []);
         const { items, ...orderNoItems } = shell;
         void items;
@@ -299,7 +445,13 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           baseDispatch({ type: "RT_DELETE_ORDER_ITEM", id: r.id, orderId: r.order_id });
           return;
         }
-        baseDispatch({ type: "RT_UPSERT_ORDER_ITEM", item: fromOrderItem(row as DbOrderItem) });
+        const item = fromOrderItem(row as DbOrderItem);
+        if (!stateRef.current.orders.some((o) => o.id === item.orderId)) {
+          // Item arrived before (or without) its order event.
+          void fetchFullOrder(item.orderId);
+          return;
+        }
+        baseDispatch({ type: "RT_UPSERT_ORDER_ITEM", item });
       },
       onInventory: (kind, row) => {
         if (kind === "DELETE") {
@@ -314,9 +466,92 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
       onWorkspace: (row) => {
         baseDispatch({ type: "RT_UPDATE_SETTINGS", patch: fromWorkspaceSettings(row as DbWorkspace) });
       },
+    }, (status) => {
+      if (disposed) return;
+      if (status === "SUBSCRIBED") {
+        setSyncStatus({ channelUp: true });
+        // Anything that happened while we were disconnected was never
+        // replayed, so close the gap with a full read.
+        void resyncRef.current("full");
+        return;
+      }
+      setSyncStatus({ channelUp: false });
+      // Rebuild the channel ourselves; a tablet that slept can hold a dead
+      // socket that never recovers on its own.
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        if (!disposed) setChannelNonce((n) => n + 1);
+      }, 2_000);
     });
-    return unsub;
-  }, [pairing.phase, pairing, supabase]);
+    return () => {
+      disposed = true;
+      clearTimeout(reconnectTimer);
+      unsub();
+    };
+  }, [pairing.phase, pairing, supabase, channelNonce, fetchFullOrder]);
+
+  // Switch the sync badge on with the provider; clear it on unpair/unmount.
+  useEffect(() => {
+    if (pairing.phase !== "ready") return;
+    setSyncStatus({ enabled: true, lastOkAt: Date.now() });
+    return () => resetSyncStatus();
+  }, [pairing.phase]);
+
+  // Fallback poll every 5s (+ a full refetch about every minute, and a retry
+  // of unsaved orders about every 30s) so a dropped realtime connection can't
+  // leave a screen behind for long.
+  useEffect(() => {
+    if (pairing.phase !== "ready") return;
+    let tick = 0;
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      tick++;
+      void resyncRef.current(tick % FULL_RESYNC_EVERY_TICKS === 0 ? "full" : "poll");
+      if (tick % UNSYNCED_RETRY_EVERY_TICKS === 0) flushUnsyncedRef.current();
+    }, POLL_MS);
+    return () => clearInterval(t);
+  }, [pairing.phase]);
+
+  // Wake from sleep / tab regains focus / network returns: rebuild the socket
+  // if we were away a while, and refetch everything.
+  useEffect(() => {
+    if (pairing.phase !== "ready") return;
+    let hiddenAt = 0;
+    const wake = (rebuild: boolean) => {
+      if (rebuild) setChannelNonce((n) => n + 1);
+      void resyncRef.current("full");
+      flushUnsyncedRef.current();
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        return;
+      }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      wake(away > 4_000);
+    };
+    const onFocus = () => {
+      if (Date.now() - lastFullAtRef.current > 2_000) wake(false);
+    };
+    const onOnline = () => wake(true);
+    const onOffline = () => setSyncStatus({ channelUp: false });
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) wake(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [pairing.phase]);
 
   // Build a write-mirroring dispatcher
   const w: Writer | null = useMemo(() => {
@@ -324,9 +559,57 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
     return writer(supabase, pairing.workspaceId);
   }, [pairing, supabase]);
 
-  // Track the state across dispatches to look up data the writer needs.
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  /** Save an order to the server, retrying; keeps it protected from refetches
+   *  and visible in the sync badge until it is confirmed saved. */
+  const submitWithRetry = useCallback(
+    async (order: Order) => {
+      if (!w || submittingRef.current.has(order.id)) return;
+      submittingRef.current.add(order.id);
+      pendingOrdersRef.current.add(order.id);
+      try {
+        for (const delay of [0, 3_000, 10_000, 30_000]) {
+          if (delay) await sleep(delay);
+          // Deleted locally while we were retrying: stop. (Skipped on the
+          // first pass: the reducer's update may not have rendered yet.)
+          if (delay && !stateRef.current.orders.some((o) => o.id === order.id)) {
+            pendingOrdersRef.current.delete(order.id);
+            unsyncedRef.current.delete(order.id);
+            setSyncStatus({ unsynced: unsyncedRef.current.size });
+            return;
+          }
+          const result = await w.submitOrder(order);
+          if ("finalOrderNumber" in result) {
+            if (result.finalOrderNumber !== order.orderNumber) {
+              baseDispatch({
+                type: "UPDATE_ORDER",
+                id: order.id,
+                patch: { orderNumber: result.finalOrderNumber },
+              });
+            }
+            lastWriteAtRef.current = Date.now();
+            pendingOrdersRef.current.delete(order.id);
+            unsyncedRef.current.delete(order.id);
+            setSyncStatus({ unsynced: unsyncedRef.current.size });
+            return;
+          }
+          unsyncedRef.current.set(order.id, order);
+          setSyncStatus({ unsynced: unsyncedRef.current.size });
+        }
+      } finally {
+        submittingRef.current.delete(order.id);
+      }
+    },
+    [w],
+  );
+
+  flushUnsyncedRef.current = () => {
+    for (const o of unsyncedRef.current.values()) void submitWithRetry(o);
+  };
+
+  const refreshOrder = useCallback(
+    (orderId: string) => fetchFullOrder(orderId),
+    [fetchFullOrder],
+  );
 
   const dispatch = useCallback(
     (a: Action) => {
@@ -339,6 +622,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
       // Apply locally first (optimistic).
       baseDispatch(a);
       if (!w) return;
+      if (!a.type.startsWith("RT_")) lastWriteAtRef.current = Date.now();
 
       if (revision) {
         baseDispatch({ type: "APPEND_ORDER_REVISION", revision });
@@ -400,15 +684,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           // The writer may bump orderNumber on a unique-constraint collision;
           // reflect that locally so the submitter's device and the RT echoes
           // to other devices agree on the final number.
-          w.submitOrder(a.order).then((result) => {
-            if ("finalOrderNumber" in result && result.finalOrderNumber !== a.order.orderNumber) {
-              baseDispatch({
-                type: "UPDATE_ORDER",
-                id: a.order.id,
-                patch: { orderNumber: result.finalOrderNumber },
-              });
-            }
-          });
+          void submitWithRetry(a.order);
           break;
         case "UPDATE_ORDER":
           w.updateOrder(a.id, a.patch);
@@ -424,6 +700,10 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           }
           break;
         case "DELETE_ORDER": {
+          pendingOrdersRef.current.delete(a.id);
+          if (unsyncedRef.current.delete(a.id)) {
+            setSyncStatus({ unsynced: unsyncedRef.current.size });
+          }
           // Use the pre-delete state to compute renumbering for the remaining
           // siblings, then issue the writes after the delete completes.
           const renumber = renumberAfterDelete(stateRef.current.orders, a.id);
@@ -485,7 +765,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           break;
       }
     },
-    [w],
+    [w, submitWithRetry],
   );
 
   const activeEvent = useMemo(() => state.events.find((e) => e.isActive), [state.events]);
@@ -498,8 +778,17 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
   const workspaceId = pairing.phase === "ready" ? pairing.workspaceId : undefined;
 
   const value = useMemo<StoreCtx>(
-    () => ({ state, dispatch, activeEvent, backend: "supabase", unpair, workspaceId }),
-    [state, dispatch, activeEvent, unpair, workspaceId],
+    () => ({
+      state,
+      dispatch,
+      activeEvent,
+      backend: "supabase",
+      unpair,
+      workspaceId,
+      refreshOrder,
+      syncNow,
+    }),
+    [state, dispatch, activeEvent, unpair, workspaceId, refreshOrder, syncNow],
   );
 
   // While pairing or loading, show a small chrome instead of the app.

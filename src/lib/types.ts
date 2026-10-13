@@ -247,6 +247,10 @@ export type OrderItem = {
   quantity: number;
   milkChoiceId?: string;
   creamChoiceId?: string;
+  /** Human-readable milk / cream captured at order time, so a barista card
+   *  never depends on an ingredient lookup that can miss. */
+  milkNameSnap?: string;
+  creamNameSnap?: string;
   sugarAdjustment?: SugarAdjustment;
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;

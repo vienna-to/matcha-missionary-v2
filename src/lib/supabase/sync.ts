@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AppState } from "@/lib/types";
+import type { AppState, Order } from "@/lib/types";
 import {
   buildAppState,
   fromEvent,
@@ -71,6 +71,64 @@ export async function loadFullState(
   );
 }
 
+// ---------- Targeted reads (poll / single-order refetch) ----------
+//
+// An order is read together with its items in ONE request (PostgREST embed),
+// so the result is a consistent snapshot — never an order without the items
+// that were committed with it.
+
+type DbOrderWithItems = DbOrder & { order_items: DbOrderItem[] | null };
+
+function toOrder(r: DbOrderWithItems): Order {
+  return fromOrder(r, (r.order_items ?? []).map(fromOrderItem));
+}
+
+export async function fetchEventOrders(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  eventId: string,
+): Promise<Order[]> {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("workspace_id", workspaceId)
+    .eq("event_id", eventId);
+  if (error) throw error;
+  return ((data ?? []) as DbOrderWithItems[]).map(toOrder);
+}
+
+/** Id of the workspace's active event (cheap; used to notice a switch made on
+ *  another device between full refetches). */
+export async function fetchActiveEventId(
+  supabase: SupabaseClient,
+  workspaceId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("events")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("is_active", true)
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0]?.id as string | undefined) ?? null;
+}
+
+/** Returns null when the order no longer exists. */
+export async function fetchOrderWithItems(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  orderId: string,
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("workspace_id", workspaceId)
+    .eq("id", orderId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toOrder(data as DbOrderWithItems) : null;
+}
+
 // ---------- Workspace setup ----------
 //
 // RLS is disabled on these tables (see supabase/migration-disable-rls.sql).
@@ -120,10 +178,13 @@ export type RealtimeHandlers = {
   onWorkspace:  (row: DbWorkspace) => void;
 };
 
+export type ChannelStatus = "SUBSCRIBED" | "CHANNEL_ERROR" | "TIMED_OUT" | "CLOSED";
+
 export function subscribeAll(
   supabase: SupabaseClient,
   workspaceId: string,
   handlers: RealtimeHandlers,
+  onStatus?: (status: ChannelStatus) => void,
 ): () => void {
   const channel = supabase.channel(`workspace:${workspaceId}`);
 
@@ -191,7 +252,7 @@ export function subscribeAll(
       { event: "UPDATE", schema: "public", table: "workspaces", filter: wsFilter },
       (p) => handlers.onWorkspace(p.new as DbWorkspace),
     )
-    .subscribe();
+    .subscribe((status) => onStatus?.(status as ChannelStatus));
 
   return () => {
     supabase.removeChannel(channel);

@@ -131,6 +131,9 @@ export type DbOrderItem = {
   quantity: number;
   milk_choice_id: string | null;
   cream_choice_id: string | null;
+  /** Added by migration-atomic-order.sql; absent on un-migrated databases. */
+  milk_name_snap?: string | null;
+  cream_name_snap?: string | null;
   sugar_adjustment: OrderItem["sugarAdjustment"] | null;
   ice_adjustment: OrderItem["iceAdjustment"] | null;
   special_requests: string | null;
@@ -304,6 +307,8 @@ export function fromOrderItem(r: DbOrderItem): OrderItem {
     quantity: r.quantity,
     milkChoiceId: undef(r.milk_choice_id),
     creamChoiceId: undef(r.cream_choice_id),
+    milkNameSnap: undef(r.milk_name_snap),
+    creamNameSnap: undef(r.cream_name_snap),
     sugarAdjustment: undef(r.sugar_adjustment),
     iceAdjustment: undef(r.ice_adjustment),
     specialRequests: undef(r.special_requests),
@@ -477,7 +482,9 @@ export function toOrderPatch(patch: Partial<Order>): Partial<DbOrder> {
 export function toOrderItemInsert(
   workspaceId: string,
   oi: OrderItem,
-): Omit<DbOrderItem, never> {
+  opts: { includeSnapNames?: boolean } = {},
+): DbOrderItem {
+  const { includeSnapNames = true } = opts;
   return {
     id: oi.id,
     workspace_id: workspaceId,
@@ -489,6 +496,11 @@ export function toOrderItemInsert(
     quantity: oi.quantity,
     milk_choice_id: nul(oi.milkChoiceId),
     cream_choice_id: nul(oi.creamChoiceId),
+    // Skipped for the legacy (pre-migration) insert path: an unknown column
+    // would make PostgREST reject the whole order.
+    ...(includeSnapNames
+      ? { milk_name_snap: nul(oi.milkNameSnap), cream_name_snap: nul(oi.creamNameSnap) }
+      : {}),
     sugar_adjustment: nul(oi.sugarAdjustment),
     ice_adjustment: nul(oi.iceAdjustment),
     special_requests: nul(oi.specialRequests),

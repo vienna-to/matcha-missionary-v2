@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ArrowUp,
   CheckCircle2,
   ChevronDown,
@@ -20,6 +21,12 @@ import { useActiveEvent, useStore } from "@/lib/store";
 import { useHelperMode } from "@/lib/helper-mode";
 import { playPing, unlockAudio } from "@/lib/audio";
 import { cn, formatMoney, formatTime, minutesAgo } from "@/lib/utils";
+import {
+  itemDrinkName,
+  orderCardIssue,
+  resolveCreamName,
+  resolveMilkName,
+} from "@/lib/order-labels";
 import type {
   Ingredient,
   MenuSnapshot,
@@ -300,6 +307,62 @@ export default function BaristaQueue() {
   );
 }
 
+/**
+ * Guards a barista card against missing item data. If the order has no items
+ * (or an item has no usable drink name) we re-read it from the server a few
+ * times. "loading" = still trying; "missing" = gave up, show the red warning.
+ * A card is never rendered blank.
+ */
+function useOrderItemRecovery(
+  order: Order,
+  snapshot: MenuSnapshot,
+): "ok" | "loading" | "partial" | "missing" {
+  const { refreshOrder } = useStore();
+  const issue = orderCardIssue(order, snapshot);
+  const [gaveUp, setGaveUp] = useState(false);
+
+  useEffect(() => {
+    if (issue === "ok") {
+      setGaveUp(false);
+      return;
+    }
+    if (!refreshOrder) {
+      setGaveUp(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < 3 && !cancelled; i++) {
+        if (await refreshOrder(order.id)) return;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (!cancelled) setGaveUp(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [issue, order.id, refreshOrder]);
+
+  if (issue === "ok") return "ok";
+  if (issue === "partial") return "partial";
+  return gaveUp ? "missing" : "loading";
+}
+
+function ItemDataMissing({ orderNumber, compact }: { orderNumber: number; compact?: boolean }) {
+  return (
+    <div
+      role="alert"
+      className={cn(
+        "flex items-center gap-2 rounded-xl border-2 border-red-500 bg-red-50 px-3 font-semibold text-red-700",
+        compact ? "py-1.5 text-xs" : "py-3 text-sm",
+      )}
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      ITEM DATA MISSING – check order #{orderNumber}
+    </div>
+  );
+}
+
 function OrderCard({
   order,
   snapshot,
@@ -335,6 +398,7 @@ function OrderCard({
     const t = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(t);
   }, []);
+  const recovery = useOrderItemRecovery(order, snapshot);
   const elapsed = minutesAgo(order.submittedAt, now);
   const { total, totalGross } = computeOrderTotals(order);
   const totalDiscount = totalGross - total;
@@ -416,19 +480,28 @@ function OrderCard({
       ) : null}
 
       <div className="mt-3 space-y-2">
-        {order.items.map((it) => (
-          <OrderItemRow
-            key={it.id}
-            item={it}
-            snapshot={snapshot}
-            interactive
-            onToggle={() => onToggleItem(it.id, it.status)}
-            onSetDiscount={
-              onSetItemDiscount ? (pct) => onSetItemDiscount(it.id, pct) : undefined
-            }
-            hidePrice={helperMode}
-          />
-        ))}
+        {recovery === "loading" ? (
+          <div className="t-caption rounded-xl border border-dashed border-cream-300 px-3 py-3 text-sm text-matcha-900/60">
+            loading order items…
+          </div>
+        ) : recovery === "missing" ? (
+          <ItemDataMissing orderNumber={order.orderNumber} />
+        ) : (
+          order.items.map((it) => (
+            <OrderItemRow
+              key={it.id}
+              item={it}
+              snapshot={snapshot}
+              orderNumber={order.orderNumber}
+              interactive
+              onToggle={() => onToggleItem(it.id, it.status)}
+              onSetDiscount={
+                onSetItemDiscount ? (pct) => onSetItemDiscount(it.id, pct) : undefined
+              }
+              hidePrice={helperMode}
+            />
+          ))
+        )}
       </div>
 
       <div className="mt-3 flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2">
@@ -465,6 +538,7 @@ function CompletedOrderCard({
   onRemove: () => void;
   helperMode: boolean;
 }) {
+  const recovery = useOrderItemRecovery(order, snapshot);
   return (
     <Card className="opacity-80">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -499,15 +573,22 @@ function CompletedOrderCard({
       ) : null}
 
       <div className="mt-2 space-y-1">
-        {order.items.map((it) => (
-          <OrderItemRow
-            key={it.id}
-            item={it}
-            snapshot={snapshot}
-            compact
-            hidePrice={helperMode}
-          />
-        ))}
+        {recovery === "loading" ? (
+          <div className="t-caption text-xs text-matcha-900/60">loading order items…</div>
+        ) : recovery === "missing" ? (
+          <ItemDataMissing orderNumber={order.orderNumber} compact />
+        ) : (
+          order.items.map((it) => (
+            <OrderItemRow
+              key={it.id}
+              item={it}
+              snapshot={snapshot}
+              orderNumber={order.orderNumber}
+              compact
+              hidePrice={helperMode}
+            />
+          ))
+        )}
       </div>
 
       <div className="t-caption mt-2 flex items-center justify-between text-xs text-matcha-900/70">
@@ -546,6 +627,7 @@ function timerLabel(min: number): string {
 function OrderItemRow({
   item,
   snapshot,
+  orderNumber,
   interactive,
   compact,
   onToggle,
@@ -554,6 +636,7 @@ function OrderItemRow({
 }: {
   item: OrderItem;
   snapshot: MenuSnapshot;
+  orderNumber: number;
   interactive?: boolean;
   compact?: boolean;
   onToggle?: () => void;
@@ -564,9 +647,14 @@ function OrderItemRow({
   // Hook must run before any conditional return.
   const [discountOpen, setDiscountOpen] = useState(false);
 
+  const drinkName = itemDrinkName(item, snapshot);
+  // No usable drink name anywhere: never render a blank row.
+  if (drinkName === null) {
+    return <ItemDataMissing orderNumber={orderNumber} compact={compact} />;
+  }
   const displayName = item.isCombo
-    ? `Combo: ${item.menuItemNameSnap} + ${item.comboPastryNameSnap ?? "?"}`
-    : item.menuItemNameSnap;
+    ? `Combo: ${drinkName} + ${item.comboPastryNameSnap ?? "?"}`
+    : drinkName;
   const done = item.status === "done";
   // priceSnap stores the un-discounted unit price (combo: COMBO_PRICE, else
   // the menu price). So it's the right base for the discount editor.
@@ -646,21 +734,15 @@ function ItemModifiers({
 
   // Always show the milk — fall back to the menu item's default if the
   // customer didn't pick one. This is what the barista actually needs.
-  const milkId = item.milkChoiceId ?? drink?.defaultMilkId;
-  if (milkId) {
-    const milk = ingredients.find((i) => i.id === milkId);
-    if (milk) mods.push(milk.name);
-  }
+  // Names snapshotted at order time win; the ingredient lookup is only a
+  // fallback for orders placed before snapshots existed.
+  const milkName =
+    item.milkNameSnap ?? resolveMilkName(item.milkChoiceId, drink, ingredients);
+  if (milkName) mods.push(milkName);
 
-  if (item.creamChoiceId === "none") {
-    mods.push("no cream");
-  } else {
-    const creamId = item.creamChoiceId ?? drink?.defaultCreamId;
-    if (creamId) {
-      const cream = ingredients.find((i) => i.id === creamId);
-      if (cream) mods.push(cream.name);
-    }
-  }
+  const creamName =
+    item.creamNameSnap ?? resolveCreamName(item.creamChoiceId, drink, ingredients);
+  if (creamName) mods.push(creamName);
 
   if (item.sugarAdjustment && item.sugarAdjustment !== "normal") {
     mods.push(

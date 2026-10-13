@@ -71,6 +71,121 @@ async function retryWithBackoff<T extends { error: unknown }>(
   return last!;
 }
 
+/** PostgREST "function not in schema cache" / Postgres "undefined function". */
+function isMissingRpc(e: unknown): boolean {
+  const code = (e as { code?: string } | null)?.code;
+  return code === "PGRST202" || code === "42883";
+}
+
+function rpcResult(data: unknown, o: Order): { finalOrderNumber: number } {
+  const n = (data as { order_number?: number } | null)?.order_number;
+  return { finalOrderNumber: typeof n === "number" ? n : o.orderNumber };
+}
+
+/** Insert order_items, tolerating a database that predates the *_name_snap
+ *  columns (migration-atomic-order.sql not run yet). */
+async function insertOrderItems(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  items: OrderItem[],
+  label: string,
+) {
+  const attempt = (includeSnapNames: boolean) =>
+    retryWithBackoff(label, () =>
+      supabase
+        .from("order_items")
+        .insert(items.map((it) => toOrderItemInsert(workspaceId, it, { includeSnapNames }))),
+    );
+  const first = await attempt(true);
+  if (first.error && /_name_snap/.test(String((first.error as { message?: string }).message))) {
+    return attempt(false);
+  }
+  return first;
+}
+
+/** The pre-migration two-step write: order first, then items, rolling the
+ *  order back if the items fail. Not atomic — another device can briefly see
+ *  the order without items — which is exactly why submit_order() exists. */
+async function legacySubmitOrder(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  o: Order,
+): Promise<{ finalOrderNumber: number } | { error: string }> {
+  let currentOrder = o;
+  let insertedParent = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const r1 = await supabase.from("orders").insert(toOrderInsert(workspaceId, currentOrder));
+    if (!r1.error) {
+      insertedParent = true;
+      break;
+    }
+    const code = (r1.error as { code?: string } | null)?.code;
+    if (code !== "23505") {
+      const retried = await retryWithBackoff("submitOrder:order", () =>
+        supabase.from("orders").insert(toOrderInsert(workspaceId, currentOrder)),
+      );
+      tag("submitOrder:order")(retried.error);
+      if (retried.error) return { error: "order insert failed" };
+      insertedParent = true;
+      break;
+    }
+    // 23505 is either an order_number collision or a retry of an order that
+    // already landed. Tell them apart before renumbering.
+    const { data: already } = await supabase
+      .from("orders")
+      .select("order_number")
+      .eq("id", currentOrder.id)
+      .limit(1);
+    if (already && already.length > 0) {
+      const { count } = await supabase
+        .from("order_items")
+        .select("id", { count: "exact", head: true })
+        .eq("order_id", currentOrder.id);
+      if ((count ?? 0) > 0) {
+        return { finalOrderNumber: already[0].order_number as number };
+      }
+      insertedParent = true; // parent exists but items never landed — finish them
+      currentOrder = { ...currentOrder, orderNumber: already[0].order_number as number };
+      break;
+    }
+    const { data: maxRow } = await supabase
+      .from("orders")
+      .select("order_number")
+      .eq("workspace_id", workspaceId)
+      .eq("event_id", currentOrder.eventId)
+      .order("order_number", { ascending: false })
+      .limit(1);
+    const observedMax =
+      (maxRow?.[0]?.order_number as number | undefined) ?? currentOrder.orderNumber;
+    const nextNum = Math.max(observedMax + 1, currentOrder.orderNumber + 1);
+    console.warn(
+      `[supabase submitOrder] order_number collision at ${currentOrder.orderNumber}; renumbering to ${nextNum}`,
+    );
+    currentOrder = { ...currentOrder, orderNumber: nextNum };
+  }
+  if (!insertedParent) {
+    console.error(`[supabase submitOrder] gave up after 5 renumber attempts`);
+    return { error: "renumber attempts exhausted" };
+  }
+
+  if (currentOrder.items.length > 0) {
+    const r2 = await insertOrderItems(supabase, workspaceId, currentOrder.items, "submitOrder:items");
+    if (r2.error) {
+      tag("submitOrder:items")(r2.error);
+      console.error(
+        `[supabase submitOrder] items failed after parent inserted — rolling back order ${currentOrder.id}`,
+      );
+      await supabase
+        .from("orders")
+        .delete()
+        .eq("id", currentOrder.id)
+        .eq("workspace_id", workspaceId);
+      return { error: "items insert failed; parent rolled back" };
+    }
+  }
+  return { finalOrderNumber: currentOrder.orderNumber };
+}
+
 export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
   async updateSettings(patch: Partial<Settings>) {
     const r: Record<string, unknown> = {};
@@ -172,85 +287,30 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
     o: Order,
   ): Promise<{ finalOrderNumber: number } | { error: string }> {
     // Order submission is the most costly write to lose — a dropped one means
-    // a customer's drink never reaches the barista queue. Handles two hazards:
+    // a customer's drink never reaches the barista queue.
     //
-    // 1. Concurrent submits from two devices can pick the same order_number
-    //    (both derived from local state). The DB has UNIQUE(event_id,
-    //    order_number) so the second insert fails with 23505. We detect that,
-    //    query max(order_number) in the DB, bump, and retry — up to 5x.
-    //
-    // 2. Parent order can insert successfully while items insert fails, which
-    //    leaves other devices seeing an empty "0 items" card in the queue.
-    //    On items failure we roll back the parent so the state is consistent.
-    let currentOrder = o;
-    let insertedParent = false;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const r1 = await supabase
-        .from("orders")
-        .insert(toOrderInsert(workspaceId, currentOrder));
-      if (!r1.error) {
-        insertedParent = true;
-        break;
-      }
-      const code = (r1.error as { code?: string } | null)?.code;
-      if (code !== "23505") {
-        // Not a collision — a real error. Retry with backoff via the shared
-        // helper (network blip / transient RLS glitch / …).
-        const retried = await retryWithBackoff("submitOrder:order", () =>
-          supabase.from("orders").insert(toOrderInsert(workspaceId, currentOrder)),
-        );
-        tag("submitOrder:order")(retried.error);
-        if (retried.error) return { error: "order insert failed" };
-        insertedParent = true;
-        break;
-      }
-      // Collision on (event_id, order_number). Look up the actual current
-      // max and bump past it.
-      const { data: maxRow } = await supabase
-        .from("orders")
-        .select("order_number")
-        .eq("workspace_id", workspaceId)
-        .eq("event_id", currentOrder.eventId)
-        .order("order_number", { ascending: false })
-        .limit(1);
-      const observedMax =
-        (maxRow?.[0]?.order_number as number | undefined) ?? currentOrder.orderNumber;
-      const nextNum = Math.max(observedMax + 1, currentOrder.orderNumber + 1);
-      console.warn(
-        `[supabase submitOrder] order_number collision at ${currentOrder.orderNumber}; renumbering to ${nextNum}`,
-      );
-      currentOrder = { ...currentOrder, orderNumber: nextNum };
+    // Preferred path: ONE transaction (public.submit_order) writes the order
+    // and all its items, so Realtime can never broadcast an order that has no
+    // items yet. It is idempotent on order id, so retrying is always safe.
+    const rpc = () =>
+      supabase.rpc("submit_order", {
+        p_order: toOrderInsert(workspaceId, o),
+        p_items: o.items.map((it) => toOrderItemInsert(workspaceId, it)),
+      });
+    let r = await rpc();
+    if (!r.error) return rpcResult(r.data, o);
+    if (!isMissingRpc(r.error)) {
+      r = await retryWithBackoff("submitOrder:rpc", rpc);
+      if (!r.error) return rpcResult(r.data, o);
+      tag("submitOrder:rpc")(r.error);
+      return { error: "order submit failed" };
     }
-    if (!insertedParent) {
-      console.error(`[supabase submitOrder] gave up after 5 renumber attempts`);
-      return { error: "renumber attempts exhausted" };
-    }
-
-    if (currentOrder.items.length > 0) {
-      const r2 = await retryWithBackoff("submitOrder:items", () =>
-        supabase
-          .from("order_items")
-          .insert(currentOrder.items.map((it) => toOrderItemInsert(workspaceId, it))),
-      );
-      if (r2.error) {
-        tag("submitOrder:items")(r2.error);
-        // Roll back the parent so other devices don't see a phantom empty
-        // order in the barista queue. The submitter's local optimistic order
-        // will get removed by the RT_DELETE_ORDER echo — they should try
-        // submitting again.
-        console.error(
-          `[supabase submitOrder] items failed after parent inserted — rolling back order ${currentOrder.id}`,
-        );
-        await supabase
-          .from("orders")
-          .delete()
-          .eq("id", currentOrder.id)
-          .eq("workspace_id", workspaceId);
-        return { error: "items insert failed; parent rolled back" };
-      }
-    }
-
-    return { finalOrderNumber: currentOrder.orderNumber };
+    // The migration hasn't been run on this database yet — fall back to the
+    // old two-step write so ordering keeps working (but see its caveat).
+    console.warn(
+      "[supabase submitOrder] submit_order() not found — run supabase/migration-atomic-order.sql. Using non-atomic fallback.",
+    );
+    return legacySubmitOrder(supabase, workspaceId, o);
   },
   async updateOrder(id: string, patch: Partial<Order>) {
     const { error } = await supabase
@@ -277,9 +337,12 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .eq("workspace_id", workspaceId);
     tag("replaceOrderItems:delete")(e1);
     if (items.length > 0) {
-      const { error: e2 } = await supabase
-        .from("order_items")
-        .insert(items.map((it) => toOrderItemInsert(workspaceId, it)));
+      const { error: e2 } = await insertOrderItems(
+        supabase,
+        workspaceId,
+        items,
+        "replaceOrderItems:insert",
+      );
       tag("replaceOrderItems:insert")(e2);
     }
   },

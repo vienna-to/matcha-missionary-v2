@@ -1,88 +1,36 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  Plus,
-  Minus,
-  Sliders,
-  Trash2,
-  Coffee,
-  ShoppingBag,
-  X,
-} from "lucide-react";
-import {
-  Button,
-  Card,
-  Chip,
-  EmptyState,
-  Field,
-  Input,
-  Label,
-  Modal,
-  NumberField,
-  Select,
-  Sheet,
-  Textarea,
-} from "@/components/ui";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Check, Plus, ShoppingBag, X } from "lucide-react";
+import { Button, EmptyState, Field, Modal, Select, Sheet } from "@/components/ui";
+import OrderFlow, { stepIndex, type CartLine, type Step } from "@/components/OrderFlow";
 import { useActiveEvent, useStore } from "@/lib/store";
 import {
   COMBO_PRICE,
-  PAYMENT_METHODS,
-  PAYMENT_METHOD_LABELS,
   compareMenuItems,
-  type Ingredient,
   type MenuItem,
   type MenuSnapshot,
   type Order,
   type PaymentMethod,
-  type SugarAdjustment,
-  type IceAdjustment,
 } from "@/lib/types";
-import { computeItemCost } from "@/lib/calc";
 import { deriveOrderItem, nextOrderNumber } from "@/lib/reducer";
 import { newId, nowIso } from "@/lib/id";
-import { DiscountRow } from "@/components/DiscountRow";
 import { useHelperMode } from "@/lib/helper-mode";
-import { cn, formatMoney } from "@/lib/utils";
+import { formatMoney } from "@/lib/utils";
 
-// Canonical milk options offered in Live Orders. The chips always render with
-// these labels. `match` is used to resolve the choice to a real ingredient ID
-// in the workspace (so cost calc picks up milk cost); if no ingredient matches,
-// we fall back to the synthetic `id` here and display the label via
-// `milkLabelForId`.
-const MILK_CHOICES: Array<{ id: string; name: string; match: RegExp }> = [
-  { id: "__milk_whole", name: "Whole milk", match: /whole/i },
-  { id: "__milk_lactose", name: "Lactose free milk", match: /lactose/i },
-];
-
-function resolveMilkChoices(ingredients: Ingredient[]) {
-  return MILK_CHOICES.map((c) => {
-    const ing = ingredients.find(
-      (i) => /milk/i.test(i.name) && c.match.test(i.name),
-    );
-    return { id: ing?.id ?? c.id, name: c.name };
-  });
+/** Landscape iPads and desktops get the order panel as a sidebar; portrait
+ *  iPads and phones get it as a bottom sheet. */
+function useIsWide(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const mq = window.matchMedia("(min-width: 1024px)");
+      mq.addEventListener("change", cb);
+      return () => mq.removeEventListener("change", cb);
+    },
+    () => window.matchMedia("(min-width: 1024px)").matches,
+    () => false,
+  );
 }
-
-function milkLabelForId(id: string): string | undefined {
-  return MILK_CHOICES.find((c) => c.id === id)?.name;
-}
-
-type CartLine = {
-  cid: string;
-  menuItemId: string;
-  quantity: number;
-  milkChoiceId?: string;
-  creamChoiceId?: string; // "none" means no cream; undefined means use default
-  sugarAdjustment?: SugarAdjustment;
-  iceAdjustment?: IceAdjustment;
-  specialRequests?: string;
-  /** Per-item discount as a percent (0–100). 100 = free. */
-  discountPct?: number;
-  /** Combo deal: priced at COMBO_PRICE, bundles drink (menuItemId) + pastry. */
-  isCombo?: boolean;
-  comboPastryId?: string;
-};
 
 export default function LiveOrders() {
   const event = useActiveEvent();
@@ -104,16 +52,32 @@ export default function LiveOrders() {
     };
   }, [event, state.menuItems, state.ingredients]);
 
+  // ---- the order being taken (survives step changes and the sheet closing) ----
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
   const [notes, setNotes] = useState("");
   // Payment method is required at submit time — for tax records we need to
   // know cash/venmo/zelle totals per event, so no silent default.
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
-  const [editingCid, setEditingCid] = useState<string | null>(null);
-  const [cartOpenMobile, setCartOpenMobile] = useState(false);
+  const [step, setStep] = useState<Step>("items");
+  const [maxStepIdx, setMaxStepIdx] = useState(0);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [comboPickerOpen, setComboPickerOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<string | null>(null);
   const [helperMode] = useHelperMode();
+  const wide = useIsWide();
+  const gridRef = useRef<HTMLDivElement>(null);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(confirmTimer.current), []);
+
+  // Removing the last item while on a later step would strand the flow.
+  useEffect(() => {
+    if (cart.length === 0 && step !== "items") {
+      setStep("items");
+      setMaxStepIdx(0);
+    }
+  }, [cart.length, step]);
 
   if (!event || !snapshot) {
     return (
@@ -132,20 +96,19 @@ export default function LiveOrders() {
   const total = cart.reduce((sum, line) => {
     const unit = line.isCombo
       ? COMBO_PRICE
-      : snapshot.menuItems.find((m) => m.id === line.menuItemId)?.price ?? 0;
+      : snap.menuItems.find((m) => m.id === line.menuItemId)?.price ?? 0;
     const factor = 1 - Math.min(1, Math.max(0, (line.discountPct ?? 0) / 100));
     return sum + unit * factor * line.quantity;
   }, 0);
+  const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
+
+  function goStep(next: Step) {
+    setStep(next);
+    setMaxStepIdx((m) => Math.max(m, stepIndex(next)));
+  }
 
   function addLine(item: MenuItem) {
-    setCart((c) => [
-      ...c,
-      {
-        cid: newId("cart"),
-        menuItemId: item.id,
-        quantity: 1,
-      },
-    ]);
+    setCart((c) => [...c, { cid: newId("cart"), menuItemId: item.id, quantity: 1 }]);
   }
 
   function addCombo(drinkId: string, pastryId: string) {
@@ -168,18 +131,27 @@ export default function LiveOrders() {
   function removeLine(cid: string) {
     setCart((c) => c.filter((l) => l.cid !== cid));
   }
+  function incrementLine(cid: string, delta: number) {
+    const line = cart.find((l) => l.cid === cid);
+    if (!line) return;
+    updateLine(cid, { quantity: Math.max(1, line.quantity + delta) });
+  }
 
+  /** Fresh order, back on step 1 with the menu grid ready to tap. */
   function reset() {
     setCart([]);
     setCustomerName("");
     setNotes("");
     setPaymentMethod("");
-    setCartOpenMobile(false);
+    setStep("items");
+    setMaxStepIdx(0);
+    setSheetOpen(false);
+    gridRef.current?.scrollIntoView({ block: "start" });
+    gridRef.current?.focus({ preventScroll: true });
   }
 
   const nameOk = customerName.trim().length > 0;
-  const paymentOk = paymentMethod !== "";
-  const submittable = cart.length > 0 && nameOk && paymentOk;
+  const submittable = cart.length > 0 && nameOk && paymentMethod !== "";
 
   function submit() {
     if (!submittable) return;
@@ -222,127 +194,108 @@ export default function LiveOrders() {
       status: "pending",
       paymentStatus: "paid",
       // Captured for tax reports. The narrowed type here is safe because
-      // `paymentOk` gates `submittable`.
-      paymentMethod: (paymentMethod || "cash") as PaymentMethod,
+      // `submittable` requires a payment method.
+      paymentMethod: paymentMethod as PaymentMethod,
     };
     dispatch({ type: "SUBMIT_ORDER", order });
+
+    setConfirmation(`Order sent · ${order.customerName} · ${formatMoney(total)}`);
+    clearTimeout(confirmTimer.current);
+    confirmTimer.current = setTimeout(() => setConfirmation(null), 3500);
     reset();
   }
 
-  const editingLine = editingCid ? cart.find((l) => l.cid === editingCid) : undefined;
-  const editingItem = editingLine
-    ? snapshot.menuItems.find((m) => m.id === editingLine.menuItemId)
-    : undefined;
+  const flow = (className?: string) => (
+    <OrderFlow
+      className={className}
+      cart={cart}
+      snapshot={snap}
+      total={total}
+      step={step}
+      maxStepIdx={maxStepIdx}
+      onStep={goStep}
+      customerName={customerName}
+      setCustomerName={setCustomerName}
+      notes={notes}
+      setNotes={setNotes}
+      paymentMethod={paymentMethod}
+      setPaymentMethod={setPaymentMethod}
+      onUpdateLine={updateLine}
+      onRemoveLine={removeLine}
+      onIncrement={incrementLine}
+      onOpenCombo={() => setComboPickerOpen(true)}
+      onSubmit={submit}
+      helperMode={helperMode}
+    />
+  );
 
   return (
-    <div className="lg:grid lg:grid-cols-[1fr_360px] lg:gap-6">
-      <div>
+    <div className="lg:grid lg:grid-cols-[1fr_400px] lg:gap-6">
+      {confirmation ? (
+        <div
+          role="status"
+          className="t-display fixed left-1/2 top-4 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-matcha-600 px-5 py-3 text-sm text-white shadow-lg"
+        >
+          <Check className="h-4 w-4" /> {confirmation}
+        </div>
+      ) : null}
+
+      <div ref={gridRef} tabIndex={-1} className="outline-none">
         <header className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <div>
             <h1 className="t-display text-xl">Live Orders</h1>
             <p className="t-caption mt-0.5 text-sm text-matcha-900/60">
-              tap a card to add. use the slider icon to customize.
+              tap a card to add, then follow the steps.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setComboPickerOpen(true)}>
+          <Button variant="outline" className="h-11" onClick={() => setComboPickerOpen(true)}>
             + Combo deal · {formatMoney(COMBO_PRICE)}
           </Button>
         </header>
         <ItemGrid items={activeItems} onAdd={addLine} />
       </div>
 
-      {/* Cart — sidebar on desktop */}
-      <aside className="hidden lg:block">
-        <div className="sticky top-4">
-          <CartPanel
-            cart={cart}
-            snapshot={snapshot}
-            onEdit={(cid) => setEditingCid(cid)}
-            onRemove={removeLine}
-            onIncrement={(cid, delta) => {
-              const line = cart.find((l) => l.cid === cid);
-              if (!line) return;
-              const q = Math.max(1, line.quantity + delta);
-              updateLine(cid, { quantity: q });
-            }}
-            onDiscount={(cid, pct) => updateLine(cid, { discountPct: pct })}
-            customerName={customerName}
-            setCustomerName={setCustomerName}
-            notes={notes}
-            setNotes={setNotes}
-            paymentMethod={paymentMethod}
-            setPaymentMethod={setPaymentMethod}
-            total={total}
-            submittable={submittable}
-            onSubmit={submit}
-            errors={{ name: !nameOk, payment: !paymentOk }}
-            helperMode={helperMode}
-          />
-        </div>
-      </aside>
-
-      {/* Cart button & sheet (mobile) */}
-      <div className="lg:hidden">
-        {cart.length > 0 ? (
-          <button
-            onClick={() => setCartOpenMobile(true)}
-            className="fixed bottom-20 right-4 z-30 flex items-center gap-2 rounded-full bg-matcha-500 px-4 py-3 text-sm font-medium text-white shadow-lg"
-          >
-            <ShoppingBag className="h-4 w-4" />
-            {cart.reduce((s, l) => s + l.quantity, 0)} · {formatMoney(total)}
-          </button>
-        ) : null}
-        <Sheet open={cartOpenMobile} onClose={() => setCartOpenMobile(false)} side="bottom">
-          <div className="p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-base font-semibold">Order</h3>
-              <button onClick={() => setCartOpenMobile(false)} className="p-1.5">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <CartPanel
-              cart={cart}
-              snapshot={snapshot}
-              onEdit={(cid) => {
-                setCartOpenMobile(false);
-                setEditingCid(cid);
-              }}
-              onRemove={removeLine}
-              onIncrement={(cid, delta) => {
-                const line = cart.find((l) => l.cid === cid);
-                if (!line) return;
-                const q = Math.max(1, line.quantity + delta);
-                updateLine(cid, { quantity: q });
-              }}
-              onDiscount={(cid, pct) => updateLine(cid, { discountPct: pct })}
-              customerName={customerName}
-              setCustomerName={setCustomerName}
-              notes={notes}
-              setNotes={setNotes}
-              paymentMethod={paymentMethod}
-              setPaymentMethod={setPaymentMethod}
-              total={total}
-              submittable={submittable}
-              onSubmit={() => submit()}
-              errors={{ name: !nameOk, payment: !paymentOk }}
-              helperMode={helperMode}
-            />
+      {wide ? (
+        // Sidebar (landscape iPad / desktop)
+        <aside>
+          <div className="sticky top-4">
+            {flow("max-h-[calc(100dvh-2rem)] overflow-y-auto")}
           </div>
-        </Sheet>
-      </div>
-
-      {editingLine && editingItem ? (
-        <CustomizeModal
-          line={editingLine}
-          item={editingItem}
-          ingredients={snapshot.ingredients}
-          onClose={() => setEditingCid(null)}
-          onSave={(patch) => {
-            updateLine(editingLine.cid, patch);
-            setEditingCid(null);
-          }}
-        />
-      ) : null}
+        </aside>
+      ) : (
+        // Bottom sheet (portrait iPad / phone). Everything — adjustments
+        // included — happens inside this one sheet, so it never closes
+        // underneath you.
+        <>
+          {cart.length > 0 && !sheetOpen ? (
+            <button
+              onClick={() => setSheetOpen(true)}
+              className="t-display fixed bottom-20 left-4 right-4 z-30 flex h-16 items-center justify-between rounded-2xl bg-matcha-500 px-5 text-base text-white shadow-lg active:bg-matcha-600"
+            >
+              <span className="flex items-center gap-2">
+                <ShoppingBag className="h-5 w-5" />
+                Review order · {itemCount}
+              </span>
+              <span className="tabular-nums">{formatMoney(total)} →</span>
+            </button>
+          ) : null}
+          <Sheet open={sheetOpen} onClose={() => setSheetOpen(false)} side="bottom">
+            <div className="p-3">
+              <div className="mb-2 flex items-center justify-between px-1">
+                <h3 className="t-display text-base">Order</h3>
+                <button
+                  onClick={() => setSheetOpen(false)}
+                  aria-label="Close"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl hover:bg-cream-100"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {flow("border-0 shadow-none")}
+            </div>
+          </Sheet>
+        </>
+      )}
 
       {comboPickerOpen ? (
         <ComboPickerModal
@@ -393,7 +346,7 @@ function ComboPickerModal({
       <div className="space-y-3">
         <p className="t-caption text-xs text-matcha-900/60">
           pick any drink and any pastry — bundle is fixed at {formatMoney(COMBO_PRICE)}.
-          customize the drink&apos;s milk / cream after adding via the cart.
+          customize the drink&apos;s milk / cream in the adjustments step.
         </p>
         <Field label="drink">
           <Select value={drinkId} onChange={(e) => setDrinkId(e.target.value)}>
@@ -423,8 +376,10 @@ function ComboPickerModal({
           </span>
         </div>
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => onPick(drinkId, pastryId)} disabled={!valid}>
+          <Button variant="ghost" className="h-12" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button className="h-12" onClick={() => onPick(drinkId, pastryId)} disabled={!valid}>
             Add combo
           </Button>
         </div>
@@ -468,379 +423,12 @@ function ItemGrid({
             <div className="text-base font-semibold tabular-nums">
               {formatMoney(item.price)}
             </div>
-            <span className="rounded-full bg-matcha-500 p-1.5 text-white opacity-90 group-hover:opacity-100">
-              <Plus className="h-3.5 w-3.5" />
+            <span className="rounded-full bg-matcha-500 p-2 text-white opacity-90 group-hover:opacity-100">
+              <Plus className="h-4 w-4" />
             </span>
           </div>
         </button>
       ))}
     </div>
-  );
-}
-
-function CartPanel({
-  cart,
-  snapshot,
-  onEdit,
-  onRemove,
-  onIncrement,
-  onDiscount,
-  customerName,
-  setCustomerName,
-  notes,
-  setNotes,
-  paymentMethod,
-  setPaymentMethod,
-  total,
-  submittable,
-  onSubmit,
-  errors,
-  helperMode,
-}: {
-  cart: CartLine[];
-  snapshot: MenuSnapshot;
-  onEdit: (cid: string) => void;
-  onRemove: (cid: string) => void;
-  onIncrement: (cid: string, delta: number) => void;
-  onDiscount: (cid: string, pct: number | undefined) => void;
-  customerName: string;
-  setCustomerName: (s: string) => void;
-  notes: string;
-  setNotes: (s: string) => void;
-  paymentMethod: PaymentMethod | "";
-  setPaymentMethod: (p: PaymentMethod | "") => void;
-  total: number;
-  submittable: boolean;
-  onSubmit: () => void;
-  errors: { name: boolean; payment: boolean };
-  helperMode: boolean;
-}) {
-  return (
-    <Card className="space-y-4 p-4">
-      <div>
-        <h3 className="t-display text-sm">Cart</h3>
-        <p className="t-caption text-xs text-matcha-900/60">
-          {cart.length === 0
-            ? "tap an item to add"
-            : `${cart.length} line${cart.length === 1 ? "" : "s"}`}
-        </p>
-      </div>
-
-      {cart.length > 0 ? (
-        <div className="space-y-2">
-          {cart.map((line) => (
-            <CartLineRow
-              key={line.cid}
-              line={line}
-              snapshot={snapshot}
-              onEdit={() => onEdit(line.cid)}
-              onRemove={() => onRemove(line.cid)}
-              onIncrement={(delta) => onIncrement(line.cid, delta)}
-              onDiscount={(pct) => onDiscount(line.cid, pct)}
-              helperMode={helperMode}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      <div className="space-y-3 border-t border-cream-200 pt-3">
-        <Field label="customer name">
-          <Input
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            placeholder="required"
-            className={cn(errors.name && "border-amber-400")}
-          />
-        </Field>
-        <Field label="order notes (optional)">
-          <Textarea
-            rows={2}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </Field>
-        <Field label="payment method">
-          <div className="flex flex-wrap gap-1.5">
-            {PAYMENT_METHODS.map((m) => {
-              const active = paymentMethod === m;
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setPaymentMethod(m)}
-                  className={cn(
-                    "t-display rounded-full border px-3 py-1.5 text-xs transition-colors",
-                    active
-                      ? "border-matcha-500 bg-matcha-500 text-white"
-                      : "border-cream-300 bg-white text-matcha-900 hover:border-matcha-400",
-                    errors.payment && !active && "border-amber-300",
-                  )}
-                >
-                  {PAYMENT_METHOD_LABELS[m]}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-      </div>
-
-      <div className="rounded-xl bg-matcha-50 p-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <div className="t-display text-[11px] text-matcha-700">Total</div>
-            <div className="text-2xl font-semibold tabular-nums text-matcha-900">
-              {formatMoney(total)}
-            </div>
-          </div>
-          <Button size="lg" onClick={onSubmit} disabled={!submittable}>
-            Submit
-          </Button>
-        </div>
-        {!submittable && cart.length > 0 ? (
-          <div className="t-caption mt-2 text-[11px] text-amber-700">
-            {errors.name ? "name required. " : ""}
-            {errors.payment ? "pick a payment method." : ""}
-          </div>
-        ) : null}
-      </div>
-    </Card>
-  );
-}
-
-function CartLineRow({
-  line,
-  snapshot,
-  onEdit,
-  onRemove,
-  onIncrement,
-  onDiscount,
-  helperMode,
-}: {
-  line: CartLine;
-  snapshot: MenuSnapshot;
-  onEdit: () => void;
-  onRemove: () => void;
-  onIncrement: (delta: number) => void;
-  onDiscount: (pct: number | undefined) => void;
-  helperMode: boolean;
-}) {
-  // All hooks must run before any conditional early return.
-  const [discountOpen, setDiscountOpen] = useState(false);
-  const item = snapshot.menuItems.find((m) => m.id === line.menuItemId);
-  if (!item) return null;
-  const milk = line.milkChoiceId
-    ? snapshot.ingredients.find((i) => i.id === line.milkChoiceId)?.name
-        ?? milkLabelForId(line.milkChoiceId)
-    : item.defaultMilkId
-    ? snapshot.ingredients.find((i) => i.id === item.defaultMilkId)?.name
-    : undefined;
-  let cream: string | undefined;
-  if (line.creamChoiceId === "none") cream = "no cream";
-  else if (line.creamChoiceId) {
-    cream = snapshot.ingredients.find((i) => i.id === line.creamChoiceId)?.name;
-  } else if (item.defaultCreamId) {
-    cream = snapshot.ingredients.find((i) => i.id === item.defaultCreamId)?.name;
-  }
-
-  const mods: string[] = [];
-  if (milk) mods.push(milk);
-  if (cream) mods.push(cream);
-  if (line.sugarAdjustment && line.sugarAdjustment !== "normal") {
-    mods.push(
-      line.sugarAdjustment === "less"
-        ? "less sweet"
-        : line.sugarAdjustment === "extra"
-        ? "extra sweet"
-        : "no agave",
-    );
-  }
-  if (line.iceAdjustment && line.iceAdjustment !== "normal") {
-    mods.push(line.iceAdjustment === "light" ? "light ice" : "extra ice");
-  }
-  if (line.specialRequests) mods.push(`"${line.specialRequests}"`);
-
-  const pastry = line.isCombo && line.comboPastryId
-    ? snapshot.menuItems.find((m) => m.id === line.comboPastryId)
-    : undefined;
-  const lineUnitPrice = line.isCombo ? COMBO_PRICE : item.price;
-  const discountFraction = Math.min(1, Math.max(0, (line.discountPct ?? 0) / 100));
-  const effectiveUnit = lineUnitPrice * (1 - discountFraction);
-  const displayName = line.isCombo
-    ? `Combo: ${item.name} + ${pastry?.name ?? "?"}`
-    : item.name;
-
-  return (
-    <div className="rounded-xl border border-cream-200 bg-cream-50/50 p-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <button onClick={onEdit} className="min-w-0 flex-1 text-left">
-          <div className="t-display text-sm">{displayName}</div>
-          {mods.length > 0 ? (
-            <div className="t-caption mt-0.5 line-clamp-2 text-xs text-matcha-900/60">
-              {mods.join(" · ")}
-            </div>
-          ) : (
-            <div className="t-caption mt-0.5 text-xs text-matcha-900/40">
-              tap to customize
-            </div>
-          )}
-        </button>
-        <div className="text-right">
-          <div className="text-sm font-medium tabular-nums">
-            {formatMoney(effectiveUnit * line.quantity)}
-          </div>
-          {discountFraction > 0 ? (
-            <div className="t-caption text-[11px] text-matcha-700">
-              {line.discountPct === 100 ? "FREE" : `${line.discountPct}% off`}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      {discountOpen && !helperMode ? (
-        <DiscountRow
-          unitPrice={lineUnitPrice}
-          pct={line.discountPct ?? 0}
-          onPct={(p) => onDiscount(p > 0 ? Math.min(100, Math.max(0, p)) : undefined)}
-          onClose={() => setDiscountOpen(false)}
-        />
-      ) : null}
-      <div className="mt-2 flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={() => onIncrement(-1)}>
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <div className="min-w-8 text-center text-sm font-medium tabular-nums">
-            {line.quantity}
-          </div>
-          <Button size="sm" variant="outline" onClick={() => onIncrement(1)}>
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-        <div className="flex gap-1">
-          {helperMode ? null : (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setDiscountOpen((s) => !s)}
-              title="Discount"
-            >
-              <span className="t-display text-[11px]">%</span>
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={onEdit}>
-            <Sliders className="h-3.5 w-3.5" />
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onRemove}>
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CustomizeModal({
-  line,
-  item,
-  ingredients,
-  onClose,
-  onSave,
-}: {
-  line: CartLine;
-  item: MenuItem;
-  ingredients: Ingredient[];
-  onClose: () => void;
-  onSave: (patch: Partial<CartLine>) => void;
-}) {
-  const [draft, setDraft] = useState<CartLine>(line);
-  const [showCustomize, setShowCustomize] = useState(false);
-
-  // Milk picker is hardcoded to Whole / Lactose-free. We resolve to real
-  // ingredient IDs by name (regardless of `pool` flag, which isn't reliable
-  // on legacy/user-added ingredients) so cost calc still picks up milk cost
-  // when those ingredients exist. Chips always render either way.
-  const milks = resolveMilkChoices(ingredients);
-
-  function patch<K extends keyof CartLine>(k: K, v: CartLine[K]) {
-    setDraft((d) => ({ ...d, [k]: v }));
-  }
-
-  const selectedMilkId = draft.milkChoiceId ?? item.defaultMilkId;
-
-  return (
-    <Modal open onClose={onClose} title={item.name}>
-      <div className="space-y-4">
-        {milks.length > 0 ? (
-          <div>
-            <Label>Milk</Label>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {milks.map((m) => (
-                <Chip
-                  key={m.id}
-                  active={selectedMilkId === m.id}
-                  onClick={() => patch("milkChoiceId", m.id)}
-                >
-                  {m.name}
-                </Chip>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <button
-          onClick={() => setShowCustomize((s) => !s)}
-          className="w-full rounded-xl bg-cream-100 px-3 py-2 text-left text-xs font-medium text-matcha-900/70 hover:bg-cream-200"
-        >
-          {showCustomize ? "Hide customize" : "Customize"}{" · "}
-          sugar, ice, special requests
-        </button>
-
-        {showCustomize ? (
-          <div className="space-y-3 rounded-xl border border-cream-200 p-3">
-            <div>
-              <Label>Sugar</Label>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {(["less", "normal", "extra", "no_agave"] as SugarAdjustment[]).map((s) => (
-                  <Chip
-                    key={s}
-                    active={draft.sugarAdjustment === s}
-                    onClick={() => patch("sugarAdjustment", s)}
-                  >
-                    {s === "less" ? "Less sweet" : s === "normal" ? "Normal" : s === "extra" ? "Extra sweet" : "No agave"}
-                  </Chip>
-                ))}
-              </div>
-            </div>
-            <div>
-              <Label>Ice</Label>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {(["light", "normal", "extra"] as IceAdjustment[]).map((s) => (
-                  <Chip
-                    key={s}
-                    active={draft.iceAdjustment === s}
-                    onClick={() => patch("iceAdjustment", s)}
-                  >
-                    {s === "light" ? "Light ice" : s === "normal" ? "Normal ice" : "Extra ice"}
-                  </Chip>
-                ))}
-              </div>
-            </div>
-            <Field label="Special requests">
-              <Input
-                value={draft.specialRequests ?? ""}
-                onChange={(e) => patch("specialRequests", e.target.value)}
-                placeholder="e.g. extra hot, no foam"
-              />
-            </Field>
-          </div>
-        ) : null}
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={() => onSave(draft)}>Save</Button>
-        </div>
-      </div>
-    </Modal>
   );
 }

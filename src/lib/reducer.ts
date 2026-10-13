@@ -1,5 +1,6 @@
 import { computeItemCost } from "./calc";
 import { newId, nowIso } from "./id";
+import { resolveCreamName, resolveMilkName } from "./order-labels";
 import {
   COMBO_PRICE,
   type AppState,
@@ -91,6 +92,13 @@ export type Action =
   | { type: "RT_DELETE_EVENT"; id: string }
   | { type: "RT_UPSERT_ORDER"; order: Omit<Order, "items">; preserveItems?: boolean }
   | { type: "RT_DELETE_ORDER"; id: string }
+  /** Replace/insert a whole order *including* its items (fetched together). */
+  | { type: "RT_SET_ORDER"; order: Order }
+  /** Result of a poll / full refetch. `scopeEventId` limits which local orders
+   *  the server result is authoritative for (undefined = every event).
+   *  `keepIds` are orders whose write hasn't landed yet and must survive. */
+  | { type: "RT_SYNC_ORDERS"; orders: Order[]; scopeEventId?: string; keepIds: string[] }
+  | { type: "RT_SYNC_FULL"; state: AppState; keepIds: string[] }
   | { type: "RT_UPSERT_ORDER_ITEM"; item: OrderItem }
   | { type: "RT_DELETE_ORDER_ITEM"; id: string; orderId?: string }
   | { type: "RT_UPDATE_SETTINGS"; patch: Partial<Settings> };
@@ -112,6 +120,10 @@ export function deriveOrderItem(
   cupSizeOz?: number,
 ): OrderItem {
   const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
+  // Snapshot the human-readable milk / cream now, so the barista card doesn't
+  // depend on an ingredient lookup that can miss later.
+  const milkNameSnap = resolveMilkName(raw.milkChoiceId, mi, snapshot.ingredients);
+  const creamNameSnap = resolveCreamName(raw.creamChoiceId, mi, snapshot.ingredients);
   const drinkCost = mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
@@ -139,6 +151,8 @@ export function deriveOrderItem(
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,
       creamChoiceId: raw.creamChoiceId,
+      milkNameSnap,
+      creamNameSnap,
       sugarAdjustment: raw.sugarAdjustment,
       iceAdjustment: raw.iceAdjustment,
       specialRequests: raw.specialRequests,
@@ -161,6 +175,8 @@ export function deriveOrderItem(
     quantity: raw.quantity,
     milkChoiceId: raw.milkChoiceId,
     creamChoiceId: raw.creamChoiceId,
+    milkNameSnap,
+    creamNameSnap,
     sugarAdjustment: raw.sugarAdjustment,
     iceAdjustment: raw.iceAdjustment,
     specialRequests: raw.specialRequests,
@@ -225,6 +241,34 @@ export function renumberAfterDelete(
     if (o.orderNumber !== idx + 1) out.push({ id: o.id, orderNumber: idx + 1 });
   });
   return out;
+}
+
+/**
+ * Merge a server read of orders into local state. The server is authoritative
+ * for every order inside `scopeEventId` (all events when undefined): orders it
+ * doesn't return are dropped locally (deleted elsewhere) — except `keepIds`,
+ * orders submitted here whose write hasn't landed yet. Orders outside the
+ * scope are untouched.
+ */
+export function mergeServerOrders(
+  local: Order[],
+  server: Order[],
+  scopeEventId: string | undefined,
+  keepIds: ReadonlySet<string>,
+): Order[] {
+  const inScope = (o: Order) => scopeEventId === undefined || o.eventId === scopeEventId;
+  const serverIds = new Set(server.map((o) => o.id));
+  const keptLocal = local.filter(
+    (o) => !inScope(o) || (keepIds.has(o.id) && !serverIds.has(o.id)),
+  );
+  const localById = new Map(local.map((o) => [o.id, o]));
+  // Don't let a server row with no items blank out an order we already hold
+  // items for (e.g. a read that raced the item write).
+  const merged = server.map((o) => {
+    const prev = localById.get(o.id);
+    return o.items.length === 0 && prev && prev.items.length > 0 ? { ...o, items: prev.items } : o;
+  });
+  return [...keptLocal, ...merged];
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -587,6 +631,42 @@ export function reducer(state: AppState, action: Action): AppState {
       }
       return { ...state, orders: [...state.orders, { ...incoming, items: [] }] };
     }
+    case "RT_SET_ORDER": {
+      const exists = state.orders.some((o) => o.id === action.order.id);
+      return {
+        ...state,
+        orders: exists
+          ? state.orders.map((o) => (o.id === action.order.id ? action.order : o))
+          : [...state.orders, action.order],
+      };
+    }
+    case "RT_SYNC_ORDERS":
+      return {
+        ...state,
+        orders: mergeServerOrders(
+          state.orders,
+          action.orders,
+          action.scopeEventId,
+          new Set(action.keepIds),
+        ),
+      };
+    case "RT_SYNC_FULL":
+      return {
+        ...action.state,
+        orders: mergeServerOrders(
+          state.orders,
+          action.state.orders,
+          undefined,
+          new Set(action.keepIds),
+        ),
+        // Audit trail is append-only and not refetched when the table is
+        // missing; never let a refetch shrink it.
+        orderRevisions:
+          action.state.orderRevisions.length >= state.orderRevisions.length
+            ? action.state.orderRevisions
+            : state.orderRevisions,
+      };
+
     case "RT_DELETE_ORDER":
       if (!state.orders.some((o) => o.id === action.id)) return state;
       return { ...state, orders: state.orders.filter((o) => o.id !== action.id) };

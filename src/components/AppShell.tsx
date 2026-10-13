@@ -23,6 +23,7 @@ import EventSummary from "./tabs/EventSummary";
 import SettingsTab from "./tabs/SettingsTab";
 import NewEventDialog from "./NewEventDialog";
 import QuickAddPastEventDialog from "./QuickAddPastEventDialog";
+import SyncBadge from "./SyncBadge";
 
 export type TabId = "orders" | "queue" | "menu" | "finance" | "summary" | "settings";
 
@@ -95,6 +96,7 @@ export default function AppShell() {
               </span>
             ) : null}
           </div>
+          <SyncBadge className="mt-3" />
           {activeEvent ? (
             helperMode ? (
               <div className="mt-4 w-full rounded-xl border border-matcha-200 bg-cream-100 p-3">
@@ -182,6 +184,7 @@ export default function AppShell() {
             ) : null}
           </div>
           <div className="flex items-center gap-1">
+            <SyncBadge />
             {helperMode ? null : (
               <button
                 onClick={() => setNewEventOpen(true)}

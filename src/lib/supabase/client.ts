@@ -16,6 +16,8 @@ export function getClient(): SupabaseClient | null {
   cached = createClient(url, anon, {
     auth: { persistSession: false },
     realtime: { params: { eventsPerSecond: 10 } },
+    // Never let the browser (iPad Safari in particular) serve a cached read.
+    global: { fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }) },
   });
   return cached;
 }

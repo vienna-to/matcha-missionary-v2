@@ -468,7 +468,7 @@ describe("a missing column is reported, never dropped silently", () => {
     expect("finalOrderNumber" in res).toBe(true); // the drink order itself still goes through
     const errs = getSaveErrors();
     expect(errs).toHaveLength(1);
-    expect(errs[0].message).toMatch(/extra of \$2\.00/);
+    expect(errs[0].message).toMatch(/tip of \$2\.00/);
     expect(errs[0].message).toMatch(/migration-order-tips-and-extras\.sql/);
   });
 
@@ -488,7 +488,7 @@ describe("a missing column is reported, never dropped silently", () => {
     const inserts = calls.filter((c) => c.op === "insert" && c.table === "orders");
     expect(inserts.length).toBeGreaterThan(1);
     expect("tip_amount" in (inserts.at(-1)!.payload as object)).toBe(false);
-    expect(getSaveErrors().map((e) => e.message).join(" ")).toMatch(/extra of \$2\.00/);
+    expect(getSaveErrors().map((e) => e.message).join(" ")).toMatch(/tip of \$2\.00/);
   });
 
   it("no tip column but NO extra on the order: nothing real was lost, so no error", async () => {

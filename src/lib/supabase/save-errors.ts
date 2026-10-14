@@ -72,6 +72,10 @@ export function missingColumns(error: unknown): NewColumn[] {
   const e = error as { code?: string; message?: string } | null;
   if (!e) return [];
   const msg = String(e.message ?? "");
+  // A check constraint that does not know a newer free reason yet (for example
+  // "friend" before migration-free-reason-friend.sql) is the same situation:
+  // the database cannot take this value, and it must not be dropped silently.
+  if (e.code === "23514" && msg.includes("free_reason")) return ["free_reason"];
   const looksMissing =
     e.code === "PGRST204" ||
     e.code === "42703" ||
@@ -92,4 +96,4 @@ export function isMissingTable(error: unknown): boolean {
 }
 
 export const MIGRATION_HINT =
-  "Run supabase/migration-order-item-prices.sql, supabase/migration-order-tips-and-extras.sql and supabase/migration-submit-order-v2.sql in the Supabase SQL editor.";
+  "Run supabase/migration-order-item-prices.sql, supabase/migration-order-tips-and-extras.sql, supabase/migration-submit-order-v2.sql and supabase/migration-free-reason-friend.sql in the Supabase SQL editor.";

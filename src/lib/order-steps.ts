@@ -109,24 +109,50 @@ export function stepChecks(d: OrderDraft): Record<Step, boolean> {
     const iceChanged = l.iceAdjustment !== undefined && l.iceAdjustment !== "normal";
     return milkChanged || creamChanged || sugarChanged || iceChanged;
   });
+  const free = d.cart.length > 0 && isFreeTotal(cartTotal(d.cart, d.snapshot));
   return {
     items: d.cart.length > 0,
     adjust: adjusted || d.notes.trim().length > 0,
     name: d.customerName.trim().length > 0,
-    payment: d.paymentMethod !== "",
+    // On a free order the order's own method is not used; the only payment
+    // input is how a tip was paid.
+    payment: free
+      ? (d.tipAmount ?? 0) > 0 && Boolean(d.tipPaymentMethod)
+      : d.paymentMethod !== "",
   };
+}
+
+/** True when the items total (after discounts) is $0. */
+export function isFreeTotal(itemsTotal: number): boolean {
+  return Math.round(itemsTotal * 100) <= 0;
 }
 
 export type SubmitCheck = { ok: true } | { ok: false; step: Step; message: string };
 
-/** The only hard requirements: something to make, and a way to reconcile it.
- *  A missing name or untouched adjustments never block an order. */
-export function validateSubmit(d: Pick<OrderDraft, "cart" | "paymentMethod">): SubmitCheck {
+/** The only hard requirements: something to make, and a way to reconcile any
+ *  money. A missing name or untouched adjustments never block an order.
+ *
+ *  A free order (items total $0) needs no payment method. If it carries a tip,
+ *  the tip needs a method. */
+export function validateSubmit(
+  d: Pick<OrderDraft, "cart" | "paymentMethod" | "tipAmount" | "tipPaymentMethod"> & {
+    /** Items total after discounts. */
+    itemsTotal: number;
+  },
+): SubmitCheck {
   if (d.cart.length === 0) {
     return { ok: false, step: "items", message: "Add at least one item before confirming." };
   }
-  if (d.paymentMethod === "") {
+  const free = isFreeTotal(d.itemsTotal);
+  if (!free && d.paymentMethod === "") {
     return { ok: false, step: "payment", message: "Pick a payment method to confirm." };
+  }
+  const tip = d.tipAmount ?? 0;
+  if (tip > 0) {
+    const tipMethod = d.tipPaymentMethod || (free ? "" : d.paymentMethod);
+    if (!tipMethod) {
+      return { ok: false, step: "payment", message: "Pick how the tip was paid." };
+    }
   }
   return { ok: true };
 }
@@ -143,7 +169,7 @@ export function cartTotal(cart: CartLine[], snapshot: MenuSnapshot): number {
 
 /** Build the Order to submit. Caller must have passed validateSubmit. */
 export function buildOrder(
-  d: OrderDraft & { paymentMethod: PaymentMethod },
+  d: OrderDraft,
   ctx: { orderId: string; orderNumber: number; submittedAt: string; event: Event },
 ): Order {
   const items = d.cart.map((l) =>
@@ -167,6 +193,11 @@ export function buildOrder(
       ctx.event.cupSizeOz,
     ),
   );
+  // A free order ($0 items) has nothing to reconcile, so it carries no payment
+  // method (never a made-up one) and is marked "comped", the database's word
+  // for free.
+  const free = isFreeTotal(cartTotal(d.cart, d.snapshot));
+  const orderMethod: PaymentMethod | undefined = free || d.paymentMethod === "" ? undefined : d.paymentMethod;
   return {
     id: ctx.orderId,
     eventId: ctx.event.id,
@@ -181,13 +212,13 @@ export function buildOrder(
     // Orders are pending until the barista checks all items off. Legacy
     // paymentStatus kept so the DB column has a value.
     status: "pending",
-    paymentStatus: "paid",
-    paymentMethod: d.paymentMethod,
+    paymentStatus: free ? "comped" : "paid",
+    paymentMethod: orderMethod,
     // Stored only when there is an extra; the method only when it differs from
     // the order's own (null/undefined means "same as the order").
     tipAmount: d.tipAmount && d.tipAmount > 0 ? d.tipAmount : undefined,
     tipPaymentMethod:
-      d.tipAmount && d.tipAmount > 0 && d.tipPaymentMethod && d.tipPaymentMethod !== d.paymentMethod
+      d.tipAmount && d.tipAmount > 0 && d.tipPaymentMethod && d.tipPaymentMethod !== orderMethod
         ? d.tipPaymentMethod
         : undefined,
   };

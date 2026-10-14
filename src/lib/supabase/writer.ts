@@ -93,18 +93,18 @@ function rpcResult(data: unknown, o: Order): { finalOrderNumber: number } {
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 
-/** Tell the user, loudly, that extra money / a free reason did not reach the
+/** Tell the user, loudly, that a tip / a free reason did not reach the
  *  database. Never swallowed: the values were real input. */
 function reportLostExtras(o: Pick<Order, "orderNumber">, what: string) {
   reportSaveError(
-    `Order #${o.orderNumber}: ${what} could not be saved because the database is missing a column. ` +
+    `Order #${o.orderNumber}: ${what} could not be saved because the database is out of date. ` +
       `The order itself was saved. ${MIGRATION_HINT} Then re-enter it with Edit order.`,
   );
 }
 
 function reportLostFreeReason(orderNumber: number | string) {
   reportSaveError(
-    `Order #${orderNumber}: the free reason could not be saved because the database is missing the free_reason column. ` +
+    `Order #${orderNumber}: the free reason could not be saved because the database is out of date. ` +
       `${MIGRATION_HINT} Then set it again on the item.`,
   );
 }
@@ -182,11 +182,11 @@ async function healExtras(supabase: SupabaseClient, workspaceId: string, o: Orde
       .eq("workspace_id", workspaceId);
     if (error) {
       if (missingColumns(error).length > 0) {
-        reportLostExtras(o, `the extra of ${money(o.tipAmount ?? 0)}`);
+        reportLostExtras(o, `the tip of ${money(o.tipAmount ?? 0)}`);
       } else {
         tag("healExtras:tip")(error);
         reportSaveError(
-          `Order #${o.orderNumber}: the extra of ${money(o.tipAmount ?? 0)} may not have been saved. Open Edit order to check it.`,
+          `Order #${o.orderNumber}: the tip of ${money(o.tipAmount ?? 0)} may not have been saved. Open Edit order to check it.`,
         );
       }
     }
@@ -229,7 +229,7 @@ async function legacySubmitOrder(
       // the drink still reaches the barista, and tell the user what was lost.
       includeTip = false;
       if ((currentOrder.tipAmount ?? 0) > 0 || currentOrder.tipPaymentMethod) {
-        reportLostExtras(currentOrder, `the extra of ${money(currentOrder.tipAmount ?? 0)}`);
+        reportLostExtras(currentOrder, `the tip of ${money(currentOrder.tipAmount ?? 0)}`);
       }
       continue;
     }
@@ -463,7 +463,7 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       }
       if (hadTip) {
         reportSaveError(
-          `The extra on this order could not be saved because the database is missing a column. ${MIGRATION_HINT}`,
+          `The tip on this order could not be saved because the database is out of date. ${MIGRATION_HINT}`,
         );
       }
       return;
@@ -563,13 +563,13 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .insert(toEventExtraInsert(workspaceId, x));
     if (error && isMissingTable(error)) {
       reportSaveError(
-        `The extra of ${money(x.amount)} was not saved because the event_extras table does not exist. Run supabase/migration-order-tips-and-extras.sql, then add it again.`,
+        `The tip of ${money(x.amount)} was not saved because the event_extras table does not exist. Run supabase/migration-order-tips-and-extras.sql, then add it again.`,
       );
       return;
     }
     if (error) {
       reportSaveError(
-        `The extra of ${money(x.amount)} may not have been saved. Check your connection and add it again if it is missing.`,
+        `The tip of ${money(x.amount)} may not have been saved. Check your connection and add it again if it is missing.`,
       );
     }
     tag("addEventExtra")(error);
@@ -580,7 +580,7 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .update(toEventExtraPatch(patch))
       .eq("id", id)
       .eq("workspace_id", workspaceId);
-    if (error) reportSaveError("An extra received entry could not be updated. Check your connection and try again.");
+    if (error) reportSaveError("A tip entry could not be updated. Check your connection and try again.");
     tag("updateEventExtra")(error);
   },
   async deleteEventExtra(id: string) {
@@ -589,7 +589,7 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .delete()
       .eq("id", id)
       .eq("workspace_id", workspaceId);
-    if (error) reportSaveError("An extra received entry could not be deleted. Check your connection and try again.");
+    if (error) reportSaveError("A tip entry could not be deleted. Check your connection and try again.");
     tag("deleteEventExtra")(error);
   },
 

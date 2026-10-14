@@ -51,7 +51,7 @@ export default function EventMoney({
   function addExtra() {
     const amount = Math.round(parseFloat(amountText) * 100) / 100;
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Enter an amount greater than $0.");
+      setError("Enter a tip amount greater than $0.");
       return;
     }
     dispatch({
@@ -70,7 +70,7 @@ export default function EventMoney({
 
   return (
     <Card>
-      <h2 className="t-display mb-3 text-sm">Sales and extra</h2>
+      <h2 className="t-display mb-3 text-sm">Sales and tips</h2>
 
       <dl className="space-y-1.5 text-sm">
         <Line label="Items sold" value={String(totals.itemsSold)} />
@@ -90,21 +90,21 @@ export default function EventMoney({
       <div className="my-3 border-t border-cream-100" />
 
       <dl className="space-y-1.5 text-sm">
-        <Line label="Extra received" value={formatMoney(collected.extraTotal)} strong />
+        <Line label="Tips received" value={formatMoney(collected.extraTotal)} strong />
         <Line
           label="On orders"
           indent
           value={`${formatMoney(collected.orderExtra)} across ${collected.ordersWithExtra} order${
             collected.ordersWithExtra === 1 ? "" : "s"
-          }`}
+          } with tips`}
         />
         <Line
-          label="Average per order with extra"
+          label="Average per order with a tip"
           indent
           value={collected.avgExtraPerOrder === null ? "None yet" : formatMoney(collected.avgExtraPerOrder)}
         />
         <Line
-          label="Standalone entries"
+          label="Standalone tips"
           indent
           value={`${formatMoney(collected.standaloneExtra)} (${collected.standaloneCount} entr${
             collected.standaloneCount === 1 ? "y" : "ies"
@@ -113,7 +113,7 @@ export default function EventMoney({
         <Line label="Total collected" value={formatMoney(collected.totalCollected)} strong />
       </dl>
       <p className="t-caption mt-1 text-xs text-matcha-900/60">
-        Total collected is sales revenue plus extra. Extra is never counted in revenue, profit or donations.
+        Total collected is sales revenue plus tips. Tips are never counted in revenue, profit or donations.
       </p>
 
       {collected.byMethod.length > 0 ? (
@@ -123,7 +123,7 @@ export default function EventMoney({
               <tr className="t-display text-left text-xs text-matcha-900/60">
                 <th className="py-2 pr-4">By payment method</th>
                 <th className="py-2 pr-4 text-right">Sales</th>
-                <th className="py-2 pr-4 text-right">Extra</th>
+                <th className="py-2 pr-4 text-right">Tips</th>
                 <th className="py-2 pr-4 text-right">Total</th>
               </tr>
             </thead>
@@ -158,9 +158,9 @@ export default function EventMoney({
       ) : null}
 
       <div className="mt-4 rounded-xl border border-cream-200 p-3">
-        <div className="t-display mb-2 text-xs text-matcha-900/70">Add extra received</div>
+        <div className="t-display mb-2 text-xs text-matcha-900/70">Add tip</div>
         <p className="t-caption mb-2 text-xs text-matcha-900/60">
-          For money that is not tied to an order, like a Venmo sent after the event.
+          For a tip that is not tied to an order, like a Venmo sent after the event.
         </p>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-[8rem_10rem_1fr_auto] md:items-end">
           <Field label="amount ($)">
@@ -212,9 +212,9 @@ export default function EventMoney({
                 <Button
                   variant="ghost"
                   size="sm"
-                  aria-label="Delete extra"
+                  aria-label="Delete tip"
                   onClick={() => {
-                    if (confirm(`Delete this ${formatMoney(x.amount)} extra?`)) {
+                    if (confirm(`Delete this ${formatMoney(x.amount)} tip?`)) {
                       dispatch({ type: "DELETE_EVENT_EXTRA", id: x.id });
                     }
                   }}

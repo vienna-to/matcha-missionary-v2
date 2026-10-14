@@ -161,22 +161,22 @@ describe("step checkmarks reflect real input only", () => {
 
 describe("submit requirements", () => {
   it("blocks with no items and jumps to Items", () => {
-    const r = validateSubmit({ cart: [], paymentMethod: "cash" });
+    const r = validateSubmit({ cart: [], paymentMethod: "cash", itemsTotal: 0 });
     expect(r).toMatchObject({ ok: false, step: "items" });
   });
 
   it("blocks with no payment method and jumps to Payment", () => {
-    const r = validateSubmit({ cart: [drinkLine()], paymentMethod: "" });
+    const r = validateSubmit({ cart: [drinkLine()], paymentMethod: "", itemsTotal: 7 });
     expect(r).toMatchObject({ ok: false, step: "payment" });
   });
 
   it("items are checked before payment when both are missing", () => {
-    expect(validateSubmit({ cart: [], paymentMethod: "" })).toMatchObject({ step: "items" });
+    expect(validateSubmit({ cart: [], paymentMethod: "", itemsTotal: 0 })).toMatchObject({ step: "items" });
   });
 
   it("succeeds with no name and no adjustments", () => {
     const d = draft({ cart: [drinkLine()], paymentMethod: "cash" });
-    expect(validateSubmit(d)).toEqual({ ok: true });
+    expect(validateSubmit({ ...d, itemsTotal: 7 })).toEqual({ ok: true });
     const order = buildOrder(
       { ...d, paymentMethod: "cash" },
       { orderId: "ord-9", orderNumber: 4, submittedAt: "2026-01-01T00:00:00.000Z", event: EVENT },

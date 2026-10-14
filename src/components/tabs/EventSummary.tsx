@@ -641,22 +641,22 @@ function buildCsv(
   rows.push(["Overall Margin %", totals.margin !== null ? (totals.margin * 100).toFixed(1) : ""]);
   rows.push([]);
 
-  // Extra money (never part of revenue)
+  // Tips (never part of revenue)
   const collected = computeCollected(orders, extras);
-  rows.push(["Extra Received"]);
+  rows.push(["Tips Received"]);
   rows.push(["Sales Revenue", collected.salesRevenue.toFixed(2)]);
-  rows.push(["Extra on Orders", collected.orderExtra.toFixed(2)]);
-  rows.push(["Orders With Extra", String(collected.ordersWithExtra)]);
+  rows.push(["Tips on Orders", collected.orderExtra.toFixed(2)]);
+  rows.push(["Orders With Tips", String(collected.ordersWithExtra)]);
   rows.push([
-    "Average Extra per Order With Extra",
+    "Average Tip per Order With a Tip",
     collected.avgExtraPerOrder === null ? "" : collected.avgExtraPerOrder.toFixed(2),
   ]);
-  rows.push(["Standalone Extra", collected.standaloneExtra.toFixed(2)]);
-  rows.push(["Standalone Entries", String(collected.standaloneCount)]);
-  rows.push(["Extra Total", collected.extraTotal.toFixed(2)]);
+  rows.push(["Standalone Tips", collected.standaloneExtra.toFixed(2)]);
+  rows.push(["Standalone Tip Entries", String(collected.standaloneCount)]);
+  rows.push(["Tips Total", collected.extraTotal.toFixed(2)]);
   rows.push(["Total Collected", collected.totalCollected.toFixed(2)]);
   rows.push([]);
-  rows.push(["Payment Method", "Sales", "Extra", "Total"]);
+  rows.push(["Payment Method", "Sales", "Tips", "Total"]);
   for (const b of collected.byMethod) {
     rows.push([
       b.method,

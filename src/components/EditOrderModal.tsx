@@ -9,6 +9,7 @@ import {
   Input,
   Label,
   Modal,
+  Select,
   Textarea,
 } from "@/components/ui";
 import { useDispatch } from "@/lib/store";
@@ -20,12 +21,15 @@ import {
   type MenuSnapshot,
   type Order,
   type OrderItem,
+  type PaymentMethod,
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
   type SugarAdjustment,
   type IceAdjustment,
 } from "@/lib/types";
 import { DiscountRow } from "@/components/DiscountRow";
 import ExtraPicker from "@/components/ExtraPicker";
-import { amountOwed, extraAmount, NO_EXTRA, type ExtraDraft } from "@/lib/order-steps";
+import { amountOwed, extraAmount, isFreeTotal, NO_EXTRA, type ExtraDraft } from "@/lib/order-steps";
 import { chargedUnitFromPct } from "@/lib/pricing";
 import { useHelperMode } from "@/lib/helper-mode";
 import { newId } from "@/lib/id";
@@ -85,6 +89,10 @@ export default function EditOrderModal({
       ? { mode: "custom", custom: order.tipAmount, method: order.tipPaymentMethod ?? "" }
       : NO_EXTRA,
   );
+  // Orders from before free orders existed may have no method. It is only
+  // asked for here when money is actually due.
+  const [orderMethod, setOrderMethod] = useState<PaymentMethod | "">(order.paymentMethod ?? "");
+  const [error, setError] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
 
@@ -133,12 +141,23 @@ export default function EditOrderModal({
     onClose();
   }
 
+  const free = items.length > 0 && isFreeTotal(total);
+
   function save() {
     if (!submittable) return;
-    // Only touch the extra columns when the extra actually changed, so a
-    // plain name edit never depends on them.
+    if (!free && orderMethod === "") {
+      setError("Pick a payment method to save.");
+      return;
+    }
+    if (extraDollars > 0 && !extra.method && orderMethod === "") {
+      setError("Pick how the tip was paid.");
+      return;
+    }
+    setError(null);
+    // Only touch the tip columns when the tip actually changed, so a plain
+    // name edit never depends on them.
     const newMethod =
-      extraDollars > 0 && extra.method && extra.method !== order.paymentMethod
+      extraDollars > 0 && extra.method && extra.method !== orderMethod
         ? extra.method
         : undefined;
     const tipChanged =
@@ -149,6 +168,13 @@ export default function EditOrderModal({
       patch: {
         customerName: name.trim(),
         notes: notes.trim() || undefined,
+        // Only written when it changed. A free order keeps whatever real
+        // method it had; it is never given a made-up one.
+        ...(orderMethod !== (order.paymentMethod ?? "")
+          ? { paymentMethod: orderMethod || undefined }
+          : {}),
+        ...(free && order.paymentStatus !== "comped" ? { paymentStatus: "comped" as const } : {}),
+        ...(!free && order.paymentStatus === "comped" ? { paymentStatus: "paid" as const } : {}),
         ...(tipChanged
           ? { tipAmount: extraDollars > 0 ? extraDollars : undefined, tipPaymentMethod: newMethod }
           : {}),
@@ -246,8 +272,34 @@ export default function EditOrderModal({
           owed={amountOwed(total)}
           draft={extra}
           onChange={setExtra}
-          orderMethod={order.paymentMethod ?? ""}
+          orderMethod={orderMethod}
         />
+
+        {!order.paymentMethod && !free ? (
+          <Field label="Payment method (required)">
+            <Select
+              value={orderMethod}
+              onChange={(e) => {
+                setOrderMethod(e.target.value as PaymentMethod | "");
+                setError(null);
+              }}
+              className={cn(error && orderMethod === "" && "border-red-400")}
+            >
+              <option value="">Choose a method</option>
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {PAYMENT_METHOD_LABELS[m]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
+
+        {error ? (
+          <div role="alert" className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+            {error}
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap justify-between gap-2 pt-2">
           <Button variant="danger" onClick={deleteOrder}>

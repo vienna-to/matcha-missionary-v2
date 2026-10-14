@@ -544,10 +544,14 @@ export function computeCollected(orders: Order[], extras: EventExtra[]): Collect
     bucket(x.paymentMethod).standaloneExtra += x.amount;
   }
 
-  const byMethod = METHOD_ORDER.filter((m) => buckets.has(m)).map((m) => {
-    const b = buckets.get(m)!;
-    return { ...b, total: b.sales + b.orderExtra + b.standaloneExtra };
-  });
+  // A method with nothing collected (for example the method left on an order
+  // that was later made free) is not part of the reconciliation.
+  const byMethod = METHOD_ORDER.filter((m) => buckets.has(m))
+    .map((m) => {
+      const b = buckets.get(m)!;
+      return { ...b, total: b.sales + b.orderExtra + b.standaloneExtra };
+    })
+    .filter((b) => Math.round(b.total * 100) !== 0);
   const extraTotal = orderExtra + standaloneExtra;
   return {
     salesRevenue,

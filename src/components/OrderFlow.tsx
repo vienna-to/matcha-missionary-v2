@@ -21,7 +21,7 @@ import {
   resolveMilkChoices,
   resolveMilkName,
 } from "@/lib/order-labels";
-import { STEPS, stepIndex, type CartLine, type ExtraDraft, type Step } from "@/lib/order-steps";
+import { isFreeTotal, STEPS, stepIndex, type CartLine, type ExtraDraft, type Step } from "@/lib/order-steps";
 import { cn, formatMoney } from "@/lib/utils";
 
 export { STEPS, stepIndex };
@@ -129,7 +129,12 @@ export default function OrderFlow(p: Props) {
                 <span className="tabular-nums">{formatMoney(p.total)}</span>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            {cart.length > 0 && isFreeTotal(p.total) ? (
+              <div className="t-caption rounded-xl border border-dashed border-cream-300 px-4 py-4 text-center text-sm text-matcha-900/70">
+                Free order. No payment method needed.
+              </div>
+            ) : null}
+            <div className={cn("grid grid-cols-2 gap-3", cart.length > 0 && isFreeTotal(p.total) && "hidden")}>
               {PAYMENT_METHODS.map((m) => {
                 const active = p.paymentMethod === m;
                 return (
@@ -153,7 +158,7 @@ export default function OrderFlow(p: Props) {
               owed={p.total}
               draft={p.extra}
               onChange={p.setExtra}
-              orderMethod={p.paymentMethod}
+              orderMethod={cart.length > 0 && isFreeTotal(p.total) ? "" : p.paymentMethod}
             />
           </div>
         )}
@@ -179,11 +184,11 @@ export default function OrderFlow(p: Props) {
             {formatMoney(step === "payment" ? p.total + p.extraDollars : p.total)}
           </div>
         </div>
-        <div className="ml-auto flex-1">
+        <div className="ml-auto min-w-0 flex-1">
           {step === "items" && (
             <Button
               size="lg"
-              className="h-14 w-full text-base"
+              className="h-14 w-full min-w-0 px-3 text-base"
               disabled={cart.length === 0}
               onClick={() => p.onStep("adjust")}
             >
@@ -193,7 +198,7 @@ export default function OrderFlow(p: Props) {
           {step === "adjust" && (
             <Button
               size="lg"
-              className="h-14 w-full text-base"
+              className="h-14 w-full min-w-0 px-3 text-base"
               onClick={() => p.onStep("name")}
             >
               Next: Name <ChevronRight className="h-5 w-5" />
@@ -202,7 +207,7 @@ export default function OrderFlow(p: Props) {
           {step === "name" && (
             <Button
               size="lg"
-              className="h-14 w-full text-base"
+              className="h-14 w-full min-w-0 px-3 text-base"
               onClick={() => p.onStep("payment")}
             >
               Next: Payment <ChevronRight className="h-5 w-5" />
@@ -211,7 +216,7 @@ export default function OrderFlow(p: Props) {
           {step === "payment" && (
             <Button
               size="lg"
-              className="h-14 w-full text-base"
+              className="h-14 w-full min-w-0 px-3 text-base"
               onClick={p.onSubmit}
             >
               <Check className="h-5 w-5" /> Confirm order

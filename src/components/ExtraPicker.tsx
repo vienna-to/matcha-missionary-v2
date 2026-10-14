@@ -16,13 +16,17 @@ import {
 import { cn, formatMoney } from "@/lib/utils";
 
 /**
- * "Extra" block for taking a round-up or tip with an order: None, Round up,
+ * "Tips" block for taking a round-up or tip with an order: None, Round up,
  * +$1, +$2 or a custom amount, the method it was paid with, and the three
- * numbers that matter (items total, extra, total collected). The extra is
- * never added to item prices or revenue.
+ * numbers that matter (items total, tip, total collected). The tip is never
+ * added to item prices or revenue.
  *
  * `owed` is what the customer owes at checkout (items total, plus sales tax
  * if it is added at checkout), which is what Round up rounds.
+ *
+ * `orderMethod` is "" when the order has no payment method of its own (a free
+ * order). Then there is nothing for the tip to default to, so the tip's method
+ * must be chosen explicitly.
  */
 export default function ExtraPicker({
   owed,
@@ -40,22 +44,25 @@ export default function ExtraPicker({
   const [customText, setCustomText] = useState(draft.custom > 0 ? String(draft.custom) : "");
   const amount = extraAmount(draft, owed);
   const roundUp = roundUpExtra(owed);
+  const roundUpDisabled = roundUp === 0;
 
   const choose = (mode: ExtraMode) => onChange({ ...draft, mode });
 
   return (
     <div className={cn("space-y-3 rounded-xl border border-cream-200 p-3", className)}>
-      <div className="t-display text-sm">Extra (optional)</div>
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+      <div className="t-display text-sm">Tips (optional)</div>
+
+      {/* Equal-width tracks that wrap to a second row instead of overflowing. */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(5.25rem,1fr))] gap-2">
         <ModeButton active={draft.mode === "none"} onClick={() => choose("none")}>
           None
         </ModeButton>
         <ModeButton
           active={draft.mode === "round"}
-          disabled={roundUp === 0}
+          disabled={roundUpDisabled}
           onClick={() => choose("round")}
         >
-          Round up{roundUp > 0 ? ` +${formatMoney(roundUp)}` : ""}
+          Round up
         </ModeButton>
         <ModeButton active={draft.mode === "plus1"} onClick={() => choose("plus1")}>
           +$1
@@ -67,6 +74,11 @@ export default function ExtraPicker({
           Custom
         </ModeButton>
       </div>
+      <p className="t-caption -mt-1 text-xs text-matcha-900/60">
+        {roundUpDisabled
+          ? "Round up is off because the total is already a whole dollar."
+          : `Round up adds ${formatMoney(roundUp)}.`}
+      </p>
 
       {draft.mode === "custom" ? (
         <label className="flex items-center gap-2">
@@ -88,16 +100,21 @@ export default function ExtraPicker({
       ) : null}
 
       {amount > 0 ? (
-        <label className="flex items-center gap-2">
-          <span className="t-caption text-sm text-matcha-900/70">Extra paid with</span>
+        <label className="flex flex-wrap items-center gap-2">
+          <span className="t-caption text-sm text-matcha-900/70">Tip paid with</span>
           <Select
             value={draft.method}
             onChange={(e) => onChange({ ...draft, method: e.target.value as PaymentMethod | "" })}
-            className="h-11 w-auto min-w-40 text-sm"
+            className={cn(
+              "h-11 w-auto min-w-40 text-sm",
+              orderMethod === "" && draft.method === "" && "border-red-400",
+            )}
           >
-            <option value="">
-              Same as order{orderMethod ? ` (${PAYMENT_METHOD_LABELS[orderMethod]})` : ""}
-            </option>
+            {orderMethod === "" ? (
+              <option value="">Choose a method</option>
+            ) : (
+              <option value="">Same as order ({PAYMENT_METHOD_LABELS[orderMethod]})</option>
+            )}
             {PAYMENT_METHODS.map((m) => (
               <option key={m} value={m}>
                 {PAYMENT_METHOD_LABELS[m]}
@@ -109,7 +126,7 @@ export default function ExtraPicker({
 
       <dl className="t-caption space-y-1 rounded-lg bg-cream-100 px-3 py-2 text-sm">
         <Row label="Items total" value={formatMoney(owed)} />
-        <Row label="Extra" value={formatMoney(amount)} />
+        <Row label="Tip" value={formatMoney(amount)} />
         <Row label="Total collected" value={formatMoney(owed + amount)} strong />
       </dl>
     </div>
@@ -143,11 +160,12 @@ function ModeButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "min-h-12 rounded-xl border-2 px-2 text-sm font-semibold transition-colors active:scale-[0.98]",
-        active
-          ? "border-matcha-500 bg-matcha-500 text-white"
-          : "border-cream-300 bg-white text-matcha-900 hover:border-matcha-400",
-        disabled && "cursor-not-allowed opacity-40",
+        "min-h-12 min-w-0 whitespace-nowrap rounded-xl border-2 px-2 text-sm font-semibold transition-colors active:scale-[0.98]",
+        disabled
+          ? "cursor-not-allowed border-dashed border-cream-200 bg-cream-100 text-matcha-900/35"
+          : active
+            ? "border-matcha-500 bg-matcha-500 text-white"
+            : "border-cream-300 bg-white text-matcha-900 hover:border-matcha-400",
       )}
     >
       {children}

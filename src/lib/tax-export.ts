@@ -1,4 +1,4 @@
-import type { AppState, Order } from "./types";
+import { FREE_REASON_LABELS, type AppState, type Order } from "./types";
 import { chargedUnit, lineRevenue as itemLineRevenue, orderTip, tipMethod } from "./pricing";
 
 /** Escape one CSV field per RFC 4180 (quotes doubled, whole thing wrapped
@@ -60,7 +60,7 @@ function orderToLines(order: Order): ItemLine[] {
       lineRevenue,
       isCombo: Boolean(it.isCombo),
       unitCharged: chargedUnit(it),
-      freeReason: it.freeReason ?? "",
+      freeReason: it.freeReason ? FREE_REASON_LABELS[it.freeReason] : "",
     });
     // Combos also snapshot a pastry; the pastry share of the bundle price is
     // recorded separately with $0 revenue attributed here (revenue lives on
@@ -203,10 +203,10 @@ export function buildFullHistoryCsv(state: AppState): string {
     }
   }
 
-  // Extra money (round-ups / tips). Kept out of ITEMIZED SALES and out of the
+  // Tips (round-ups and tips). Kept out of ITEMIZED SALES and out of the
   // quarterly revenue totals: it is not a sale.
   rows.push([]);
-  rows.push(["EXTRA RECEIVED (not included in sales revenue)"]);
+  rows.push(["TIPS RECEIVED (not included in sales revenue)"]);
   rows.push(["Event name", "Event date", "Source", "Order #", "Amount", "Payment method", "Note"]);
   for (const o of orders) {
     const tip = orderTip(o);
@@ -378,6 +378,9 @@ export function buildQuarterlyReportCsv(
       orderRevenue += itemLineRevenue(it);
     }
     b.totalRevenue += orderRevenue;
+    // A free order has no payment method and nothing to reconcile: skip it so
+    // it does not add an "unknown" column.
+    if (o.paymentMethod == null && Math.round(orderRevenue * 100) === 0) continue;
     const pm = o.paymentMethod ?? "unknown";
     b.byMethod[pm] = (b.byMethod[pm] ?? 0) + orderRevenue;
   }

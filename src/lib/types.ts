@@ -233,13 +233,21 @@ export const COMP_REASON_LABELS: Record<CompReason, string> = {
   other: "Other",
 };
 
-export type FreeReason = "giveaway" | "sample" | "staff" | "influencer" | "other";
-export const FREE_REASONS: FreeReason[] = ["giveaway", "sample", "staff", "influencer", "other"];
+export type FreeReason = "giveaway" | "sample" | "staff" | "influencer" | "friend" | "other";
+export const FREE_REASONS: FreeReason[] = [
+  "giveaway",
+  "sample",
+  "staff",
+  "influencer",
+  "friend",
+  "other",
+];
 export const FREE_REASON_LABELS: Record<FreeReason, string> = {
   giveaway: "Giveaway",
   sample: "Sample",
   staff: "Staff",
   influencer: "Influencer",
+  friend: "Friend",
   other: "Other",
 };
 

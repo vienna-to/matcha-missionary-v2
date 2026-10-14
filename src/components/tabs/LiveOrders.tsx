@@ -18,6 +18,13 @@ import {
 } from "@/lib/order-steps";
 import { useActiveEvent, useStore } from "@/lib/store";
 import {
+  applyComboSuggestion,
+  comboChoices,
+  findComboSuggestion,
+  pairKey,
+  type ComboSuggestion,
+} from "@/lib/combos";
+import {
   COMBO_PRICE,
   compareMenuItems,
   type MenuItem,
@@ -75,6 +82,10 @@ export default function LiveOrders() {
   const [notice, setNotice] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [comboPickerOpen, setComboPickerOpen] = useState(false);
+  // Combo suggestion: the pair being offered, and pairs the customer said
+  // "No thanks" to (for this order only; cleared by reset()).
+  const [suggestion, setSuggestion] = useState<ComboSuggestion | null>(null);
+  const [declinedPairs, setDeclinedPairs] = useState<string[]>([]);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [helperMode] = useHelperMode();
   const wide = useIsWide();
@@ -102,10 +113,28 @@ export default function LiveOrders() {
   // added at checkout in this app, so that is the items total.
   const owed = amountOwed(total);
   const extraDollars = extraAmount(extra, owed);
-  const checks = stepChecks({ cart, snapshot: snap, customerName, notes, paymentMethod });
+  const checks = stepChecks({
+    cart,
+    snapshot: snap,
+    customerName,
+    notes,
+    paymentMethod,
+    tipAmount: extraDollars,
+    tipPaymentMethod: extra.method,
+  });
   const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
 
+  /** Offer a combo if the cart has a drink and a pastry that would be cheaper
+   *  bundled. Returns true when a popup was opened. */
+  function offerCombo(): boolean {
+    const s = findComboSuggestion(cart, snap, new Set(declinedPairs));
+    if (s) setSuggestion(s);
+    return Boolean(s);
+  }
+
   function goStep(next: Step) {
+    // Leaving the Items step is the moment the customer has finished picking.
+    if (step === "items" && next !== "items") offerCombo();
     setStep(next);
     setNotice(null);
   }
@@ -148,6 +177,8 @@ export default function LiveOrders() {
     setNotes("");
     setPaymentMethod("");
     setExtra(NO_EXTRA);
+    setDeclinedPairs([]);
+    setSuggestion(null);
     setStep("items");
     setNotice(null);
     setSheetOpen(false);
@@ -156,9 +187,18 @@ export default function LiveOrders() {
   }
 
   function submit() {
+    // One last chance to bundle a pair added after the Items step. Nothing is
+    // submitted this tap; the popup answers first, then Confirm again.
+    if (cart.length > 0 && offerCombo()) return;
     // Only an item and a payment method are required; name and adjustments
     // are optional. If one is missing, say so and jump to that step.
-    const check = validateSubmit({ cart, paymentMethod });
+    const check = validateSubmit({
+      cart,
+      paymentMethod,
+      itemsTotal: total,
+      tipAmount: extraDollars,
+      tipPaymentMethod: extra.method,
+    });
     if (!check.ok) {
       setStep(check.step);
       setNotice(check.message);
@@ -172,7 +212,7 @@ export default function LiveOrders() {
         snapshot: snap,
         customerName,
         notes,
-        paymentMethod: paymentMethod as PaymentMethod,
+        paymentMethod,
         tipAmount: extraDollars,
         tipPaymentMethod: extra.method,
       },
@@ -292,6 +332,21 @@ export default function LiveOrders() {
         </>
       )}
 
+      {suggestion ? (
+        <ComboSuggestModal
+          suggestion={suggestion}
+          snapshot={snap}
+          onAccept={() => {
+            setCart((c) => applyComboSuggestion(c, suggestion));
+            setSuggestion(null);
+          }}
+          onDecline={() => {
+            setDeclinedPairs((d) => [...d, pairKey(suggestion.drinkId, suggestion.pastryId)]);
+            setSuggestion(null);
+          }}
+        />
+      ) : null}
+
       {comboPickerOpen ? (
         <ComboPickerModal
           items={activeItems}
@@ -312,40 +367,28 @@ function ComboPickerModal({
   onClose: () => void;
   onPick: (drinkId: string, pastryId: string) => void;
 }) {
-  // Any active item can be either side of the combo — let the user decide
-  // since "pastry" isn't strictly modelled anymore. We do put items tagged
-  // category="pastry" at the top of the pastry picker for convenience.
-  const pastryFirst = useMemo(() => {
-    const arr = [...items];
-    arr.sort((a, b) => {
-      const ap = a.category === "pastry" ? 0 : 1;
-      const bp = b.category === "pastry" ? 0 : 1;
-      return ap - bp || compareMenuItems(a, b);
-    });
-    return arr;
-  }, [items]);
+  // Drinks and pastries are told apart by the menu's own classification (see
+  // comboChoices); each dropdown shows only its own kind.
+  const { drinks, pastries, unclassified } = useMemo(() => comboChoices(items), [items]);
 
-  const initialDrink = items.find((m) => m.category !== "pastry")?.id ?? items[0]?.id ?? "";
-  const initialPastry = pastryFirst[0]?.id ?? "";
+  const [drinkId, setDrinkId] = useState<string>(drinks[0]?.id ?? "");
+  const [pastryId, setPastryId] = useState<string>(pastries[0]?.id ?? "");
 
-  const [drinkId, setDrinkId] = useState<string>(initialDrink);
-  const [pastryId, setPastryId] = useState<string>(initialPastry);
-
-  const drink = items.find((m) => m.id === drinkId);
-  const pastry = items.find((m) => m.id === pastryId);
+  const drink = drinks.find((m) => m.id === drinkId);
+  const pastry = pastries.find((m) => m.id === pastryId);
   const savings = (drink?.price ?? 0) + (pastry?.price ?? 0) - COMBO_PRICE;
-  const valid = Boolean(drink && pastry && drinkId !== pastryId);
+  const valid = Boolean(drink && pastry);
 
   return (
-    <Modal open onClose={onClose} title={`Combo deal — ${formatMoney(COMBO_PRICE)}`}>
+    <Modal open onClose={onClose} title={`Combo deal: ${formatMoney(COMBO_PRICE)}`}>
       <div className="space-y-3">
         <p className="t-caption text-xs text-matcha-900/60">
-          pick any drink and any pastry — bundle is fixed at {formatMoney(COMBO_PRICE)}.
+          pick a drink and a pastry. the bundle is fixed at {formatMoney(COMBO_PRICE)}.
           customize the drink&apos;s milk / cream in the adjustments step.
         </p>
         <Field label="drink">
           <Select value={drinkId} onChange={(e) => setDrinkId(e.target.value)}>
-            {items.map((m) => (
+            {drinks.map((m) => (
               <option key={m.id} value={m.id}>
                 {`${m.name} · ${formatMoney(m.price)}`.toUpperCase()}
               </option>
@@ -354,13 +397,27 @@ function ComboPickerModal({
         </Field>
         <Field label="pastry">
           <Select value={pastryId} onChange={(e) => setPastryId(e.target.value)}>
-            {pastryFirst.map((m) => (
+            {pastries.map((m) => (
               <option key={m.id} value={m.id}>
                 {`${m.name} · ${formatMoney(m.price)}`.toUpperCase()}
               </option>
             ))}
           </Select>
         </Field>
+        {drinks.length === 0 || pastries.length === 0 ? (
+          <p role="alert" className="t-caption text-xs font-semibold text-red-700">
+            {drinks.length === 0 ? "No drinks on the menu. " : ""}
+            {pastries.length === 0
+              ? "No pastries on the menu. Set an item's Size to Pastry in Menu Manager."
+              : ""}
+          </p>
+        ) : null}
+        {unclassified > 0 ? (
+          <p className="t-caption text-xs text-matcha-900/60">
+            {unclassified} item{unclassified === 1 ? "" : "s"} can&apos;t be used in a combo. Set their Size in
+            Menu Manager.
+          </p>
+        ) : null}
         <div className="t-caption flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2 text-xs text-matcha-900/80">
           <span>combo price</span>
           <span className="tabular-nums">
@@ -376,6 +433,49 @@ function ComboPickerModal({
           </Button>
           <Button className="h-12" onClick={() => onPick(drinkId, pastryId)} disabled={!valid}>
             Add combo
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** "Make this a combo?" shown when a drink and a pastry in the order would be
+ *  cheaper bundled. */
+function ComboSuggestModal({
+  suggestion,
+  snapshot,
+  onAccept,
+  onDecline,
+}: {
+  suggestion: ComboSuggestion;
+  snapshot: MenuSnapshot;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const drink = snapshot.menuItems.find((m) => m.id === suggestion.drinkId);
+  const pastry = snapshot.menuItems.find((m) => m.id === suggestion.pastryId);
+  const n = suggestion.pairs;
+  return (
+    <Modal open onClose={onDecline} title="Make it a combo?">
+      <div className="space-y-4">
+        <div className="rounded-xl bg-cream-100 px-4 py-3">
+          <div className="t-display text-base">
+            {n > 1 ? `${n} × ` : ""}
+            {drink?.name} + {pastry?.name}
+          </div>
+          <div className="t-caption mt-1 text-sm text-matcha-900/70">
+            <span className="tabular-nums">{formatMoney(suggestion.separateTotal)}</span> separately,{" "}
+            <span className="tabular-nums">{formatMoney(suggestion.comboTotal)}</span> combo
+            {n > 1 ? ` (${n} combos)` : ""}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row-reverse">
+          <Button size="lg" className="h-14 flex-1 text-base" onClick={onAccept}>
+            Make it a combo
+          </Button>
+          <Button variant="outline" size="lg" className="h-14 flex-1 text-base" onClick={onDecline}>
+            No thanks
           </Button>
         </div>
       </div>

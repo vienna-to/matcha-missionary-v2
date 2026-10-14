@@ -16,10 +16,9 @@ import {
   Volume2,
 } from "lucide-react";
 import { Button, Card, EmptyState } from "@/components/ui";
-import { DiscountRow } from "@/components/DiscountRow";
 import { useActiveEvent, useStore } from "@/lib/store";
 import { useHelperMode } from "@/lib/helper-mode";
-import { lineList, lineRevenue, listUnit } from "@/lib/pricing";
+import { lineList, lineRevenue } from "@/lib/pricing";
 import { playPing, unlockAudio } from "@/lib/audio";
 import { cn, formatMoney, formatTime, minutesAgo } from "@/lib/utils";
 import {
@@ -30,7 +29,6 @@ import {
   resolveMilkName,
 } from "@/lib/order-labels";
 import type {
-  FreeReason,
   Ingredient,
   MenuSnapshot,
   Order,
@@ -152,24 +150,6 @@ export default function BaristaQueue() {
     });
   }
 
-  function setItemDiscount(orderId: string, itemId: string, pct: number) {
-    dispatch({
-      type: "UPDATE_ORDER_ITEM",
-      orderId,
-      orderItemId: itemId,
-      patch: { discountPct: pct > 0 ? pct : undefined },
-    });
-  }
-
-  function setItemFreeReason(orderId: string, itemId: string, reason: FreeReason | undefined) {
-    dispatch({
-      type: "UPDATE_ORDER_ITEM",
-      orderId,
-      orderItemId: itemId,
-      patch: { freeReason: reason },
-    });
-  }
-
   function markComplete(o: Order) {
     dispatch({
       type: "UPDATE_ORDER",
@@ -260,17 +240,6 @@ export default function BaristaQueue() {
               pinned={typeof o.queuePriority === "number"}
               onPin={() => pin(o.id, typeof o.queuePriority === "number")}
               onToggleItem={(itemId, status) => toggleItem(o, itemId, status)}
-              // Helpers can toggle item status + mark done, but not touch prices.
-              onSetItemDiscount={
-                helperMode
-                  ? undefined
-                  : (itemId, pct) => setItemDiscount(o.id, itemId, pct)
-              }
-              onSetItemFreeReason={
-                helperMode
-                  ? undefined
-                  : (itemId, reason) => setItemFreeReason(o.id, itemId, reason)
-              }
               onMarkComplete={() => markComplete(o)}
               onClaim={() => claim(o)}
               onRelease={() => release(o)}
@@ -387,8 +356,6 @@ function OrderCard({
   pinned,
   onPin,
   onToggleItem,
-  onSetItemDiscount,
-  onSetItemFreeReason,
   onMarkComplete,
   onClaim,
   onRelease,
@@ -402,8 +369,6 @@ function OrderCard({
   pinned: boolean;
   onPin: () => void;
   onToggleItem: (itemId: string, status: OrderItemStatus) => void;
-  onSetItemDiscount?: (itemId: string, pct: number) => void;
-  onSetItemFreeReason?: (itemId: string, reason: FreeReason | undefined) => void;
   onMarkComplete: () => void;
   onClaim: () => void;
   onRelease: () => void;
@@ -452,7 +417,7 @@ function OrderCard({
             {formatTime(order.submittedAt)} · {timerLabel(elapsed)}
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-1.5">
+        <div className="flex shrink-0 flex-wrap gap-1.5 max-md:w-full max-md:shrink max-md:[&>button]:h-10">
           <Button
             size="sm"
             variant={pinned ? "primary" : "outline"}
@@ -514,12 +479,6 @@ function OrderCard({
               orderNumber={order.orderNumber}
               interactive
               onToggle={() => onToggleItem(it.id, it.status)}
-              onSetDiscount={
-                onSetItemDiscount ? (pct) => onSetItemDiscount(it.id, pct) : undefined
-              }
-              onSetFreeReason={
-                onSetItemFreeReason ? (r) => onSetItemFreeReason(it.id, r) : undefined
-              }
               hidePrice={helperMode}
             />
           ))
@@ -651,8 +610,6 @@ function OrderItemRow({
   interactive,
   compact,
   onToggle,
-  onSetDiscount,
-  onSetFreeReason,
   hidePrice,
 }: {
   item: OrderItem;
@@ -661,13 +618,10 @@ function OrderItemRow({
   interactive?: boolean;
   compact?: boolean;
   onToggle?: () => void;
-  onSetDiscount?: (pct: number) => void;
-  onSetFreeReason?: (reason: FreeReason | undefined) => void;
   /** Suppress the FREE / % off text next to the item (helper mode). */
   hidePrice?: boolean;
 }) {
   // Hook must run before any conditional return.
-  const [discountOpen, setDiscountOpen] = useState(false);
 
   const drinkName = itemDrinkName(item, snapshot);
   // No usable drink name anywhere: never render a blank row.
@@ -678,9 +632,8 @@ function OrderItemRow({
     ? `Combo: ${drinkName} + ${item.comboPastryNameSnap ?? "?"}`
     : drinkName;
   const done = item.status === "done";
-  // priceSnap stores the un-discounted unit price (combo: COMBO_PRICE, else
-  // the menu price). So it's the right base for the discount editor.
-  const unitPrice = listUnit(item);
+  // Discounts are set in Live Orders / Edit Order, not here; this row only
+  // shows the result.
   const pct = item.discountPct ?? 0;
 
   return (
@@ -718,28 +671,8 @@ function OrderItemRow({
               {pct === 100 ? "FREE" : `${pct}% off`}
             </div>
           ) : null}
-          {interactive && onSetDiscount ? (
-            <Button
-              size="sm"
-              variant={pct > 0 ? "primary" : "ghost"}
-              onClick={() => setDiscountOpen((s) => !s)}
-              title={pct > 0 ? "Edit discount" : "Add discount"}
-            >
-              <span className="t-display text-[11px]">%</span>
-            </Button>
-          ) : null}
         </div>
       </div>
-      {discountOpen && onSetDiscount ? (
-        <DiscountRow
-          unitPrice={unitPrice}
-          pct={pct}
-          onPct={onSetDiscount}
-          onClose={() => setDiscountOpen(false)}
-          freeReason={item.freeReason}
-          onFreeReason={onSetFreeReason}
-        />
-      ) : null}
     </div>
   );
 }

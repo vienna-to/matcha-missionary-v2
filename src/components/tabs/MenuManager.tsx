@@ -55,14 +55,14 @@ export default function MenuManager() {
   const [subtab, setSubtab] = useState<SubTab>("items");
   return (
     <div className="space-y-5">
-      <header className="flex items-end justify-between gap-3">
+      <header className="flex items-end justify-between gap-3 max-md:flex-col max-md:items-stretch">
         <div>
           <h1 className="t-display text-xl">Menu</h1>
           <p className="t-caption mt-1 text-sm text-matcha-900/60">
             master menu and ingredients. future events copy a snapshot at creation time.
           </p>
         </div>
-        <div className="flex gap-1.5 rounded-xl bg-cream-100 p-1">
+        <div className="flex gap-1.5 rounded-xl bg-cream-100 p-1 max-md:[&>button]:flex-1">
           <Chip active={subtab === "items"} onClick={() => setSubtab("items")}>
             <span className="t-display">Items</span>
           </Chip>
@@ -125,7 +125,7 @@ function ItemsList() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={() => setCreating(true)}>
+        <Button onClick={() => setCreating(true)} className="max-md:w-full">
           <Plus className="h-4 w-4" /> New item
         </Button>
       </div>
@@ -333,8 +333,8 @@ function ItemRow({
       <div className="flex flex-wrap items-center gap-3">
         {dragHandle}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <div className="t-display text-sm">{item.name}</div>
+          <div className="flex items-center gap-2 max-md:flex-wrap max-md:gap-y-1">
+            <div className="t-display text-sm max-md:min-w-0 max-md:break-words">{item.name}</div>
             <Badge variant="neutral">{SIZE_LABELS[item.size]}</Badge>
             {lowMargin ? (
               <Badge variant="warning">
@@ -346,12 +346,12 @@ function ItemRow({
             <div className="t-caption mt-1 text-xs text-matcha-900/60">{item.description}</div>
           ) : null}
         </div>
-        <div className="flex items-center gap-6 text-right">
+        <div className="flex items-center gap-6 text-right max-md:grid max-md:w-full max-md:grid-cols-3 max-md:gap-2 max-md:text-center">
           <Stat label="Price" value={formatMoney(item.price)} />
           <Stat label="Cost" value={formatMoney(cost)} />
           <Stat label="Margin" value={formatPct(margin)} />
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 max-md:w-full max-md:[&>button]:h-10 max-md:[&>button]:flex-1">
           <Button size="sm" variant="outline" onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
@@ -375,7 +375,7 @@ function ItemRow({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="text-right">
+    <div className="text-right max-md:text-center">
       <div className="t-display text-[10px] text-matcha-900/50">{label}</div>
       <div className="text-sm font-medium tabular-nums">{value}</div>
     </div>
@@ -683,8 +683,9 @@ function LineRow({
   const validUnits = UNITS_BY_CATEGORY[category];
 
   return (
-    <div className="grid grid-cols-[1fr_70px_80px_auto] items-center gap-2">
+    <div className="grid grid-cols-[1fr_70px_80px_auto] items-center gap-2 max-md:grid-cols-[1fr_5.5rem_auto]">
       <Select
+        className="max-md:col-span-3"
         value={line.ingredientId}
         onChange={(e) => {
           const newId = e.target.value;
@@ -892,11 +893,11 @@ function IngredientsList() {
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-sm max-md:min-w-[38rem]">
               <thead>
                 <tr className="t-display text-left text-xs text-matcha-900/60">
                   <th className="w-6 py-2" />
-                  <th className="py-2 pr-3">Name</th>
+                  <th className="py-2 pr-3 max-md:min-w-[11rem]">Name</th>
                   <th className="py-2 pr-3">Package $</th>
                   <th className="py-2 pr-3">Package amount</th>
                   <th className="py-2 pr-3">Unit</th>

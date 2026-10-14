@@ -213,11 +213,11 @@ export default function EventSummary() {
             {event.name} · {event.date} · {event.startTime}–{event.endTime}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 max-md:grid max-md:w-full max-md:grid-cols-2">
           <Select
             value={selectedEventId}
             onChange={(e) => setSelectedEventId(e.target.value)}
-            className="text-sm"
+            className="text-sm max-md:col-span-2"
           >
             <option value={ALL_EVENTS}>All events ({state.events.length})</option>
             {sortedEvents.map((ev) => (
@@ -226,10 +226,10 @@ export default function EventSummary() {
               </option>
             ))}
           </Select>
-          <Button variant="outline" size="sm" onClick={handleExport}>
+          <Button variant="outline" size="sm" onClick={handleExport} className="max-md:h-10">
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>
-          <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting}>
+          <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting} className="max-md:h-10">
             <Trash2 className="h-3.5 w-3.5" /> {deleting ? "deleting…" : "Delete event"}
           </Button>
         </div>
@@ -893,7 +893,7 @@ function AllEventsView({
             combined across {aggregate.eventCount} event{aggregate.eventCount === 1 ? "" : "s"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 max-md:w-full">
           <Select
             value={selectedEventId}
             onChange={(e) => onSelectEvent(e.target.value)}
@@ -1187,11 +1187,11 @@ function ContractView({
             {event.clientName ? ` · ${event.clientName}` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 max-md:grid max-md:w-full max-md:grid-cols-2">
           <Select
             value={selectedEventId}
             onChange={(e) => onSelectEvent(e.target.value)}
-            className="text-sm"
+            className="text-sm max-md:col-span-2"
           >
             <option value={ALL_EVENTS}>All events ({sortedEvents.length})</option>
             {sortedEvents.map((ev) => (
@@ -1200,14 +1200,14 @@ function ContractView({
               </option>
             ))}
           </Select>
-          <Button variant="outline" size="sm" onClick={() => setResultsOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => setResultsOpen(true)} className="max-md:h-10">
             <Pencil className="h-3.5 w-3.5" />{" "}
             {orders.length > 0 ? "Edit results" : "Enter results"}
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExport}>
+          <Button variant="outline" size="sm" onClick={handleExport} className="max-md:h-10">
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>
-          <Button variant="danger" size="sm" onClick={onDelete} disabled={deleting}>
+          <Button variant="danger" size="sm" onClick={onDelete} disabled={deleting} className="max-md:h-10">
             <Trash2 className="h-3.5 w-3.5" /> {deleting ? "deleting…" : "Delete event"}
           </Button>
         </div>

@@ -233,6 +233,16 @@ export const COMP_REASON_LABELS: Record<CompReason, string> = {
   other: "Other",
 };
 
+export type FreeReason = "giveaway" | "sample" | "staff" | "influencer" | "other";
+export const FREE_REASONS: FreeReason[] = ["giveaway", "sample", "staff", "influencer", "other"];
+export const FREE_REASON_LABELS: Record<FreeReason, string> = {
+  giveaway: "Giveaway",
+  sample: "Sample",
+  staff: "Staff",
+  influencer: "Influencer",
+  other: "Other",
+};
+
 export type SugarAdjustment = "less" | "normal" | "extra" | "no_agave";
 export type IceAdjustment = "light" | "normal" | "extra";
 
@@ -257,6 +267,15 @@ export type OrderItem = {
   /** Per-item discount as a percentage (0–100). 0 = full price, 100 = free.
    *  Effective price = priceSnap × (1 − discountPct/100). */
   discountPct?: number;
+  /** Menu price per unit at time of sale (same value as priceSnap). Optional
+   *  on rows from before the price columns existed; see lib/pricing.ts. */
+  listPrice?: number;
+  /** What the customer actually paid per unit. "Free" is derived from this
+   *  being 0, never stored as a flag. Optional on legacy rows (falls back to
+   *  priceSnap x (1 - discountPct/100)). */
+  priceCharged?: number;
+  /** Optional reason on a free line (price charged = 0). */
+  freeReason?: FreeReason;
   /** @deprecated Order status flow was removed; field kept for legacy data. */
   status: OrderItemStatus;
   /** Combo-deal fields. When `isCombo`, priceSnap is fixed at COMBO_PRICE and
@@ -279,6 +298,11 @@ export type Order = {
   customerName: string;
   items: OrderItem[];
   notes?: string;
+  /** Extra money received with this order (round-up or tip). Never part of
+   *  item prices, line totals or revenue. Undefined on legacy rows = 0. */
+  tipAmount?: number;
+  /** How the extra was paid. Undefined = same as `paymentMethod`. */
+  tipPaymentMethod?: PaymentMethod;
   /** Pin to top of Barista Queue — sort by descending value, undefined sorts last. */
   queuePriority?: number;
   submittedAt: string;
@@ -295,6 +319,18 @@ export type Order = {
   status: OrderStatus;
   /** @deprecated done timestamp from the old status flow. */
   doneAt?: string;
+};
+
+/** Extra money for an event that is not tied to an order (for example a
+ *  Venmo sent after the event). */
+export type EventExtra = {
+  id: string;
+  eventId: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Settings = {
@@ -351,5 +387,6 @@ export type AppState = {
   events: Event[];
   orders: Order[];
   inventoryPurchases: InventoryPurchase[];
+  eventExtras: EventExtra[];
   orderRevisions: OrderRevision[];
 };

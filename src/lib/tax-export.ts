@@ -1,4 +1,5 @@
 import type { AppState, Order } from "./types";
+import { chargedUnit, lineRevenue as itemLineRevenue, orderTip, tipMethod } from "./pricing";
 
 /** Escape one CSV field per RFC 4180 (quotes doubled, whole thing wrapped
  *  if it contains delimiters, quotes, or line breaks). */
@@ -34,14 +35,16 @@ type ItemLine = {
   discountPct: number;
   lineRevenue: number;
   isCombo: boolean;
+  /** Per-unit price actually charged (0 for a free line). */
+  unitCharged: number;
+  freeReason: string;
 };
 
 function orderToLines(order: Order): ItemLine[] {
   const out: ItemLine[] = [];
   const pm = order.paymentMethod ?? "";
   for (const it of order.items) {
-    const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
-    const lineRevenue = it.priceSnap * factor * it.quantity;
+    const lineRevenue = itemLineRevenue(it);
     out.push({
       orderId: order.id,
       orderNumber: order.orderNumber,
@@ -56,6 +59,8 @@ function orderToLines(order: Order): ItemLine[] {
       discountPct: it.discountPct ?? 0,
       lineRevenue,
       isCombo: Boolean(it.isCombo),
+      unitCharged: chargedUnit(it),
+      freeReason: it.freeReason ?? "",
     });
     // Combos also snapshot a pastry; the pastry share of the bundle price is
     // recorded separately with $0 revenue attributed here (revenue lives on
@@ -76,6 +81,8 @@ function orderToLines(order: Order): ItemLine[] {
         discountPct: 0,
         lineRevenue: 0,
         isCombo: true,
+        unitCharged: 0,
+        freeReason: "",
       });
     }
   }
@@ -160,6 +167,8 @@ export function buildFullHistoryCsv(state: AppState): string {
     "Discount %",
     "Line revenue",
     "Combo",
+    "Price charged (unit)",
+    "Free reason",
   ]);
   const orders = [...state.orders].sort((a, b) =>
     a.submittedAt.localeCompare(b.submittedAt),
@@ -188,8 +197,42 @@ export function buildFullHistoryCsv(state: AppState): string {
         line.discountPct,
         line.lineRevenue.toFixed(2),
         line.isCombo ? "yes" : "",
+        line.unitCharged.toFixed(2),
+        line.freeReason,
       ]);
     }
+  }
+
+  // Extra money (round-ups / tips). Kept out of ITEMIZED SALES and out of the
+  // quarterly revenue totals: it is not a sale.
+  rows.push([]);
+  rows.push(["EXTRA RECEIVED (not included in sales revenue)"]);
+  rows.push(["Event name", "Event date", "Source", "Order #", "Amount", "Payment method", "Note"]);
+  for (const o of orders) {
+    const tip = orderTip(o);
+    if (tip <= 0) continue;
+    const evt = eventById.get(o.eventId);
+    rows.push([
+      evt?.name ?? "",
+      evt?.date ?? "",
+      "order",
+      o.orderNumber,
+      tip.toFixed(2),
+      tipMethod(o) ?? "",
+      "",
+    ]);
+  }
+  for (const x of [...state.eventExtras].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    const evt = eventById.get(x.eventId);
+    rows.push([
+      evt?.name ?? "",
+      evt?.date ?? "",
+      "standalone",
+      "",
+      x.amount.toFixed(2),
+      x.paymentMethod,
+      x.note ?? "",
+    ]);
   }
 
   rows.push([]);
@@ -231,8 +274,7 @@ export function buildFullHistoryCsv(state: AppState): string {
     let preRevenue = 0;
     const itemBits: string[] = [];
     for (const it of snap.items) {
-      const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
-      preRevenue += it.priceSnap * factor * it.quantity;
+      preRevenue += itemLineRevenue(it);
       itemBits.push(`${it.menuItemNameSnap} ×${it.quantity}`);
     }
     rows.push([
@@ -333,8 +375,7 @@ export function buildQuarterlyReportCsv(
     if (!b) continue;
     let orderRevenue = 0;
     for (const it of o.items) {
-      const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
-      orderRevenue += it.priceSnap * factor * it.quantity;
+      orderRevenue += itemLineRevenue(it);
     }
     b.totalRevenue += orderRevenue;
     const pm = o.paymentMethod ?? "unknown";

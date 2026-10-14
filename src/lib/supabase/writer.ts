@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Event,
+  EventExtra,
   Ingredient,
   InventoryPurchase,
   MenuItem,
@@ -11,6 +12,14 @@ import type {
   Settings,
 } from "@/lib/types";
 import {
+  isMissingTable,
+  missingColumns,
+  MIGRATION_HINT,
+  reportSaveError,
+} from "./save-errors";
+import {
+  toEventExtraInsert,
+  toEventExtraPatch,
   toEventInsert,
   toEventPatch,
   toIngredientInsert,
@@ -82,25 +91,118 @@ function rpcResult(data: unknown, o: Order): { finalOrderNumber: number } {
   return { finalOrderNumber: typeof n === "number" ? n : o.orderNumber };
 }
 
+const money = (n: number) => `$${n.toFixed(2)}`;
+
+/** Tell the user, loudly, that extra money / a free reason did not reach the
+ *  database. Never swallowed: the values were real input. */
+function reportLostExtras(o: Pick<Order, "orderNumber">, what: string) {
+  reportSaveError(
+    `Order #${o.orderNumber}: ${what} could not be saved because the database is missing a column. ` +
+      `The order itself was saved. ${MIGRATION_HINT} Then re-enter it with Edit order.`,
+  );
+}
+
+function reportLostFreeReason(orderNumber: number | string) {
+  reportSaveError(
+    `Order #${orderNumber}: the free reason could not be saved because the database is missing the free_reason column. ` +
+      `${MIGRATION_HINT} Then set it again on the item.`,
+  );
+}
+
 /** Insert order_items, tolerating a database that predates the *_name_snap
- *  columns (migration-atomic-order.sql not run yet). */
+ *  columns (migration-atomic-order.sql) or the price columns (silently, since
+ *  they are derived from price_snap / discount_pct). A missing free_reason
+ *  column is reported to the user when a reason was set. */
 async function insertOrderItems(
   supabase: SupabaseClient,
   workspaceId: string,
   items: OrderItem[],
   label: string,
-) {
-  const attempt = (includeSnapNames: boolean) =>
-    retryWithBackoff(label, () =>
+): Promise<{ error: unknown; lostFreeReason: boolean }> {
+  const opts = { includeSnapNames: true, includePrices: true, includeFreeReason: true };
+  let last: unknown = null;
+  for (let i = 0; i < 4; i++) {
+    const r = await retryWithBackoff(label, () =>
       supabase
         .from("order_items")
-        .insert(items.map((it) => toOrderItemInsert(workspaceId, it, { includeSnapNames }))),
+        .insert(items.map((it) => toOrderItemInsert(workspaceId, it, opts))),
     );
-  const first = await attempt(true);
-  if (first.error && /_name_snap/.test(String((first.error as { message?: string }).message))) {
-    return attempt(false);
+    if (!r.error) {
+      return {
+        error: null,
+        lostFreeReason: !opts.includeFreeReason && items.some((it) => Boolean(it.freeReason)),
+      };
+    }
+    last = r.error;
+    const msg = String((r.error as { message?: string }).message);
+    const miss = missingColumns(r.error);
+    let changed = false;
+    if (opts.includeSnapNames && /_name_snap/.test(msg)) {
+      opts.includeSnapNames = false;
+      changed = true;
+    }
+    if (opts.includePrices && miss.some((c) => c === "list_price" || c === "price_charged")) {
+      opts.includePrices = false;
+      changed = true;
+    }
+    if (opts.includeFreeReason && miss.includes("free_reason")) {
+      opts.includeFreeReason = false;
+      changed = true;
+    }
+    if (!changed) break;
   }
-  return first;
+  return { error: last, lostFreeReason: false };
+}
+
+/** submit_order() returns features: 2 once migration-submit-order-v2.sql has
+ *  run. An older function ignores tip / free reason without any error. */
+function rpcHasV2(data: unknown): boolean {
+  return (data as { features?: number } | null)?.features === 2;
+}
+
+function orderHasExtras(o: Order): boolean {
+  return (
+    (o.tipAmount ?? 0) > 0 ||
+    Boolean(o.tipPaymentMethod) ||
+    o.items.some((it) => Boolean(it.freeReason))
+  );
+}
+
+/** The submit_order() on this database predates tip / free reason and dropped
+ *  them. Apply them with plain updates, and report if the columns are missing. */
+async function healExtras(supabase: SupabaseClient, workspaceId: string, o: Order) {
+  console.warn(
+    "[supabase submitOrder] submit_order() is out of date. Run supabase/migration-submit-order-v2.sql.",
+  );
+  if ((o.tipAmount ?? 0) > 0 || o.tipPaymentMethod) {
+    const { error } = await supabase
+      .from("orders")
+      .update(toOrderPatch({ tipAmount: o.tipAmount, tipPaymentMethod: o.tipPaymentMethod }))
+      .eq("id", o.id)
+      .eq("workspace_id", workspaceId);
+    if (error) {
+      if (missingColumns(error).length > 0) {
+        reportLostExtras(o, `the extra of ${money(o.tipAmount ?? 0)}`);
+      } else {
+        tag("healExtras:tip")(error);
+        reportSaveError(
+          `Order #${o.orderNumber}: the extra of ${money(o.tipAmount ?? 0)} may not have been saved. Open Edit order to check it.`,
+        );
+      }
+    }
+  }
+  for (const it of o.items) {
+    if (!it.freeReason) continue;
+    const { error } = await supabase
+      .from("order_items")
+      .update({ free_reason: it.freeReason })
+      .eq("id", it.id)
+      .eq("workspace_id", workspaceId);
+    if (error) {
+      if (missingColumns(error).length > 0) reportLostFreeReason(o.orderNumber);
+      else tag("healExtras:freeReason")(error);
+    }
+  }
 }
 
 /** The pre-migration two-step write: order first, then items, rolling the
@@ -113,16 +215,27 @@ async function legacySubmitOrder(
 ): Promise<{ finalOrderNumber: number } | { error: string }> {
   let currentOrder = o;
   let insertedParent = false;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const r1 = await supabase.from("orders").insert(toOrderInsert(workspaceId, currentOrder));
+  let includeTip = true;
+  const orderRow = () => toOrderInsert(workspaceId, currentOrder, { includeTip });
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const r1 = await supabase.from("orders").insert(orderRow());
     if (!r1.error) {
       insertedParent = true;
       break;
     }
     const code = (r1.error as { code?: string } | null)?.code;
+    if (includeTip && missingColumns(r1.error).some((c) => c === "tip_amount" || c === "tip_payment_method")) {
+      // The extra columns do not exist yet. Save the order without them so
+      // the drink still reaches the barista, and tell the user what was lost.
+      includeTip = false;
+      if ((currentOrder.tipAmount ?? 0) > 0 || currentOrder.tipPaymentMethod) {
+        reportLostExtras(currentOrder, `the extra of ${money(currentOrder.tipAmount ?? 0)}`);
+      }
+      continue;
+    }
     if (code !== "23505") {
       const retried = await retryWithBackoff("submitOrder:order", () =>
-        supabase.from("orders").insert(toOrderInsert(workspaceId, currentOrder)),
+        supabase.from("orders").insert(orderRow()),
       );
       tag("submitOrder:order")(retried.error);
       if (retried.error) return { error: "order insert failed" };
@@ -164,12 +277,13 @@ async function legacySubmitOrder(
     currentOrder = { ...currentOrder, orderNumber: nextNum };
   }
   if (!insertedParent) {
-    console.error(`[supabase submitOrder] gave up after 5 renumber attempts`);
+    console.error(`[supabase submitOrder] gave up after 6 attempts`);
     return { error: "renumber attempts exhausted" };
   }
 
   if (currentOrder.items.length > 0) {
     const r2 = await insertOrderItems(supabase, workspaceId, currentOrder.items, "submitOrder:items");
+    if (r2.lostFreeReason) reportLostFreeReason(currentOrder.orderNumber);
     if (r2.error) {
       tag("submitOrder:items")(r2.error);
       console.error(
@@ -297,13 +411,25 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
         p_order: toOrderInsert(workspaceId, o),
         p_items: o.items.map((it) => toOrderItemInsert(workspaceId, it)),
       });
+    const done = async (data: unknown) => {
+      if (!rpcHasV2(data) && orderHasExtras(o)) await healExtras(supabase, workspaceId, o);
+      return rpcResult(data, o);
+    };
     let r = await rpc();
-    if (!r.error) return rpcResult(r.data, o);
-    if (!isMissingRpc(r.error)) {
+    if (!r.error) return done(r.data);
+    if (!isMissingRpc(r.error) && missingColumns(r.error).length === 0) {
       r = await retryWithBackoff("submitOrder:rpc", rpc);
-      if (!r.error) return rpcResult(r.data, o);
-      tag("submitOrder:rpc")(r.error);
-      return { error: "order submit failed" };
+      if (!r.error) return done(r.data);
+      if (missingColumns(r.error).length === 0) {
+        tag("submitOrder:rpc")(r.error);
+        return { error: "order submit failed" };
+      }
+    }
+    if (!isMissingRpc(r.error)) {
+      // The function wants columns this database does not have yet. The
+      // fallback below saves what it can and reports what it had to drop.
+      console.warn("[supabase submitOrder] submit_order() failed on a missing column", r.error);
+      return legacySubmitOrder(supabase, workspaceId, o);
     }
     // The migration hasn't been run on this database yet — fall back to the
     // old two-step write so ordering keeps working (but see its caveat).
@@ -313,11 +439,35 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
     return legacySubmitOrder(supabase, workspaceId, o);
   },
   async updateOrder(id: string, patch: Partial<Order>) {
+    const dbPatch = toOrderPatch(patch);
+    if (Object.keys(dbPatch).length === 0) return;
     const { error } = await supabase
       .from("orders")
-      .update(toOrderPatch(patch))
+      .update(dbPatch)
       .eq("id", id)
       .eq("workspace_id", workspaceId);
+    if (error && missingColumns(error).length > 0) {
+      // Save the rest of the edit (name, notes, ...) and say loudly that the
+      // extra did not land.
+      const rest: Record<string, unknown> = { ...dbPatch };
+      const hadTip = "tip_amount" in rest || "tip_payment_method" in rest;
+      delete rest.tip_amount;
+      delete rest.tip_payment_method;
+      if (Object.keys(rest).length > 0) {
+        const r2 = await supabase
+          .from("orders")
+          .update(rest)
+          .eq("id", id)
+          .eq("workspace_id", workspaceId);
+        tag("updateOrder")(r2.error);
+      }
+      if (hadTip) {
+        reportSaveError(
+          `The extra on this order could not be saved because the database is missing a column. ${MIGRATION_HINT}`,
+        );
+      }
+      return;
+    }
     tag("updateOrder")(error);
   },
   async deleteOrder(id: string) {
@@ -337,13 +487,9 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .eq("workspace_id", workspaceId);
     tag("replaceOrderItems:delete")(e1);
     if (items.length > 0) {
-      const { error: e2 } = await insertOrderItems(
-        supabase,
-        workspaceId,
-        items,
-        "replaceOrderItems:insert",
-      );
-      tag("replaceOrderItems:insert")(e2);
+      const r2 = await insertOrderItems(supabase, workspaceId, items, "replaceOrderItems:insert");
+      if (r2.lostFreeReason) reportLostFreeReason("(edited)");
+      tag("replaceOrderItems:insert")(r2.error);
     }
   },
   async updateOrderItemStatus(orderItemId: string, status: OrderItem["status"]) {
@@ -362,6 +508,27 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .update(dbPatch)
       .eq("id", orderItemId)
       .eq("workspace_id", workspaceId);
+    const miss = missingColumns(error);
+    if (error && miss.length > 0) {
+      // Retry with the plain columns so the discount still lands. A missing
+      // price column is lossless (derived from discount_pct); a missing
+      // free_reason column loses real input, so that one is reported.
+      const lost = miss.includes("free_reason") && Boolean(patch.freeReason);
+      const rest: Record<string, unknown> = { ...dbPatch };
+      delete rest.list_price;
+      delete rest.price_charged;
+      delete rest.free_reason;
+      if (Object.keys(rest).length > 0) {
+        const r2 = await supabase
+          .from("order_items")
+          .update(rest)
+          .eq("id", orderItemId)
+          .eq("workspace_id", workspaceId);
+        tag("updateOrderItem")(r2.error);
+      }
+      if (lost) reportLostFreeReason("(edited)");
+      return;
+    }
     tag("updateOrderItem")(error);
   },
 
@@ -387,6 +554,43 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .eq("id", id)
       .eq("workspace_id", workspaceId);
     tag("deleteInventoryPurchase")(error);
+  },
+
+  // ---------- standalone extra money ----------
+  async addEventExtra(x: EventExtra) {
+    const { error } = await supabase
+      .from("event_extras")
+      .insert(toEventExtraInsert(workspaceId, x));
+    if (error && isMissingTable(error)) {
+      reportSaveError(
+        `The extra of ${money(x.amount)} was not saved because the event_extras table does not exist. Run supabase/migration-order-tips-and-extras.sql, then add it again.`,
+      );
+      return;
+    }
+    if (error) {
+      reportSaveError(
+        `The extra of ${money(x.amount)} may not have been saved. Check your connection and add it again if it is missing.`,
+      );
+    }
+    tag("addEventExtra")(error);
+  },
+  async updateEventExtra(id: string, patch: Partial<EventExtra>) {
+    const { error } = await supabase
+      .from("event_extras")
+      .update(toEventExtraPatch(patch))
+      .eq("id", id)
+      .eq("workspace_id", workspaceId);
+    if (error) reportSaveError("An extra received entry could not be updated. Check your connection and try again.");
+    tag("updateEventExtra")(error);
+  },
+  async deleteEventExtra(id: string) {
+    const { error } = await supabase
+      .from("event_extras")
+      .delete()
+      .eq("id", id)
+      .eq("workspace_id", workspaceId);
+    if (error) reportSaveError("An extra received entry could not be deleted. Check your connection and try again.");
+    tag("deleteEventExtra")(error);
   },
 
   // ---------- order revisions (audit trail, append-only) ----------

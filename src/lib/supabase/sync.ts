@@ -4,11 +4,13 @@ import {
   buildAppState,
   fromEvent,
   fromIngredient,
+  fromEventExtra,
   fromInventoryPurchase,
   fromMenuItem,
   fromOrder,
   fromOrderItem,
   type DbEvent,
+  type DbEventExtra,
   type DbIngredient,
   type DbInventoryPurchase,
   type DbMenuItem,
@@ -24,6 +26,16 @@ export async function loadFullState(
   supabase: SupabaseClient,
   workspaceId: string,
 ): Promise<AppState> {
+  return (await loadFullStateWithMeta(supabase, workspaceId)).state;
+}
+
+/** Same as loadFullState, plus whether event_extras could be read. When the
+ *  table is missing (migration not run) callers keep their local extras and
+ *  skip the realtime binding, which would otherwise error the whole channel. */
+export async function loadFullStateWithMeta(
+  supabase: SupabaseClient,
+  workspaceId: string,
+): Promise<{ state: AppState; extrasUnavailable: boolean }> {
   const [
     { data: ws, error: wsErr },
     { data: ings, error: ingErr },
@@ -33,6 +45,7 @@ export async function loadFullState(
     { data: orderItems, error: oiErr },
     { data: invs, error: invErr },
     revsResult,
+    extrasResult,
   ] = await Promise.all([
     supabase.from("workspaces").select("*").eq("id", workspaceId).single(),
     supabase.from("ingredients").select("*").eq("workspace_id", workspaceId),
@@ -44,6 +57,8 @@ export async function loadFullState(
     // order_revisions is a new table — tolerate its absence (pre-migration
     // Supabase deploys) so the app still loads. Only real problems throw.
     supabase.from("order_revisions").select("*").eq("workspace_id", workspaceId),
+    // event_extras is new too (migration-order-tips-and-extras.sql).
+    supabase.from("event_extras").select("*").eq("workspace_id", workspaceId),
   ]);
 
   const err = wsErr || ingErr || miErr || evErr || ordErr || oiErr || invErr;
@@ -59,7 +74,18 @@ export async function loadFullState(
     revs = (revsResult.data ?? []) as DbOrderRevision[];
   }
 
-  return buildAppState(
+  let extras: DbEventExtra[] = [];
+  const extrasUnavailable = Boolean(extrasResult.error);
+  if (extrasResult.error) {
+    console.warn(
+      "[supabase] event_extras load failed. Run supabase/migration-order-tips-and-extras.sql.",
+      extrasResult.error,
+    );
+  } else {
+    extras = (extrasResult.data ?? []) as DbEventExtra[];
+  }
+
+  const state = buildAppState(
     ws as DbWorkspace,
     (ings ?? []) as DbIngredient[],
     (items ?? []) as DbMenuItem[],
@@ -68,7 +94,9 @@ export async function loadFullState(
     (orderItems ?? []) as DbOrderItem[],
     (invs ?? []) as DbInventoryPurchase[],
     revs,
+    extras,
   );
+  return { state, extrasUnavailable };
 }
 
 // ---------- Targeted reads (poll / single-order refetch) ----------
@@ -175,6 +203,7 @@ export type RealtimeHandlers = {
   onOrder:      (kind: "INSERT" | "UPDATE" | "DELETE", row: DbOrder      | { id: string }) => void;
   onOrderItem:  (kind: "INSERT" | "UPDATE" | "DELETE", row: DbOrderItem  | { id: string }) => void;
   onInventory:  (kind: "INSERT" | "UPDATE" | "DELETE", row: DbInventoryPurchase | { id: string }) => void;
+  onEventExtra?: (kind: "INSERT" | "UPDATE" | "DELETE", row: DbEventExtra | { id: string }) => void;
   onWorkspace:  (row: DbWorkspace) => void;
 };
 
@@ -185,6 +214,7 @@ export function subscribeAll(
   workspaceId: string,
   handlers: RealtimeHandlers,
   onStatus?: (status: ChannelStatus) => void,
+  opts: { includeExtras?: boolean } = {},
 ): () => void {
   const channel = supabase.channel(`workspace:${workspaceId}`);
 
@@ -251,8 +281,21 @@ export function subscribeAll(
       "postgres_changes",
       { event: "UPDATE", schema: "public", table: "workspaces", filter: wsFilter },
       (p) => handlers.onWorkspace(p.new as DbWorkspace),
-    )
-    .subscribe((status) => onStatus?.(status as ChannelStatus));
+    );
+  // Only bind event_extras when the table exists: a binding to a missing
+  // table makes the server reject the whole channel.
+  if (opts.includeExtras && handlers.onEventExtra) {
+    channel.on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "event_extras", filter },
+      (p) => handlers.onEventExtra?.(
+        p.eventType as "INSERT" | "UPDATE" | "DELETE",
+        // @ts-expect-error see above
+        p.new && Object.keys(p.new).length ? p.new : p.old,
+      ),
+    );
+  }
+  channel.subscribe((status) => onStatus?.(status as ChannelStatus));
 
   return () => {
     supabase.removeChannel(channel);
@@ -267,4 +310,5 @@ export {
   fromOrder,
   fromOrderItem,
   fromInventoryPurchase,
+  fromEventExtra,
 };

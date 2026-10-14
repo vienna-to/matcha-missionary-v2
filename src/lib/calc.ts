@@ -7,10 +7,14 @@ import {
   type IngredientLine,
   type MenuItem,
   type MenuSnapshot,
+  type EventExtra,
   type Order,
   type OrderItem,
+  type PaymentMethod,
+  PAYMENT_METHODS,
 } from "./types";
 import { sameCategory, toCanonical } from "./units";
+import { lineList, lineRevenue, orderTip, priceKind, tipMethod } from "./pricing";
 
 export function ingredientCostPerCanonical(ing: Ingredient): number {
   return ing.packagePrice / toCanonical(ing.packageAmount, ing.unit);
@@ -74,7 +78,18 @@ export type ItemTotals = {
   name: string;
   category: string;
   sortOrder: number;
+  /** Every unit made, free ones included (COGS and production use this). */
   qty: number;
+  /** Units with price_charged > 0 (discounted units count, free ones do not). */
+  qtyPaid: number;
+  /** Units given away (price_charged = 0). */
+  qtyFree: number;
+  /** Retail value (list price) of the free units. */
+  freeRetailValue: number;
+  /** Units sold below list price (discounted, not free). */
+  qtyDiscounted: number;
+  /** Dollars knocked off list across discounted units only. */
+  discountTotal: number;
   priceSnap: number; // representative selling price (first observed)
   costSnapAvg: number; // average costSnap weighted by qty
   /** Effective revenue (after per-item discount). */
@@ -85,6 +100,40 @@ export type ItemTotals = {
   profit: number;
   margin: number | null;
 };
+
+const EMPTY_PRICE_COUNTS = {
+  qtyPaid: 0,
+  qtyFree: 0,
+  freeRetailValue: 0,
+  qtyDiscounted: 0,
+  discountTotal: 0,
+};
+
+/** Add one order line's price-kind counts to a bucket. `share` is the portion
+ *  of the line that belongs to the bucket (1 except for combo splits). */
+function addPriceCounts(
+  t: {
+    qtyPaid: number;
+    qtyFree: number;
+    freeRetailValue: number;
+    qtyDiscounted: number;
+    discountTotal: number;
+  },
+  oi: OrderItem,
+  share = 1,
+) {
+  const kind = priceKind(oi);
+  if (kind === "free") {
+    t.qtyFree += oi.quantity;
+    t.freeRetailValue += lineList(oi) * share;
+    return;
+  }
+  t.qtyPaid += oi.quantity;
+  if (kind === "discounted") {
+    t.qtyDiscounted += oi.quantity;
+    t.discountTotal += (lineList(oi) - lineRevenue(oi)) * share;
+  }
+}
 
 export function computeItemTotals(
   snapshot: MenuSnapshot,
@@ -98,6 +147,7 @@ export function computeItemTotals(
       category: mi.category,
       sortOrder: mi.sortOrder ?? Number.POSITIVE_INFINITY,
       qty: 0,
+      ...EMPTY_PRICE_COUNTS,
       priceSnap: mi.price,
       costSnapAvg: 0,
       revenuePaid: 0,
@@ -121,6 +171,7 @@ export function computeItemTotals(
       // Place combos last in any sortOrder-based render.
       sortOrder: Number.POSITIVE_INFINITY - 1,
       qty: 0,
+      ...EMPTY_PRICE_COUNTS,
       priceSnap: COMBO_PRICE,
       costSnapAvg: 0,
       revenuePaid: 0,
@@ -146,6 +197,7 @@ export function computeItemTotals(
       category: "other",
       sortOrder: Number.POSITIVE_INFINITY,
       qty: 0,
+      ...EMPTY_PRICE_COUNTS,
       priceSnap: oi.priceSnap,
       costSnapAvg: 0,
       revenuePaid: 0,
@@ -167,12 +219,12 @@ export function computeItemTotals(
       // so a menu item added after this event's snapshot was taken still gets
       // aggregated correctly.
       const t = oi.isCombo ? ensureCombo() : ensureItemBucket(oi.menuItemId, oi);
-      const discountFraction = Math.min(1, Math.max(0, (oi.discountPct ?? 0) / 100));
-      const effectivePrice = oi.priceSnap * (1 - discountFraction);
+      // Revenue is what was charged; COGS counts every unit made, free or not.
       t.qty += oi.quantity;
       t.totalCost += oi.costSnap * oi.quantity;
-      t.revenuePaid += effectivePrice * oi.quantity;
-      t.revenueGross += oi.priceSnap * oi.quantity;
+      t.revenuePaid += lineRevenue(oi);
+      t.revenueGross += lineList(oi);
+      addPriceCounts(t, oi);
       costSum.set(oi.menuItemId, (costSum.get(oi.menuItemId) ?? 0) + oi.costSnap * oi.quantity);
     }
   }
@@ -192,10 +244,20 @@ export type EventTotals = {
   cupsPoured: number;
   /** Items with size "pastry_count". Combos count too (drink + pastry). */
   pastriesServed: number;
-  /** Effective revenue (after per-item discount). */
+  /** Effective revenue: sum of price_charged x quantity. Free items add $0. */
   revenuePaid: number;
-  /** Gross before discount — useful for "total discounts given" math. */
+  /** List-price value of everything (free and discounted at full list). */
   revenueGross: number;
+  /** Items sold: quantity where price_charged > 0 (discounted counts). */
+  itemsSold: number;
+  /** Items given away (price_charged = 0). */
+  freeItems: number;
+  /** Retail (list price) value of the free items. */
+  freeRetailValue: number;
+  /** Discounted items (paid, below list). */
+  discountedItems: number;
+  /** Dollars discounted across the discounted items only. */
+  discountTotal: number;
   ingredientCost: number;
   fixedCosts: number;
   totalCost: number;
@@ -249,6 +311,11 @@ export function computeEventTotals(
     pastriesServed,
     revenuePaid,
     revenueGross,
+    itemsSold: byItem.reduce((s, t) => s + t.qtyPaid, 0),
+    freeItems: byItem.reduce((s, t) => s + t.qtyFree, 0),
+    freeRetailValue: byItem.reduce((s, t) => s + t.freeRetailValue, 0),
+    discountedItems: byItem.reduce((s, t) => s + t.qtyDiscounted, 0),
+    discountTotal: byItem.reduce((s, t) => s + t.discountTotal, 0),
     ingredientCost,
     fixedCosts: fixedCostsSum,
     totalCost,
@@ -277,7 +344,20 @@ export function expandCombosInByItem(
   snapshot: MenuSnapshot,
   orders: Order[],
 ): ItemTotals[] {
-  type Split = { qty: number; revenue: number; revenueGross: number; cost: number };
+  type Split = {
+    qty: number;
+    revenue: number;
+    revenueGross: number;
+    cost: number;
+    counts: typeof EMPTY_PRICE_COUNTS;
+  };
+  const emptySplit = (): Split => ({
+    qty: 0,
+    revenue: 0,
+    revenueGross: 0,
+    cost: 0,
+    counts: { ...EMPTY_PRICE_COUNTS },
+  });
   const splits = new Map<string, Split>();
   let unsplittableComboCount = 0;
 
@@ -297,24 +377,24 @@ export function expandCombosInByItem(
       const drinkShare = drinkPrice / totalPrice;
       const pastryShare = pastryPrice / totalPrice;
 
-      const discountFraction = Math.min(1, Math.max(0, (oi.discountPct ?? 0) / 100));
-      const effectivePrice = oi.priceSnap * (1 - discountFraction);
-      const lineRevenue = effectivePrice * oi.quantity;
-      const lineGross = oi.priceSnap * oi.quantity;
+      const comboRevenue = lineRevenue(oi);
+      const lineGross = lineList(oi);
       const lineCost = oi.costSnap * oi.quantity;
 
-      const drinkSplit = splits.get(oi.menuItemId) ?? { qty: 0, revenue: 0, revenueGross: 0, cost: 0 };
+      const drinkSplit = splits.get(oi.menuItemId) ?? emptySplit();
       drinkSplit.qty += oi.quantity;
-      drinkSplit.revenue += lineRevenue * drinkShare;
+      drinkSplit.revenue += comboRevenue * drinkShare;
       drinkSplit.revenueGross += lineGross * drinkShare;
       drinkSplit.cost += lineCost * drinkShare;
+      addPriceCounts(drinkSplit.counts, oi, drinkShare);
       splits.set(oi.menuItemId, drinkSplit);
 
-      const pastrySplit = splits.get(oi.comboPastryId) ?? { qty: 0, revenue: 0, revenueGross: 0, cost: 0 };
+      const pastrySplit = splits.get(oi.comboPastryId) ?? emptySplit();
       pastrySplit.qty += oi.quantity;
-      pastrySplit.revenue += lineRevenue * pastryShare;
+      pastrySplit.revenue += comboRevenue * pastryShare;
       pastrySplit.revenueGross += lineGross * pastryShare;
       pastrySplit.cost += lineCost * pastryShare;
+      addPriceCounts(pastrySplit.counts, oi, pastryShare);
       splits.set(oi.comboPastryId, pastrySplit);
     }
   }
@@ -336,6 +416,7 @@ export function expandCombosInByItem(
         category: mi.category,
         sortOrder: mi.sortOrder ?? Number.POSITIVE_INFINITY,
         qty: 0,
+        ...EMPTY_PRICE_COUNTS,
         priceSnap: mi.price,
         costSnapAvg: 0,
         revenuePaid: 0,
@@ -347,6 +428,11 @@ export function expandCombosInByItem(
       result.push(existing);
     }
     existing.qty += split.qty;
+    existing.qtyPaid += split.counts.qtyPaid;
+    existing.qtyFree += split.counts.qtyFree;
+    existing.freeRetailValue += split.counts.freeRetailValue;
+    existing.qtyDiscounted += split.counts.qtyDiscounted;
+    existing.discountTotal += split.counts.discountTotal;
     existing.revenuePaid += split.revenue;
     existing.revenueGross += split.revenueGross;
     existing.totalCost += split.cost;
@@ -379,4 +465,99 @@ export function defaultItemMargin(item: MenuItem, ingredients: Ingredient[]): nu
   const cost = defaultItemCost(item, ingredients);
   if (item.price <= 0) return null;
   return (item.price - cost) / item.price;
+}
+
+// ---------------------------------------------------------------------------
+// Extra money (tips / round-ups) and the payment-method breakdown
+// ---------------------------------------------------------------------------
+
+export type PaymentBucket = {
+  method: PaymentMethod | "unknown";
+  /** Sales revenue (price_charged x qty) on orders paid with this method. */
+  sales: number;
+  /** Extra received on orders, by the method the extra was paid with. */
+  orderExtra: number;
+  /** Standalone extra received entries with this method. */
+  standaloneExtra: number;
+  /** sales + orderExtra + standaloneExtra: what should be in that account. */
+  total: number;
+};
+
+export type CollectedTotals = {
+  /** Sales revenue (never includes extra). */
+  salesRevenue: number;
+  /** Extra attached to orders. */
+  orderExtra: number;
+  ordersWithExtra: number;
+  /** Average extra per order that had one, or null when none did. */
+  avgExtraPerOrder: number | null;
+  /** Standalone extra received entries. */
+  standaloneExtra: number;
+  standaloneCount: number;
+  /** orderExtra + standaloneExtra. */
+  extraTotal: number;
+  /** salesRevenue + extraTotal. */
+  totalCollected: number;
+  byMethod: PaymentBucket[];
+};
+
+const METHOD_ORDER: Array<PaymentMethod | "unknown"> = [
+  ...PAYMENT_METHODS,
+  "card",
+  "unknown",
+];
+
+/**
+ * Money collected for a set of orders (one event's) plus standalone extras.
+ * Extra is kept strictly apart from revenue: salesRevenue is exactly the sum
+ * of price_charged x quantity, the same number computeEventTotals reports.
+ */
+export function computeCollected(orders: Order[], extras: EventExtra[]): CollectedTotals {
+  const buckets = new Map<PaymentMethod | "unknown", PaymentBucket>();
+  const bucket = (m: PaymentMethod | "unknown") => {
+    let b = buckets.get(m);
+    if (!b) {
+      b = { method: m, sales: 0, orderExtra: 0, standaloneExtra: 0, total: 0 };
+      buckets.set(m, b);
+    }
+    return b;
+  };
+
+  let salesRevenue = 0;
+  let orderExtra = 0;
+  let ordersWithExtra = 0;
+  for (const o of orders) {
+    if (o.status === "cancelled") continue;
+    const sales = o.items.reduce((sum, it) => sum + lineRevenue(it), 0);
+    salesRevenue += sales;
+    bucket(o.paymentMethod ?? "unknown").sales += sales;
+    const tip = orderTip(o);
+    if (tip > 0) {
+      orderExtra += tip;
+      ordersWithExtra += 1;
+      bucket(tipMethod(o) ?? "unknown").orderExtra += tip;
+    }
+  }
+  let standaloneExtra = 0;
+  for (const x of extras) {
+    standaloneExtra += x.amount;
+    bucket(x.paymentMethod).standaloneExtra += x.amount;
+  }
+
+  const byMethod = METHOD_ORDER.filter((m) => buckets.has(m)).map((m) => {
+    const b = buckets.get(m)!;
+    return { ...b, total: b.sales + b.orderExtra + b.standaloneExtra };
+  });
+  const extraTotal = orderExtra + standaloneExtra;
+  return {
+    salesRevenue,
+    orderExtra,
+    ordersWithExtra,
+    avgExtraPerOrder: ordersWithExtra > 0 ? orderExtra / ordersWithExtra : null,
+    standaloneExtra,
+    standaloneCount: extras.length,
+    extraTotal,
+    totalCollected: salesRevenue + extraTotal,
+    byMethod,
+  };
 }

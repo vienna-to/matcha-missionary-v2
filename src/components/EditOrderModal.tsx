@@ -14,6 +14,7 @@ import {
 import { useDispatch } from "@/lib/store";
 import {
   COMBO_PRICE,
+  type FreeReason,
   type Ingredient,
   type MenuItem,
   type MenuSnapshot,
@@ -23,6 +24,9 @@ import {
   type IceAdjustment,
 } from "@/lib/types";
 import { DiscountRow } from "@/components/DiscountRow";
+import ExtraPicker from "@/components/ExtraPicker";
+import { amountOwed, extraAmount, NO_EXTRA, type ExtraDraft } from "@/lib/order-steps";
+import { chargedUnitFromPct } from "@/lib/pricing";
 import { useHelperMode } from "@/lib/helper-mode";
 import { newId } from "@/lib/id";
 import { hasDrinkAdjustments } from "@/lib/order-labels";
@@ -38,6 +42,7 @@ type DraftItem = {
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
   discountPct?: number;
+  freeReason?: FreeReason;
   status: "pending" | "in_progress" | "done";
   // Combo passthrough — preserve when re-saving so existing combos aren't
   // accidentally broken into singletons by an unrelated edit.
@@ -72,7 +77,13 @@ export default function EditOrderModal({
       isCombo: it.isCombo,
       comboPastryId: it.comboPastryId,
       discountPct: it.discountPct,
+      freeReason: it.freeReason,
     })),
+  );
+  const [extra, setExtra] = useState<ExtraDraft>(() =>
+    order.tipAmount && order.tipAmount > 0
+      ? { mode: "custom", custom: order.tipAmount, method: order.tipPaymentMethod ?? "" }
+      : NO_EXTRA,
   );
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
@@ -84,14 +95,14 @@ export default function EditOrderModal({
       const unit = it.isCombo
         ? COMBO_PRICE
         : snapshot.menuItems.find((m) => m.id === it.menuItemId)?.price ?? 0;
-      const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
-      acc.total += unit * factor * it.quantity;
+      acc.total += chargedUnitFromPct(unit, it.discountPct) * it.quantity;
       acc.totalGross += unit * it.quantity;
       return acc;
     },
     { total: 0, totalGross: 0 },
   );
   const totalDiscount = totalGross - total;
+  const extraDollars = extraAmount(extra, amountOwed(total));
 
   function updateItem(id: string, patch: Partial<DraftItem>) {
     setItems((arr) => arr.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -124,12 +135,23 @@ export default function EditOrderModal({
 
   function save() {
     if (!submittable) return;
+    // Only touch the extra columns when the extra actually changed, so a
+    // plain name edit never depends on them.
+    const newMethod =
+      extraDollars > 0 && extra.method && extra.method !== order.paymentMethod
+        ? extra.method
+        : undefined;
+    const tipChanged =
+      extraDollars !== (order.tipAmount ?? 0) || newMethod !== order.tipPaymentMethod;
     dispatch({
       type: "UPDATE_ORDER",
       id: order.id,
       patch: {
         customerName: name.trim(),
         notes: notes.trim() || undefined,
+        ...(tipChanged
+          ? { tipAmount: extraDollars > 0 ? extraDollars : undefined, tipPaymentMethod: newMethod }
+          : {}),
       },
     });
     dispatch({
@@ -147,6 +169,7 @@ export default function EditOrderModal({
         isCombo: it.isCombo,
         comboPastryId: it.comboPastryId,
         discountPct: it.discountPct,
+        freeReason: it.freeReason,
       })),
     });
     onClose();
@@ -196,6 +219,7 @@ export default function EditOrderModal({
                   onSetDiscount={(pct) =>
                     updateItem(it.id, { discountPct: pct > 0 ? pct : undefined })
                   }
+                  onSetFreeReason={(r) => updateItem(it.id, { freeReason: r })}
                   helperMode={helperMode}
                 />
               ))}
@@ -217,6 +241,13 @@ export default function EditOrderModal({
             </div>
           ) : null}
         </div>
+
+        <ExtraPicker
+          owed={amountOwed(total)}
+          draft={extra}
+          onChange={setExtra}
+          orderMethod={order.paymentMethod ?? ""}
+        />
 
         <div className="flex flex-wrap justify-between gap-2 pt-2">
           <Button variant="danger" onClick={deleteOrder}>
@@ -264,6 +295,7 @@ function DraftItemRow({
   onRemove,
   onIncrement,
   onSetDiscount,
+  onSetFreeReason,
   helperMode,
 }: {
   item: DraftItem;
@@ -272,6 +304,7 @@ function DraftItemRow({
   onRemove: () => void;
   onIncrement: (d: number) => void;
   onSetDiscount: (pct: number) => void;
+  onSetFreeReason: (reason: FreeReason | undefined) => void;
   helperMode: boolean;
 }) {
   // Hook must run before any conditional return.
@@ -354,6 +387,8 @@ function DraftItemRow({
           pct={pct}
           onPct={onSetDiscount}
           onClose={() => setDiscountOpen(false)}
+          freeReason={item.freeReason}
+          onFreeReason={onSetFreeReason}
         />
       ) : null}
     </div>

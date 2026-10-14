@@ -5,9 +5,13 @@ import { Check, Plus, ShoppingBag, X } from "lucide-react";
 import { Button, EmptyState, Field, Modal, Select, Sheet } from "@/components/ui";
 import OrderFlow from "@/components/OrderFlow";
 import {
+  amountOwed,
   buildOrder,
   cartTotal,
+  extraAmount,
+  NO_EXTRA,
   stepChecks,
+  type ExtraDraft,
   validateSubmit,
   type CartLine,
   type Step,
@@ -66,6 +70,7 @@ export default function LiveOrders() {
   // Payment method is required at submit time — for tax records we need to
   // know cash/venmo/zelle totals per event, so no silent default.
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
+  const [extra, setExtra] = useState<ExtraDraft>(NO_EXTRA);
   const [step, setStep] = useState<Step>("items");
   const [notice, setNotice] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -93,6 +98,10 @@ export default function LiveOrders() {
   const snap = snapshot;
   const activeItems = snap.menuItems.filter((m) => m.active).sort(compareMenuItems);
   const total = cartTotal(cart, snap);
+  // Round up is against what the customer owes at checkout. No sales tax is
+  // added at checkout in this app, so that is the items total.
+  const owed = amountOwed(total);
+  const extraDollars = extraAmount(extra, owed);
   const checks = stepChecks({ cart, snapshot: snap, customerName, notes, paymentMethod });
   const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
 
@@ -138,6 +147,7 @@ export default function LiveOrders() {
     setCustomerName("");
     setNotes("");
     setPaymentMethod("");
+    setExtra(NO_EXTRA);
     setStep("items");
     setNotice(null);
     setSheetOpen(false);
@@ -157,7 +167,15 @@ export default function LiveOrders() {
     // Build the full Order in the caller so the dispatch wrapper can write to
     // Supabase without re-reading stateRef (which races on rapid submits).
     const order = buildOrder(
-      { cart, snapshot: snap, customerName, notes, paymentMethod: paymentMethod as PaymentMethod },
+      {
+        cart,
+        snapshot: snap,
+        customerName,
+        notes,
+        paymentMethod: paymentMethod as PaymentMethod,
+        tipAmount: extraDollars,
+        tipPaymentMethod: extra.method,
+      },
       {
         orderId: newId("ord"),
         orderNumber: nextOrderNumber(state, activeEvent_.id),
@@ -167,7 +185,9 @@ export default function LiveOrders() {
     );
     dispatch({ type: "SUBMIT_ORDER", order });
 
-    setConfirmation(`Order sent · ${order.customerName} · ${formatMoney(total)}`);
+    setConfirmation(
+      `Order sent · ${order.customerName} · ${formatMoney(total + extraDollars)}`,
+    );
     clearTimeout(confirmTimer.current);
     confirmTimer.current = setTimeout(() => setConfirmation(null), 3500);
     reset();
@@ -179,6 +199,9 @@ export default function LiveOrders() {
       cart={cart}
       snapshot={snap}
       total={total}
+      extra={extra}
+      setExtra={setExtra}
+      extraDollars={extraDollars}
       step={step}
       checks={checks}
       notice={notice}

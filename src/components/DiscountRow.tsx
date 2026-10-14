@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, Field, NumberField } from "@/components/ui";
+import { Button, Field, NumberField, Select } from "@/components/ui";
+import { FREE_REASONS, FREE_REASON_LABELS, type FreeReason } from "@/lib/types";
 
 /**
  * Inline editor for a per-item discount.
@@ -20,16 +21,22 @@ export function DiscountRow({
   pct,
   onPct,
   onClose,
+  freeReason,
+  onFreeReason,
 }: {
   unitPrice: number;
   pct: number;
   onPct: (p: number) => void;
   onClose: () => void;
+  /** Optional reason, shown only while the line is free (100% off). */
+  freeReason?: FreeReason;
+  onFreeReason?: (r: FreeReason | undefined) => void;
 }) {
   const clamped = Math.min(100, Math.max(0, pct));
   const finalPrice = unitPrice * (1 - clamped / 100);
   return (
-    <div className="mt-2 grid grid-cols-[1fr_1fr_auto_auto] items-end gap-2 rounded-xl bg-cream-50 p-2">
+    <div className="mt-2 rounded-xl bg-cream-50 p-2">
+    <div className="grid grid-cols-[1fr_1fr_auto_auto] items-end gap-2">
       <Field label="% off">
         <NumberField
           min={0}
@@ -65,6 +72,23 @@ export function DiscountRow({
       <Button size="sm" variant="ghost" onClick={onClose}>
         ✓
       </Button>
+    </div>
+      {clamped === 100 && onFreeReason ? (
+        <Field label="free reason (optional)" className="mt-2">
+          <Select
+            value={freeReason ?? ""}
+            onChange={(e) => onFreeReason((e.target.value || undefined) as FreeReason | undefined)}
+            className="h-8 text-sm"
+          >
+            <option value="">No reason</option>
+            {FREE_REASONS.map((r) => (
+              <option key={r} value={r}>
+                {FREE_REASON_LABELS[r]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : null}
     </div>
   );
 }

@@ -23,6 +23,7 @@ import EventSummary from "./tabs/EventSummary";
 import SettingsTab from "./tabs/SettingsTab";
 import NewEventDialog from "./NewEventDialog";
 import QuickAddPastEventDialog from "./QuickAddPastEventDialog";
+import SaveErrorBanner from "./SaveErrorBanner";
 import SyncBadge from "./SyncBadge";
 
 export type TabId = "orders" | "queue" | "menu" | "finance" | "summary" | "settings";
@@ -227,6 +228,7 @@ export default function AppShell() {
           )
         ) : null}
 
+        <SaveErrorBanner />
         <div className="px-4 py-4 md:px-8 md:py-6">
           {tab === "orders" && <LiveOrders />}
           {tab === "queue" && <BaristaQueue />}

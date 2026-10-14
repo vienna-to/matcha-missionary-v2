@@ -1,10 +1,12 @@
 import { computeItemCost } from "./calc";
 import { newId, nowIso } from "./id";
+import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
 import {
   COMBO_PRICE,
   type AppState,
   type Event,
+  type EventExtra,
   type FixedCost,
   type Ingredient,
   type InventoryPurchase,
@@ -53,7 +55,7 @@ export type Action =
   | {
       type: "REPLACE_ORDER_ITEMS";
       orderId: string;
-      items: (Omit<OrderItem, "id" | "orderId" | "priceSnap" | "costSnap" | "menuItemNameSnap" | "status"> & {
+      items: (Omit<OrderItem, "id" | "orderId" | "priceSnap" | "listPrice" | "priceCharged" | "costSnap" | "menuItemNameSnap" | "status"> & {
         status?: OrderItemStatus;
       })[];
     }
@@ -77,6 +79,14 @@ export type Action =
     }
   | { type: "UPDATE_INVENTORY_PURCHASE"; id: string; patch: Partial<InventoryPurchase> }
   | { type: "DELETE_INVENTORY_PURCHASE"; id: string }
+  | {
+      type: "ADD_EVENT_EXTRA";
+      extra: Omit<EventExtra, "id" | "createdAt" | "updatedAt">;
+    }
+  | { type: "UPDATE_EVENT_EXTRA"; id: string; patch: Partial<EventExtra> }
+  | { type: "DELETE_EVENT_EXTRA"; id: string }
+  | { type: "RT_UPSERT_EVENT_EXTRA"; extra: EventExtra }
+  | { type: "RT_DELETE_EVENT_EXTRA"; id: string }
   | { type: "RT_UPSERT_INVENTORY_PURCHASE"; purchase: InventoryPurchase }
   | { type: "RT_DELETE_INVENTORY_PURCHASE"; id: string }
   /** Local-only insert of an audit snapshot. The Supabase writer mirrors to
@@ -98,7 +108,9 @@ export type Action =
    *  the server result is authoritative for (undefined = every event).
    *  `keepIds` are orders whose write hasn't landed yet and must survive. */
   | { type: "RT_SYNC_ORDERS"; orders: Order[]; scopeEventId?: string; keepIds: string[] }
-  | { type: "RT_SYNC_FULL"; state: AppState; keepIds: string[] }
+  /** `extrasUnavailable`: the event_extras table could not be read (migration
+   *  not run), so keep the local list instead of replacing it with nothing. */
+  | { type: "RT_SYNC_FULL"; state: AppState; keepIds: string[]; extrasUnavailable?: boolean }
   | { type: "RT_UPSERT_ORDER_ITEM"; item: OrderItem }
   | { type: "RT_DELETE_ORDER_ITEM"; id: string; orderId?: string }
   | { type: "RT_UPDATE_SETTINGS"; patch: Partial<Settings> };
@@ -111,8 +123,21 @@ function findEvent(state: AppState, id: string): Event | undefined {
   return state.events.find((e) => e.id === id);
 }
 
+/** Stamp list price, price charged and (for free lines) the reason. */
+function priceFields(
+  listPrice: number,
+  raw: { discountPct?: number; freeReason?: OrderItem["freeReason"] },
+): Pick<OrderItem, "listPrice" | "priceCharged" | "freeReason"> {
+  const priceCharged = chargedUnitFromPct(listPrice, raw.discountPct);
+  return {
+    listPrice,
+    priceCharged,
+    freeReason: priceCharged <= 0 ? raw.freeReason : undefined,
+  };
+}
+
 export function deriveOrderItem(
-  raw: Omit<OrderItem, "id" | "orderId" | "priceSnap" | "costSnap" | "menuItemNameSnap" | "status"> & {
+  raw: Omit<OrderItem, "id" | "orderId" | "priceSnap" | "listPrice" | "priceCharged" | "costSnap" | "menuItemNameSnap" | "status"> & {
     status?: OrderItemStatus;
   },
   orderId: string,
@@ -164,6 +189,7 @@ export function deriveOrderItem(
       menuItemId: raw.menuItemId,
       menuItemNameSnap: mi?.name ?? "Unknown drink",
       priceSnap: COMBO_PRICE,
+      ...priceFields(COMBO_PRICE, raw),
       costSnap: drinkCost + pastryCost,
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,
@@ -188,6 +214,7 @@ export function deriveOrderItem(
     menuItemId: raw.menuItemId,
     menuItemNameSnap: mi?.name ?? "Unknown item",
     priceSnap: mi?.price ?? 0,
+    ...priceFields(mi?.price ?? 0, raw),
     costSnap: drinkCost,
     quantity: raw.quantity,
     milkChoiceId: raw.milkChoiceId,
@@ -410,6 +437,7 @@ export function reducer(state: AppState, action: Action): AppState {
         events: state.events.filter((e) => e.id !== action.id),
         menuSnapshots: state.menuSnapshots.filter((s) => s.id !== evt.menuSnapshotId),
         orders: state.orders.filter((o) => o.eventId !== action.id),
+        eventExtras: state.eventExtras.filter((x) => x.eventId !== action.id),
       };
     }
 
@@ -501,7 +529,9 @@ export function reducer(state: AppState, action: Action): AppState {
         orders: state.orders.map((o) => {
           if (o.id !== action.orderId) return o;
           const items = o.items.map((it) =>
-            it.id === action.orderItemId ? { ...it, ...action.patch } : it,
+            it.id === action.orderItemId
+              ? { ...it, ...normalizeItemPatch(it, action.patch) }
+              : it,
           );
           return { ...o, items, updatedAt: nowIso() };
         }),
@@ -556,6 +586,41 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         inventoryPurchases: state.inventoryPurchases.filter((p) => p.id !== action.id),
       };
+
+    case "ADD_EVENT_EXTRA": {
+      const extra: EventExtra = {
+        ...action.extra,
+        id: newId("xtra"),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      return { ...state, eventExtras: [...state.eventExtras, extra] };
+    }
+
+    case "UPDATE_EVENT_EXTRA":
+      return {
+        ...state,
+        eventExtras: state.eventExtras.map((x) =>
+          x.id === action.id ? { ...x, ...action.patch, updatedAt: nowIso() } : x,
+        ),
+      };
+
+    case "DELETE_EVENT_EXTRA":
+      return { ...state, eventExtras: state.eventExtras.filter((x) => x.id !== action.id) };
+
+    case "RT_UPSERT_EVENT_EXTRA": {
+      const exists = state.eventExtras.some((x) => x.id === action.extra.id);
+      return {
+        ...state,
+        eventExtras: exists
+          ? state.eventExtras.map((x) => (x.id === action.extra.id ? action.extra : x))
+          : [...state.eventExtras, action.extra],
+      };
+    }
+
+    case "RT_DELETE_EVENT_EXTRA":
+      if (!state.eventExtras.some((x) => x.id === action.id)) return state;
+      return { ...state, eventExtras: state.eventExtras.filter((x) => x.id !== action.id) };
 
     case "APPEND_ORDER_REVISION": {
       // Dedupe by id — the reducer is the local optimistic write; a later
@@ -631,6 +696,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ? state.menuSnapshots.filter((s) => s.id !== evt.menuSnapshotId)
           : state.menuSnapshots,
         orders: state.orders.filter((o) => o.eventId !== action.id),
+        eventExtras: state.eventExtras.filter((x) => x.eventId !== action.id),
       };
     }
 
@@ -676,6 +742,7 @@ export function reducer(state: AppState, action: Action): AppState {
           undefined,
           new Set(action.keepIds),
         ),
+        eventExtras: action.extrasUnavailable ? state.eventExtras : action.state.eventExtras,
         // Audit trail is append-only and not refetched when the table is
         // missing; never let a refetch shrink it.
         orderRevisions:

@@ -19,6 +19,7 @@ import { Button, Card, EmptyState } from "@/components/ui";
 import { DiscountRow } from "@/components/DiscountRow";
 import { useActiveEvent, useStore } from "@/lib/store";
 import { useHelperMode } from "@/lib/helper-mode";
+import { lineList, lineRevenue, listUnit } from "@/lib/pricing";
 import { playPing, unlockAudio } from "@/lib/audio";
 import { cn, formatMoney, formatTime, minutesAgo } from "@/lib/utils";
 import {
@@ -29,6 +30,7 @@ import {
   resolveMilkName,
 } from "@/lib/order-labels";
 import type {
+  FreeReason,
   Ingredient,
   MenuSnapshot,
   Order,
@@ -159,6 +161,15 @@ export default function BaristaQueue() {
     });
   }
 
+  function setItemFreeReason(orderId: string, itemId: string, reason: FreeReason | undefined) {
+    dispatch({
+      type: "UPDATE_ORDER_ITEM",
+      orderId,
+      orderItemId: itemId,
+      patch: { freeReason: reason },
+    });
+  }
+
   function markComplete(o: Order) {
     dispatch({
       type: "UPDATE_ORDER",
@@ -254,6 +265,11 @@ export default function BaristaQueue() {
                 helperMode
                   ? undefined
                   : (itemId, pct) => setItemDiscount(o.id, itemId, pct)
+              }
+              onSetItemFreeReason={
+                helperMode
+                  ? undefined
+                  : (itemId, reason) => setItemFreeReason(o.id, itemId, reason)
               }
               onMarkComplete={() => markComplete(o)}
               onClaim={() => claim(o)}
@@ -372,6 +388,7 @@ function OrderCard({
   onPin,
   onToggleItem,
   onSetItemDiscount,
+  onSetItemFreeReason,
   onMarkComplete,
   onClaim,
   onRelease,
@@ -386,6 +403,7 @@ function OrderCard({
   onPin: () => void;
   onToggleItem: (itemId: string, status: OrderItemStatus) => void;
   onSetItemDiscount?: (itemId: string, pct: number) => void;
+  onSetItemFreeReason?: (itemId: string, reason: FreeReason | undefined) => void;
   onMarkComplete: () => void;
   onClaim: () => void;
   onRelease: () => void;
@@ -499,6 +517,9 @@ function OrderCard({
               onSetDiscount={
                 onSetItemDiscount ? (pct) => onSetItemDiscount(it.id, pct) : undefined
               }
+              onSetFreeReason={
+                onSetItemFreeReason ? (r) => onSetItemFreeReason(it.id, r) : undefined
+              }
               hidePrice={helperMode}
             />
           ))
@@ -608,10 +629,8 @@ function computeOrderTotals(order: Order): { total: number; totalGross: number }
   let total = 0;
   let totalGross = 0;
   for (const it of order.items) {
-    const unit = it.priceSnap;
-    const factor = 1 - Math.min(1, Math.max(0, (it.discountPct ?? 0) / 100));
-    total += unit * factor * it.quantity;
-    totalGross += unit * it.quantity;
+    total += lineRevenue(it);
+    totalGross += lineList(it);
   }
   return { total, totalGross };
 }
@@ -633,6 +652,7 @@ function OrderItemRow({
   compact,
   onToggle,
   onSetDiscount,
+  onSetFreeReason,
   hidePrice,
 }: {
   item: OrderItem;
@@ -642,6 +662,7 @@ function OrderItemRow({
   compact?: boolean;
   onToggle?: () => void;
   onSetDiscount?: (pct: number) => void;
+  onSetFreeReason?: (reason: FreeReason | undefined) => void;
   /** Suppress the FREE / % off text next to the item (helper mode). */
   hidePrice?: boolean;
 }) {
@@ -659,7 +680,7 @@ function OrderItemRow({
   const done = item.status === "done";
   // priceSnap stores the un-discounted unit price (combo: COMBO_PRICE, else
   // the menu price). So it's the right base for the discount editor.
-  const unitPrice = item.priceSnap;
+  const unitPrice = listUnit(item);
   const pct = item.discountPct ?? 0;
 
   return (
@@ -715,6 +736,8 @@ function OrderItemRow({
           pct={pct}
           onPct={onSetDiscount}
           onClose={() => setDiscountOpen(false)}
+          freeReason={item.freeReason}
+          onFreeReason={onSetFreeReason}
         />
       ) : null}
     </div>

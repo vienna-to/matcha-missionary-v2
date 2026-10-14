@@ -118,6 +118,8 @@ export default function ContractResultsDialog({
           menuItemId: miId,
           menuItemNameSnap: mi.name,
           priceSnap: mi.price,
+          listPrice: mi.price,
+          priceCharged: mi.price,
           costSnap: cost,
           quantity: 1,
           status: "done",

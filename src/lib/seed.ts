@@ -301,6 +301,8 @@ function buildOrder(spec: OrderSpec): Order {
       menuItemId: raw.menuItemId,
       menuItemNameSnap: mi?.name ?? "Unknown",
       priceSnap: mi?.price ?? 0,
+      listPrice: mi?.price ?? 0,
+      priceCharged: mi?.price ?? 0,
       costSnap: cost,
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,
@@ -354,6 +356,7 @@ export function initialSeed(): AppState {
       events: [event],
       orders,
       inventoryPurchases: [],
+      eventExtras: [],
       orderRevisions: [],
     } satisfies AppState),
   );

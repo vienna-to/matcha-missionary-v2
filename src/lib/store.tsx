@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { initialSeed } from "./seed";
+import { normalizeItemPatch } from "./pricing";
 import { reducer, renumberAfterDelete, type Action } from "./reducer";
 import { newId, nowIso } from "./id";
 import type {
@@ -31,6 +32,7 @@ import {
 } from "./supabase/client";
 import {
   fromEvent,
+  fromEventExtra,
   fromIngredient,
   fromInventoryPurchase,
   fromMenuItem,
@@ -38,6 +40,7 @@ import {
   fromOrderItem,
   fromWorkspaceSettings,
   type DbEvent,
+  type DbEventExtra,
   type DbIngredient,
   type DbInventoryPurchase,
   type DbMenuItem,
@@ -51,6 +54,7 @@ import {
   fetchOrderWithItems,
   joinWorkspace,
   loadFullState,
+  loadFullStateWithMeta,
   subscribeAll,
 } from "./supabase/sync";
 import { resetSyncStatus, setSyncStatus } from "./supabase/sync-status";
@@ -114,6 +118,7 @@ function loadLocalState(): AppState {
     // Backfill fields added in later releases so older payloads still work.
     if (!Array.isArray(parsed.inventoryPurchases)) parsed.inventoryPurchases = [];
     if (!Array.isArray(parsed.orderRevisions)) parsed.orderRevisions = [];
+    if (!Array.isArray(parsed.eventExtras)) parsed.eventExtras = [];
     return parsed;
   } catch {
     return initialSeed();
@@ -271,7 +276,8 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
     const wid = pairing.workspaceId;
     (async () => {
       try {
-        const snap = await loadFullState(supabase, wid);
+        const { state: snap, extrasUnavailable } = await loadFullStateWithMeta(supabase, wid);
+        extrasAvailableRef.current = !extrasUnavailable;
         baseDispatch({ type: "REPLACE", state: snap });
         const code = snap.settings.workspaceCode;
         setPairing({ phase: "ready", workspaceId: wid, code });
@@ -284,6 +290,9 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
   // Track the state across dispatches to look up data the writer needs.
   const stateRef = useRef(state);
   stateRef.current = state;
+  /** False until event_extras has been read successfully: until then we do
+   *  not bind its realtime feed (a missing table would fail the channel). */
+  const extrasAvailableRef = useRef(false);
 
   // ---- sync bookkeeping ----
   const lastWriteAtRef = useRef(0);
@@ -345,7 +354,11 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           const serverActiveId = await fetchActiveEventId(supabase, workspaceIdForSync);
           if (serverActiveId !== (local?.id ?? null)) {
             // Active event changed on another device: pull everything.
-            const snap = await loadFullState(supabase, workspaceIdForSync);
+            const { state: snap, extrasUnavailable } = await loadFullStateWithMeta(
+              supabase,
+              workspaceIdForSync,
+            );
+            extrasAvailableRef.current = !extrasUnavailable;
             setSyncStatus({ lastOkAt: Date.now() });
             lastFullAtRef.current = Date.now();
             if (!stale()) {
@@ -353,6 +366,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
                 type: "RT_SYNC_FULL",
                 state: snap,
                 keepIds: [...pendingOrdersRef.current],
+                extrasUnavailable,
               });
             }
             return;
@@ -371,7 +385,11 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
             keepIds: [...pendingOrdersRef.current],
           });
         } else {
-          const snap = await loadFullState(supabase, workspaceIdForSync);
+          const { state: snap, extrasUnavailable } = await loadFullStateWithMeta(
+            supabase,
+            workspaceIdForSync,
+          );
+          extrasAvailableRef.current = !extrasUnavailable;
           setSyncStatus({ lastOkAt: Date.now() });
           lastFullAtRef.current = Date.now();
           if (stale()) return;
@@ -379,6 +397,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
             type: "RT_SYNC_FULL",
             state: snap,
             keepIds: [...pendingOrdersRef.current],
+            extrasUnavailable,
           });
         }
       } catch (e) {
@@ -463,6 +482,16 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           purchase: fromInventoryPurchase(row as DbInventoryPurchase),
         });
       },
+      onEventExtra: (kind, row) => {
+        if (kind === "DELETE") {
+          baseDispatch({ type: "RT_DELETE_EVENT_EXTRA", id: row.id });
+          return;
+        }
+        baseDispatch({
+          type: "RT_UPSERT_EVENT_EXTRA",
+          extra: fromEventExtra(row as DbEventExtra),
+        });
+      },
       onWorkspace: (row) => {
         baseDispatch({ type: "RT_UPDATE_SETTINGS", patch: fromWorkspaceSettings(row as DbWorkspace) });
       },
@@ -482,7 +511,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
       reconnectTimer = setTimeout(() => {
         if (!disposed) setChannelNonce((n) => n + 1);
       }, 2_000);
-    });
+    }, { includeExtras: extrasAvailableRef.current });
     return () => {
       disposed = true;
       clearTimeout(reconnectTimer);
@@ -745,8 +774,26 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           }
           break;
         }
-        case "UPDATE_ORDER_ITEM":
-          w.updateOrderItem(a.orderItemId, a.patch);
+        case "UPDATE_ORDER_ITEM": {
+          // A discount change must also carry the new price_charged (and
+          // clear a stale free reason) so the database matches the screen.
+          const cur = stateRef.current.orders
+            .find((o) => o.id === a.orderId)
+            ?.items.find((it) => it.id === a.orderItemId);
+          w.updateOrderItem(a.orderItemId, cur ? normalizeItemPatch(cur, a.patch) : a.patch);
+          break;
+        }
+        case "ADD_EVENT_EXTRA":
+          setTimeout(() => {
+            const latest = stateRef.current.eventExtras.at(-1);
+            if (latest) w.addEventExtra(latest);
+          }, 0);
+          break;
+        case "UPDATE_EVENT_EXTRA":
+          w.updateEventExtra(a.id, a.patch);
+          break;
+        case "DELETE_EVENT_EXTRA":
+          w.deleteEventExtra(a.id);
           break;
         case "ADD_INVENTORY_PURCHASE":
           setTimeout(() => {

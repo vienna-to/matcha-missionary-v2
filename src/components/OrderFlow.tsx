@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Minus, Plus, Trash2 } from "lucide-react";
 import { Button, Field, Input, Textarea } from "@/components/ui";
 import { DiscountRow } from "@/components/DiscountRow";
+import ExtraPicker from "@/components/ExtraPicker";
 import {
   COMBO_PRICE,
   PAYMENT_METHODS,
@@ -20,7 +21,7 @@ import {
   resolveMilkChoices,
   resolveMilkName,
 } from "@/lib/order-labels";
-import { STEPS, stepIndex, type CartLine, type Step } from "@/lib/order-steps";
+import { STEPS, stepIndex, type CartLine, type ExtraDraft, type Step } from "@/lib/order-steps";
 import { cn, formatMoney } from "@/lib/utils";
 
 export { STEPS, stepIndex };
@@ -42,6 +43,11 @@ type Props = {
   cart: CartLine[];
   snapshot: MenuSnapshot;
   total: number;
+  /** Extra money (round-up / tip) chosen at the Payment step. */
+  extra: ExtraDraft;
+  setExtra: (d: ExtraDraft) => void;
+  /** The extra resolved to dollars. */
+  extraDollars: number;
   step: Step;
   /** Per-step "has real input" flags that drive the checkmarks. */
   checks: Record<Step, boolean>;
@@ -143,6 +149,12 @@ export default function OrderFlow(p: Props) {
                 );
               })}
             </div>
+            <ExtraPicker
+              owed={p.total}
+              draft={p.extra}
+              onChange={p.setExtra}
+              orderMethod={p.paymentMethod}
+            />
           </div>
         )}
       </div>
@@ -160,9 +172,11 @@ export default function OrderFlow(p: Props) {
           </Button>
         ) : null}
         <div className="min-w-0 shrink-0 px-1">
-          <div className="t-display text-[10px] text-matcha-700">Total</div>
+          <div className="t-display text-[10px] text-matcha-700">
+            {step === "payment" && p.extraDollars > 0 ? "Collect" : "Total"}
+          </div>
           <div className="text-xl font-semibold tabular-nums text-matcha-900">
-            {formatMoney(p.total)}
+            {formatMoney(step === "payment" ? p.total + p.extraDollars : p.total)}
           </div>
         </div>
         <div className="ml-auto flex-1">
@@ -377,6 +391,8 @@ function ItemLine({
             onUpdate({ discountPct: v > 0 ? Math.min(100, Math.max(0, v)) : undefined })
           }
           onClose={() => setDiscountOpen(false)}
+          freeReason={line.freeReason}
+          onFreeReason={(r) => onUpdate({ freeReason: r })}
         />
       ) : null}
       <div className="mt-2 flex items-center justify-between">

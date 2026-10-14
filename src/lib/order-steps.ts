@@ -1,6 +1,8 @@
 import { COMBO_PRICE } from "./types";
+import { chargedUnitFromPct, roundUpExtra } from "./pricing";
 import type {
   Event,
+  FreeReason,
   IceAdjustment,
   MenuSnapshot,
   Order,
@@ -21,6 +23,8 @@ export type CartLine = {
   specialRequests?: string;
   /** Per-item discount as a percent (0–100). 100 = free. */
   discountPct?: number;
+  /** Optional reason when the line is free (100% off). */
+  freeReason?: FreeReason;
   /** Combo deal: priced at COMBO_PRICE, bundles drink (menuItemId) + pastry. */
   isCombo?: boolean;
   comboPastryId?: string;
@@ -44,7 +48,49 @@ export type OrderDraft = {
   customerName: string;
   notes: string;
   paymentMethod: PaymentMethod | "";
+  /** Extra money on top of the items (round-up / tip). Not part of any item
+   *  price or revenue. */
+  tipAmount?: number;
+  /** How the extra is paid. "" or the order's own method = same as order. */
+  tipPaymentMethod?: PaymentMethod | "";
 };
+
+// ---------- extra money (round-up / tip) at order entry ----------
+
+export type ExtraMode = "none" | "round" | "plus1" | "plus2" | "custom";
+export type ExtraDraft = {
+  mode: ExtraMode;
+  /** Dollars, used when mode is "custom". */
+  custom: number;
+  /** "" = same as the order's payment method. */
+  method: PaymentMethod | "";
+};
+export const NO_EXTRA: ExtraDraft = { mode: "none", custom: 0, method: "" };
+
+/**
+ * What the customer owes at checkout: the items total plus any sales tax added
+ * at checkout. The app does not add tax at checkout today, so `tax` is 0; the
+ * parameter keeps the round-up correct if that is ever added.
+ */
+export function amountOwed(itemsTotal: number, tax = 0): number {
+  return itemsTotal + tax;
+}
+
+/** Resolve the chosen extra to dollars, against what the customer owes. */
+export function extraAmount(d: ExtraDraft, owed: number): number {
+  switch (d.mode) {
+    case "round":
+      return roundUpExtra(owed);
+    case "plus1":
+      return 1;
+    case "plus2":
+      return 2;
+    case "custom":
+      return Number.isFinite(d.custom) && d.custom > 0 ? Math.round(d.custom * 100) / 100 : 0;
+    default:
+      return 0;
+  }
+}
 
 /**
  * Which steps show a checkmark. A step is checked only when it holds real
@@ -91,8 +137,7 @@ export function cartTotal(cart: CartLine[], snapshot: MenuSnapshot): number {
     const unit = line.isCombo
       ? COMBO_PRICE
       : snapshot.menuItems.find((m) => m.id === line.menuItemId)?.price ?? 0;
-    const factor = 1 - Math.min(1, Math.max(0, (line.discountPct ?? 0) / 100));
-    return sum + unit * factor * line.quantity;
+    return sum + chargedUnitFromPct(unit, line.discountPct) * line.quantity;
   }, 0);
 }
 
@@ -112,6 +157,7 @@ export function buildOrder(
         iceAdjustment: l.iceAdjustment,
         specialRequests: l.specialRequests,
         discountPct: l.discountPct,
+        freeReason: l.freeReason,
         isCombo: l.isCombo,
         comboPastryId: l.comboPastryId,
         status: "pending",
@@ -137,5 +183,12 @@ export function buildOrder(
     status: "pending",
     paymentStatus: "paid",
     paymentMethod: d.paymentMethod,
+    // Stored only when there is an extra; the method only when it differs from
+    // the order's own (null/undefined means "same as the order").
+    tipAmount: d.tipAmount && d.tipAmount > 0 ? d.tipAmount : undefined,
+    tipPaymentMethod:
+      d.tipAmount && d.tipAmount > 0 && d.tipPaymentMethod && d.tipPaymentMethod !== d.paymentMethod
+        ? d.tipPaymentMethod
+        : undefined,
   };
 }

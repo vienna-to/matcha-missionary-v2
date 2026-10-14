@@ -17,10 +17,11 @@ import {
 import { AlertTriangle, Download, Pencil, Target, Trash2 } from "lucide-react";
 import { Badge, Button, Card, EmptyState, Select } from "@/components/ui";
 import { useActiveEvent, useStore } from "@/lib/store";
-import { computeEventTotals, expandCombosInByItem } from "@/lib/calc";
-import type { Event, MenuSnapshot, Order } from "@/lib/types";
+import { computeCollected, computeEventTotals, expandCombosInByItem } from "@/lib/calc";
+import type { Event, EventExtra, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
 import ContractResultsDialog from "@/components/ContractResultsDialog";
+import EventMoney from "./EventMoney";
 
 const ALL_EVENTS = "__all__";
 
@@ -153,7 +154,11 @@ export default function EventSummary() {
     snapshot.menuItems.filter((m) => m.size === "pastry_count").map((m) => m.id),
   );
 
-  const bestSeller = itemsSorted[0];
+  // Best seller counts paid items only (price_charged > 0). Giveaways do not
+  // make an item a best seller.
+  const bestSeller = [...totals.byItem]
+    .filter((t) => t.qtyPaid > 0)
+    .sort((a, b) => b.qtyPaid - a.qtyPaid)[0];
   const mostProfitable = [...totals.byItem]
     .filter((t) => t.profit > 0)
     .sort((a, b) => b.profit - a.profit)[0];
@@ -168,7 +173,13 @@ export default function EventSummary() {
   const netMargin = totals.revenuePaid > 0 ? netProfit / totals.revenuePaid : null;
 
   const handleExport = () => {
-    const csv = buildCsv(event, snapshot, orders, totals);
+    const csv = buildCsv(
+      event,
+      snapshot,
+      orders,
+      totals,
+      state.eventExtras.filter((x) => x.eventId === event.id),
+    );
     downloadCsv(csv, `${event.name.replace(/\s+/g, "-")}_${event.date}.csv`);
   };
 
@@ -248,8 +259,8 @@ export default function EventSummary() {
           label="Revenue (paid)"
           value={formatMoney(totals.revenuePaid)}
           subtext={
-            totals.revenueGross > totals.revenuePaid
-              ? `${formatMoney(totals.revenueGross - totals.revenuePaid)} in discounts`
+            totals.discountTotal > 0
+              ? `${formatMoney(totals.discountTotal)} in discounts`
               : undefined
           }
         />
@@ -301,6 +312,8 @@ export default function EventSummary() {
         </Card>
       ) : null}
 
+      <EventMoney event={event} orders={orders} totals={totals} />
+
       {/* Highlights */}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {bestSeller ? (
@@ -308,7 +321,7 @@ export default function EventSummary() {
             <div className="t-display text-xs text-matcha-900/60">Best seller</div>
             <div className="t-display mt-1 text-lg">{bestSeller.name}</div>
             <div className="t-caption mt-0.5 text-sm text-matcha-900/70">
-              {bestSeller.qty} cups · {formatMoney(bestSeller.revenuePaid)} revenue
+              {bestSeller.qtyPaid} sold · {formatMoney(bestSeller.revenuePaid)} revenue
             </div>
           </Card>
         ) : null}
@@ -325,7 +338,7 @@ export default function EventSummary() {
 
       {/* Chart 1: Quantity by item */}
       <Card>
-        <h2 className="t-display mb-3 text-sm">Quantity sold by item</h2>
+        <h2 className="t-display mb-3 text-sm">Quantity by item (free items included)</h2>
         {chartItems.length === 0 ? (
           <p className="text-sm text-matcha-900/60">No sales yet.</p>
         ) : (
@@ -418,6 +431,7 @@ export default function EventSummary() {
               <tr className="t-display text-left text-xs text-matcha-900/60">
                 <th className="py-2 pr-4">Item</th>
                 <th className="py-2 pr-4 text-right">Qty</th>
+                <th className="py-2 pr-4 text-right">Free</th>
                 <th className="py-2 pr-4 text-right">Revenue</th>
                 <th className="py-2 pr-4 text-right">Ingredient cost</th>
                 <th className="py-2 pr-4 text-right">Loaded margin</th>
@@ -436,6 +450,7 @@ export default function EventSummary() {
                   <tr key={t.menuItemId} className="border-t border-cream-100">
                     <td className="py-2 pr-4 font-medium lowercase">{t.name}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{t.qty}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums">{t.qtyFree || ""}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(t.revenuePaid)}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(t.totalCost)}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{formatPct(loadedMargin)}</td>
@@ -454,6 +469,7 @@ export default function EventSummary() {
               <tr className="border-t-2 border-cream-200">
                 <td className="py-2 pr-4 font-semibold">Totals</td>
                 <td className="py-2 pr-4 text-right font-semibold tabular-nums">{totals.totalCups}</td>
+                <td className="py-2 pr-4 text-right font-semibold tabular-nums">{totals.freeItems || ""}</td>
                 <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(totals.revenuePaid)}</td>
                 <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(totals.ingredientCost)}</td>
                 <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatPct(totals.margin)}</td>
@@ -464,6 +480,7 @@ export default function EventSummary() {
                   <tr className="border-t border-cream-100 text-matcha-900/70">
                     <td className="py-2 pr-4">− Donation ({donationPct}% of revenue)</td>
                     <td />
+                    <td />
                     <td className="py-2 pr-4 text-right tabular-nums">−{formatMoney(donationAmount)}</td>
                     <td />
                     <td />
@@ -471,6 +488,7 @@ export default function EventSummary() {
                   </tr>
                   <tr className="border-t-2 border-cream-200">
                     <td className="py-2 pr-4 font-semibold">Net (after donation)</td>
+                    <td />
                     <td />
                     <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(totals.revenuePaid - donationAmount)}</td>
                     <td />
@@ -563,8 +581,9 @@ const tooltipStyle: React.CSSProperties = {
 function buildCsv(
   event: Event,
   _snapshot: MenuSnapshot,
-  _orders: Order[],
+  orders: Order[],
   totals: ReturnType<typeof computeEventTotals>,
+  extras: EventExtra[],
 ): string {
   const rows: string[][] = [];
 
@@ -586,6 +605,7 @@ function buildCsv(
     "Total Cost",
     "Profit",
     "Margin %",
+    "Free Qty",
   ]);
   for (const t of totals.byItem) {
     rows.push([
@@ -597,6 +617,7 @@ function buildCsv(
       t.totalCost.toFixed(2),
       t.profit.toFixed(2),
       t.margin !== null ? (t.margin * 100).toFixed(1) : "",
+      String(t.qtyFree),
     ]);
   }
   rows.push([]);
@@ -608,11 +629,42 @@ function buildCsv(
   rows.push(["Pastries Served", String(totals.pastriesServed)]);
   rows.push(["Revenue", totals.revenuePaid.toFixed(2)]);
   rows.push(["Gross (before discounts)", totals.revenueGross.toFixed(2)]);
+  rows.push(["Items Sold (paid)", String(totals.itemsSold)]);
+  rows.push(["Free Items Given", String(totals.freeItems)]);
+  rows.push(["Free Items Retail Value", totals.freeRetailValue.toFixed(2)]);
+  rows.push(["Discounts Given", totals.discountTotal.toFixed(2)]);
+  rows.push(["Discounted Items", String(totals.discountedItems)]);
   rows.push(["Ingredient Cost", totals.ingredientCost.toFixed(2)]);
   rows.push(["Fixed Costs", totals.fixedCosts.toFixed(2)]);
   rows.push(["Total Cost", totals.totalCost.toFixed(2)]);
   rows.push(["Profit", totals.profit.toFixed(2)]);
   rows.push(["Overall Margin %", totals.margin !== null ? (totals.margin * 100).toFixed(1) : ""]);
+  rows.push([]);
+
+  // Extra money (never part of revenue)
+  const collected = computeCollected(orders, extras);
+  rows.push(["Extra Received"]);
+  rows.push(["Sales Revenue", collected.salesRevenue.toFixed(2)]);
+  rows.push(["Extra on Orders", collected.orderExtra.toFixed(2)]);
+  rows.push(["Orders With Extra", String(collected.ordersWithExtra)]);
+  rows.push([
+    "Average Extra per Order With Extra",
+    collected.avgExtraPerOrder === null ? "" : collected.avgExtraPerOrder.toFixed(2),
+  ]);
+  rows.push(["Standalone Extra", collected.standaloneExtra.toFixed(2)]);
+  rows.push(["Standalone Entries", String(collected.standaloneCount)]);
+  rows.push(["Extra Total", collected.extraTotal.toFixed(2)]);
+  rows.push(["Total Collected", collected.totalCollected.toFixed(2)]);
+  rows.push([]);
+  rows.push(["Payment Method", "Sales", "Extra", "Total"]);
+  for (const b of collected.byMethod) {
+    rows.push([
+      b.method,
+      b.sales.toFixed(2),
+      (b.orderExtra + b.standaloneExtra).toFixed(2),
+      b.total.toFixed(2),
+    ]);
+  }
   rows.push([]);
 
   // Fixed costs detail

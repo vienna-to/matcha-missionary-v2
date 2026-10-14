@@ -1,6 +1,7 @@
 import type {
   AppState,
   Event,
+  EventExtra,
   Ingredient,
   InventoryPurchase,
   MenuItem,
@@ -95,6 +96,9 @@ export type DbOrder = {
   done_at: string | null;
   updated_at: string;
   queue_priority: number | null;
+  /** Added by migration-order-tips-and-extras.sql; absent on un-migrated databases. */
+  tip_amount?: number | null;
+  tip_payment_method?: Order["paymentMethod"] | null;
 };
 
 export type DbOrderRevision = {
@@ -143,6 +147,21 @@ export type DbOrderItem = {
   combo_pastry_name_snap: string | null;
   combo_pastry_cost_snap: number | null;
   discount_pct: number | null;
+  /** Added by migration-order-item-prices.sql; absent on un-migrated databases. */
+  list_price?: number | null;
+  price_charged?: number | null;
+  free_reason?: OrderItem["freeReason"] | null;
+};
+
+export type DbEventExtra = {
+  id: string;
+  workspace_id: string;
+  event_id: string;
+  amount: number;
+  payment_method: EventExtra["paymentMethod"];
+  note: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 // ---------- DB → TS ----------
@@ -227,6 +246,8 @@ export function fromOrder(r: DbOrder, items: OrderItem[]): Order {
     doneAt: undef(r.done_at),
     updatedAt: r.updated_at,
     queuePriority: r.queue_priority == null ? undefined : Number(r.queue_priority),
+    tipAmount: r.tip_amount == null || Number(r.tip_amount) <= 0 ? undefined : Number(r.tip_amount),
+    tipPaymentMethod: undef(r.tip_payment_method),
   };
 }
 
@@ -319,7 +340,44 @@ export function fromOrderItem(r: DbOrderItem): OrderItem {
     comboPastryCostSnap:
       r.combo_pastry_cost_snap == null ? undefined : Number(r.combo_pastry_cost_snap),
     discountPct: r.discount_pct == null ? undefined : Number(r.discount_pct),
+    listPrice: r.list_price == null ? undefined : Number(r.list_price),
+    priceCharged: r.price_charged == null ? undefined : Number(r.price_charged),
+    freeReason: undef(r.free_reason),
   };
+}
+
+export function fromEventExtra(r: DbEventExtra): EventExtra {
+  return {
+    id: r.id,
+    eventId: r.event_id,
+    amount: Number(r.amount),
+    paymentMethod: r.payment_method,
+    note: r.note ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function toEventExtraInsert(
+  workspaceId: string,
+  x: EventExtra,
+): Omit<DbEventExtra, "created_at" | "updated_at"> {
+  return {
+    id: x.id,
+    workspace_id: workspaceId,
+    event_id: x.eventId,
+    amount: x.amount,
+    payment_method: x.paymentMethod,
+    note: nul(x.note),
+  };
+}
+
+export function toEventExtraPatch(patch: Partial<EventExtra>): Partial<DbEventExtra> {
+  const r: Partial<DbEventExtra> = {};
+  if (patch.amount !== undefined) r.amount = patch.amount;
+  if (patch.paymentMethod !== undefined) r.payment_method = patch.paymentMethod;
+  if (patch.note !== undefined) r.note = nul(patch.note);
+  return r;
 }
 
 export function fromWorkspaceSettings(w: DbWorkspace): Settings {
@@ -445,7 +503,16 @@ export function toEventPatch(patch: Partial<Event>): Partial<DbEvent> {
   return r;
 }
 
-export function toOrderInsert(workspaceId: string, o: Order): Omit<DbOrder, "created_at" | "updated_at"> {
+/** Column groups added after the first release. The writer drops a group only
+ *  when the database lacks it, and reports it if real data was in it. */
+export type OrderWriteOpts = { includeTip?: boolean };
+
+export function toOrderInsert(
+  workspaceId: string,
+  o: Order,
+  opts: OrderWriteOpts = {},
+): Omit<DbOrder, "created_at" | "updated_at"> {
+  const { includeTip = true } = opts;
   return {
     id: o.id,
     workspace_id: workspaceId,
@@ -461,6 +528,9 @@ export function toOrderInsert(workspaceId: string, o: Order): Omit<DbOrder, "cre
     submitted_at: o.submittedAt,
     done_at: nul(o.doneAt),
     queue_priority: nul(o.queuePriority),
+    ...(includeTip
+      ? { tip_amount: o.tipAmount && o.tipAmount > 0 ? o.tipAmount : 0, tip_payment_method: nul(o.tipPaymentMethod) }
+      : {}),
   };
 }
 
@@ -476,15 +546,17 @@ export function toOrderPatch(patch: Partial<Order>): Partial<DbOrder> {
   if (patch.notes !== undefined) r.notes = nul(patch.notes);
   if (patch.doneAt !== undefined) r.done_at = nul(patch.doneAt);
   if (patch.queuePriority !== undefined) r.queue_priority = nul(patch.queuePriority);
+  if ("tipAmount" in patch) r.tip_amount = patch.tipAmount && patch.tipAmount > 0 ? patch.tipAmount : 0;
+  if ("tipPaymentMethod" in patch) r.tip_payment_method = nul(patch.tipPaymentMethod);
   return r;
 }
 
 export function toOrderItemInsert(
   workspaceId: string,
   oi: OrderItem,
-  opts: { includeSnapNames?: boolean } = {},
+  opts: { includeSnapNames?: boolean; includePrices?: boolean; includeFreeReason?: boolean } = {},
 ): DbOrderItem {
-  const { includeSnapNames = true } = opts;
+  const { includeSnapNames = true, includePrices = true, includeFreeReason = true } = opts;
   return {
     id: oi.id,
     workspace_id: workspaceId,
@@ -510,6 +582,13 @@ export function toOrderItemInsert(
     combo_pastry_name_snap: nul(oi.comboPastryNameSnap),
     combo_pastry_cost_snap: nul(oi.comboPastryCostSnap),
     discount_pct: nul(oi.discountPct),
+    ...(includePrices
+      ? {
+          list_price: oi.listPrice ?? oi.priceSnap,
+          price_charged: oi.priceCharged ?? oi.priceSnap * (1 - Math.min(1, Math.max(0, (oi.discountPct ?? 0) / 100))),
+        }
+      : {}),
+    ...(includeFreeReason ? { free_reason: nul(oi.freeReason) } : {}),
   };
 }
 
@@ -530,7 +609,10 @@ export function toOrderItemPatch(patch: Partial<OrderItem>): Partial<DbOrderItem
   if (patch.comboPastryId !== undefined) r.combo_pastry_id = nul(patch.comboPastryId);
   if (patch.comboPastryNameSnap !== undefined) r.combo_pastry_name_snap = nul(patch.comboPastryNameSnap);
   if (patch.comboPastryCostSnap !== undefined) r.combo_pastry_cost_snap = nul(patch.comboPastryCostSnap);
-  if (patch.discountPct !== undefined) r.discount_pct = nul(patch.discountPct);
+  if ("discountPct" in patch) r.discount_pct = nul(patch.discountPct);
+  if (patch.listPrice !== undefined) r.list_price = patch.listPrice;
+  if (patch.priceCharged !== undefined) r.price_charged = patch.priceCharged;
+  if ("freeReason" in patch) r.free_reason = nul(patch.freeReason);
   return r;
 }
 
@@ -545,6 +627,7 @@ export function buildAppState(
   orderItems: DbOrderItem[],
   inventoryPurchases: DbInventoryPurchase[],
   orderRevisions: DbOrderRevision[] = [],
+  eventExtras: DbEventExtra[] = [],
 ): AppState {
   const tsIngredients = ingredients.map(fromIngredient);
   const tsMenuItems = menuItems.map(fromMenuItem);
@@ -569,6 +652,7 @@ export function buildAppState(
     events: tsEvents,
     orders: tsOrders,
     inventoryPurchases: inventoryPurchases.map(fromInventoryPurchase),
+    eventExtras: eventExtras.map(fromEventExtra),
     orderRevisions: orderRevisions.map(fromOrderRevision),
   };
 }

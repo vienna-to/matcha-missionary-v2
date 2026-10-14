@@ -417,12 +417,13 @@ function OrderCard({
             {formatTime(order.submittedAt)} · {timerLabel(elapsed)}
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-1.5 max-md:w-full max-md:shrink max-md:[&>button]:h-10">
+        <div className="flex shrink-0 flex-wrap gap-1.5 max-md:grid max-md:w-full max-md:shrink max-md:grid-cols-6 max-md:[&>button]:h-10">
           <Button
             size="sm"
             variant={pinned ? "primary" : "outline"}
             onClick={onPin}
             title={pinned ? "Unpin" : "Bump to top"}
+            className="max-md:col-span-2 max-md:order-3"
           >
             <ArrowUp className="h-3.5 w-3.5" />
           </Button>
@@ -432,21 +433,22 @@ function OrderCard({
               variant="outline"
               onClick={onRelease}
               title="Someone else can take this"
+              className="max-md:col-span-3 max-md:order-1 max-md:px-2"
             >
               <RotateCcw className="h-3.5 w-3.5" /> Release
             </Button>
           ) : (
-            <Button size="sm" variant="secondary" onClick={onClaim}>
+            <Button size="sm" variant="secondary" onClick={onClaim} className="max-md:col-span-3 max-md:order-1 max-md:px-2">
               <Play className="h-3.5 w-3.5" /> Start
             </Button>
           )}
-          <Button size="sm" variant="primary" onClick={onMarkComplete}>
+          <Button size="sm" variant="primary" onClick={onMarkComplete} className="max-md:col-span-3 max-md:order-2 max-md:px-2">
             <CheckCircle2 className="h-3.5 w-3.5" /> Mark all done
           </Button>
-          <Button size="sm" variant="outline" onClick={onEdit} title="Edit">
+          <Button size="sm" variant="outline" onClick={onEdit} title="Edit" className="max-md:col-span-2 max-md:order-4">
             <Pencil className="h-3.5 w-3.5" />
           </Button>
-          <Button size="sm" variant="outline" onClick={onRemove} title="Remove">
+          <Button size="sm" variant="outline" onClick={onRemove} title="Remove" className="max-md:col-span-2 max-md:order-5">
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>

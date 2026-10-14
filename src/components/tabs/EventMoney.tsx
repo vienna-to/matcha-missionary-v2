@@ -12,7 +12,7 @@ import {
   type Order,
   type PaymentMethod,
 } from "@/lib/types";
-import { formatMoney } from "@/lib/utils";
+import { cn, formatMoney } from "@/lib/utils";
 
 const methodLabel = (m: PaymentMethod | "unknown") =>
   m === "unknown" ? "Not recorded" : PAYMENT_METHOD_LABELS[m];
@@ -94,9 +94,9 @@ export default function EventMoney({
         <Line
           label="On orders"
           indent
-          value={`${formatMoney(collected.orderExtra)} across ${collected.ordersWithExtra} order${
+          value={`${formatMoney(collected.orderExtra)} (${collected.ordersWithExtra} order${
             collected.ordersWithExtra === 1 ? "" : "s"
-          } with tips`}
+          })`}
         />
         <Line
           label="Average per order with a tip"
@@ -121,34 +121,34 @@ export default function EventMoney({
           <table className="min-w-full text-sm">
             <thead>
               <tr className="t-display text-left text-xs text-matcha-900/60">
-                <th className="py-2 pr-4">By payment method</th>
-                <th className="py-2 pr-4 text-right">Sales</th>
-                <th className="py-2 pr-4 text-right">Tips</th>
-                <th className="py-2 pr-4 text-right">Total</th>
+                <th className="py-2 pr-4 max-md:whitespace-nowrap max-md:pr-2">By payment method</th>
+                <th className="py-2 pr-4 max-md:pr-2 text-right">Sales</th>
+                <th className="py-2 pr-4 max-md:pr-2 text-right">Tips</th>
+                <th className="py-2 pr-4 max-md:pr-2 text-right">Total</th>
               </tr>
             </thead>
             <tbody>
               {collected.byMethod.map((b) => (
                 <tr key={b.method} className="border-t border-cream-100">
-                  <td className="py-2 pr-4 font-medium">{methodLabel(b.method)}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(b.sales)}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">
+                  <td className="py-2 pr-4 max-md:whitespace-nowrap max-md:pr-2 font-medium">{methodLabel(b.method)}</td>
+                  <td className="py-2 pr-4 max-md:pr-2 text-right tabular-nums">{formatMoney(b.sales)}</td>
+                  <td className="py-2 pr-4 max-md:pr-2 text-right tabular-nums">
                     {formatMoney(b.orderExtra + b.standaloneExtra)}
                   </td>
-                  <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(b.total)}</td>
+                  <td className="py-2 pr-4 max-md:pr-2 text-right font-semibold tabular-nums">{formatMoney(b.total)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-cream-200">
-                <td className="py-2 pr-4 font-semibold">All methods</td>
-                <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                <td className="py-2 pr-4 max-md:whitespace-nowrap max-md:pr-2 font-semibold">All methods</td>
+                <td className="py-2 pr-4 max-md:pr-2 text-right font-semibold tabular-nums">
                   {formatMoney(collected.salesRevenue)}
                 </td>
-                <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                <td className="py-2 pr-4 max-md:pr-2 text-right font-semibold tabular-nums">
                   {formatMoney(collected.extraTotal)}
                 </td>
-                <td className="py-2 pr-4 text-right font-semibold tabular-nums">
+                <td className="py-2 pr-4 max-md:pr-2 text-right font-semibold tabular-nums">
                   {formatMoney(collected.totalCollected)}
                 </td>
               </tr>
@@ -242,9 +242,21 @@ function Line({
   indent?: boolean;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className={indent ? "pl-4 text-matcha-900/70" : strong ? "font-semibold" : undefined}>{label}</dt>
-      <dd className={strong ? "font-semibold tabular-nums" : "tabular-nums"}>{value}</dd>
+    // On phones every row has the same shape: label left, value right. The
+    // label keeps its own width, and a value too long for the row wraps onto
+    // its own line under the label instead of squeezing it.
+    <div className="flex items-baseline justify-between gap-3 max-md:flex-wrap max-md:gap-y-0.5">
+      <dt
+        className={cn(
+          "max-md:max-w-full",
+          indent ? "pl-4 text-matcha-900/70" : strong ? "font-semibold" : undefined,
+        )}
+      >
+        {label}
+      </dt>
+      <dd className={cn("max-md:ml-auto max-md:min-w-0 max-md:text-right", strong ? "font-semibold tabular-nums" : "tabular-nums")}>
+        {value}
+      </dd>
     </div>
   );
 }

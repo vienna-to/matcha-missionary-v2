@@ -307,7 +307,7 @@ export default function SettingsTab() {
           on their own.
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={copyHelperLink}>
+          <Button variant="outline" size="sm" onClick={copyHelperLink} className="max-md:h-auto max-md:min-h-10 max-md:w-full max-md:whitespace-normal max-md:py-2 max-md:text-center">
             <Share2 className="h-3.5 w-3.5" /> {helperCopied ? "Copied!" : "Copy helper link"}
           </Button>
         </div>
@@ -337,7 +337,7 @@ export default function SettingsTab() {
             somewhere durable (Drive, iCloud, etc.) after each event or at
             least quarterly.
           </p>
-          <Button variant="outline" size="sm" onClick={downloadFullHistory}>
+          <Button variant="outline" size="sm" onClick={downloadFullHistory} className="max-md:h-auto max-md:min-h-10 max-md:w-full max-md:whitespace-normal max-md:py-2 max-md:text-center max-md:text-[13px] max-md:leading-tight max-md:tracking-[0.02em]">
             <Download className="h-3.5 w-3.5" /> Download full history CSV
           </Button>
         </div>
@@ -351,7 +351,7 @@ export default function SettingsTab() {
             admission-charged vs. free-entry. Revenue is also split by
             payment method so cash / Venmo / Zelle deposits reconcile.
           </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[100px_140px_auto]">
+          <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:grid-cols-[100px_140px_auto]">
             <Field label="year">
               <NumberField
                 min={2020}
@@ -377,8 +377,8 @@ export default function SettingsTab() {
                 <option value="4">Q4 (Oct–Dec)</option>
               </Select>
             </Field>
-            <div className="flex items-end">
-              <Button variant="outline" size="sm" onClick={downloadQuarterlyReport}>
+            <div className="flex items-end max-sm:col-span-2">
+              <Button variant="outline" size="sm" onClick={downloadQuarterlyReport} className="max-md:h-auto max-md:min-h-10 max-md:w-full max-md:whitespace-normal max-md:py-2 max-md:text-center max-md:text-[13px] max-md:leading-tight max-md:tracking-[0.02em]">
                 <FileText className="h-3.5 w-3.5" /> Download{" "}
                 {quarterLabel(reportYear, reportQuarter)}
               </Button>
@@ -442,7 +442,7 @@ export default function SettingsTab() {
                 the uci spring pop-up demo event is loaded in supabase. delete it once
                 you&apos;ve created your own events.
               </p>
-              <Button variant="danger" size="sm" onClick={clearSampleDataSupabase} disabled={seedBusy}>
+              <Button variant="danger" size="sm" onClick={clearSampleDataSupabase} disabled={seedBusy} className="max-md:h-auto max-md:min-h-10 max-md:w-full max-md:whitespace-normal max-md:py-2 max-md:text-center max-md:text-[13px] max-md:leading-tight max-md:tracking-[0.02em]">
                 <Trash2 className="h-3.5 w-3.5" /> {seedBusy ? "deleting…" : "Clear sample event"}
               </Button>
             </>
@@ -453,7 +453,7 @@ export default function SettingsTab() {
                 ingredients, 30 orders). uses fresh uuids so it&apos;s safe to run alongside
                 your real data.
               </p>
-              <Button variant="outline" size="sm" onClick={loadSampleDataSupabase} disabled={seedBusy}>
+              <Button variant="outline" size="sm" onClick={loadSampleDataSupabase} disabled={seedBusy} className="max-md:h-auto max-md:min-h-10 max-md:w-full max-md:whitespace-normal max-md:py-2 max-md:text-center max-md:text-[13px] max-md:leading-tight max-md:tracking-[0.02em]">
                 <RefreshCw className="h-3.5 w-3.5" /> {seedBusy ? "loading…" : "Load sample data into Supabase"}
               </Button>
             </>
@@ -464,7 +464,7 @@ export default function SettingsTab() {
               the uci spring pop-up demo event is loaded. clear it once you&apos;ve created
               your own events. your menu and ingredients are not removed.
             </p>
-            <Button variant="danger" size="sm" onClick={clearSampleDataLocal}>
+            <Button variant="danger" size="sm" onClick={clearSampleDataLocal} className="max-md:h-auto max-md:min-h-10 max-md:w-full max-md:whitespace-normal max-md:py-2 max-md:text-center max-md:text-[13px] max-md:leading-tight max-md:tracking-[0.02em]">
               <Trash2 className="h-3.5 w-3.5" /> Clear sample data
             </Button>
           </>
@@ -473,7 +473,7 @@ export default function SettingsTab() {
             <p className="t-caption text-xs text-matcha-900/60">
               reload the uci spring pop-up sample event to explore the app or demo it.
             </p>
-            <Button variant="outline" size="sm" onClick={reloadSampleDataLocal}>
+            <Button variant="outline" size="sm" onClick={reloadSampleDataLocal} className="max-md:h-auto max-md:min-h-10 max-md:w-full max-md:whitespace-normal max-md:py-2 max-md:text-center max-md:text-[13px] max-md:leading-tight max-md:tracking-[0.02em]">
               <RefreshCw className="h-3.5 w-3.5" /> Reload sample data
             </Button>
           </>

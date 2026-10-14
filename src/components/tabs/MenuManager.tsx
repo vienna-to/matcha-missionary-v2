@@ -62,7 +62,7 @@ export default function MenuManager() {
             master menu and ingredients. future events copy a snapshot at creation time.
           </p>
         </div>
-        <div className="flex gap-1.5 rounded-xl bg-cream-100 p-1 max-md:[&>button]:flex-1">
+        <div className="flex gap-1.5 rounded-xl bg-cream-100 p-1 max-md:[&>button]:min-w-0 max-md:[&>button]:flex-1 max-md:[&>button]:px-2 max-[380px]:[&>button]:text-xs">
           <Chip active={subtab === "items"} onClick={() => setSubtab("items")}>
             <span className="t-display">Items</span>
           </Chip>

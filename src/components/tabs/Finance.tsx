@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, Archive, ArchiveRestore, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Card, Field, Input, NumberField, TextField } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { defaultItemCost, defaultItemMargin, ingredientCostPerCanonical } from "@/lib/calc";
@@ -15,6 +15,14 @@ function todayLocal(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/** "2026-10-14" -> "Oct 14" (no year, no weekday). Built from the parts so the
+ *  day never shifts with the timezone. */
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export default function Finance() {
@@ -282,7 +290,9 @@ function CurrentExpensesCard({
           no current expenses logged yet.
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+        <PurchaseCards purchases={purchases} total={total} dispatch={dispatch} archived={false} />
+        <div className="overflow-x-auto max-md:hidden">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="t-display text-left text-xs text-matcha-900/60">
@@ -325,6 +335,7 @@ function CurrentExpensesCard({
             </tfoot>
           </table>
         </div>
+        </>
       )}
     </Card>
   );
@@ -369,7 +380,11 @@ function ArchivedExpensesCard({
       </button>
 
       {open ? (
-        <div className="mt-3 overflow-x-auto">
+        <>
+        <div className="mt-3 md:hidden">
+          <PurchaseCards purchases={purchases} total={total} dispatch={dispatch} archived />
+        </div>
+        <div className="mt-3 overflow-x-auto max-md:hidden">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="t-display text-left text-xs text-matcha-900/60">
@@ -413,8 +428,153 @@ function ArchivedExpensesCard({
             </tfoot>
           </table>
         </div>
+        </>
       ) : null}
     </Card>
+  );
+}
+
+/** Phone layout for an expenses list: one stacked card per expense. The
+ *  desktop table keeps its inline-editable cells; inputs can't wrap, so here
+ *  the name is plain text (wraps freely) and a pencil switches the card into
+ *  the same editable fields. */
+function PurchaseCards({
+  purchases,
+  total,
+  dispatch,
+  archived,
+}: {
+  purchases: InventoryPurchase[];
+  total: number;
+  dispatch: ReturnType<typeof useStore>["dispatch"];
+  archived: boolean;
+}) {
+  return (
+    <div className="md:hidden">
+      <ul>
+        {purchases.map((p) => (
+          <PurchaseCard
+            key={p.id}
+            purchase={p}
+            archived={archived}
+            onPatch={(patch) => dispatch({ type: "UPDATE_INVENTORY_PURCHASE", id: p.id, patch })}
+            onArchiveToggle={() =>
+              dispatch({
+                type: "UPDATE_INVENTORY_PURCHASE",
+                id: p.id,
+                patch: { archived: !archived },
+              })
+            }
+            onDelete={() => dispatch({ type: "DELETE_INVENTORY_PURCHASE", id: p.id })}
+          />
+        ))}
+      </ul>
+      <div className="flex items-center justify-between border-t-2 border-cream-200 pt-2 text-sm font-semibold">
+        <span>Total</span>
+        <span className="tabular-nums">{formatMoney(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+function PurchaseCard({
+  purchase,
+  archived,
+  onPatch,
+  onArchiveToggle,
+  onDelete,
+}: {
+  purchase: InventoryPurchase;
+  archived: boolean;
+  onPatch: (patch: Partial<InventoryPurchase>) => void;
+  onArchiveToggle: () => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <li className="border-t border-cream-100 py-2.5 first:border-t-0">
+      {editing ? (
+        <div className="space-y-2">
+          <TextField
+            className="h-10 lowercase"
+            value={purchase.name}
+            onChange={(v) => onPatch({ name: v })}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <TextField
+              className="h-10"
+              type="date"
+              value={purchase.date}
+              onChange={(v) => onPatch({ date: v })}
+            />
+            <NumberField
+              className="h-10 text-right"
+              min={0}
+              step="0.01"
+              value={purchase.amount}
+              onChange={(n) => onPatch({ amount: n })}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button size="sm" variant="outline" className="h-10" onClick={() => setEditing(false)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 break-words text-sm font-medium lowercase">{purchase.name}</div>
+            <div className="shrink-0 text-sm font-semibold tabular-nums">
+              {formatMoney(purchase.amount)}
+            </div>
+          </div>
+          <div className="mt-0.5 flex items-center justify-between gap-2">
+            <div className="t-caption text-[11px] !normal-case text-matcha-900/60">
+              {shortDate(purchase.date)}
+            </div>
+            <div className="flex items-center">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-10 w-10 px-0"
+                onClick={() => setEditing(true)}
+                aria-label="Edit"
+                title="Edit"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-10 w-10 px-0"
+                onClick={onArchiveToggle}
+                aria-label={archived ? "Unarchive" : "Archive"}
+                title={archived ? "Unarchive" : "Archive"}
+              >
+                {archived ? (
+                  <ArchiveRestore className="h-3.5 w-3.5" />
+                ) : (
+                  <Archive className="h-3.5 w-3.5" />
+                )}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-10 w-10 px-0"
+                onClick={() => {
+                  if (confirm(`Delete "${purchase.name}"?`)) onDelete();
+                }}
+                aria-label="Delete"
+                title="Delete"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </li>
   );
 }
 

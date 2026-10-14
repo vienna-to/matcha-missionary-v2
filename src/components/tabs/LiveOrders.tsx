@@ -283,7 +283,7 @@ export default function LiveOrders() {
               tap a card to add, then follow the steps.
             </p>
           </div>
-          <Button variant="outline" className="h-11" onClick={() => setComboPickerOpen(true)}>
+          <Button variant="outline" className="h-11 max-md:h-auto max-md:min-h-11 max-md:w-full max-md:whitespace-normal max-md:py-2" onClick={() => setComboPickerOpen(true)}>
             + Combo deal · {formatMoney(COMBO_PRICE)}
           </Button>
         </header>

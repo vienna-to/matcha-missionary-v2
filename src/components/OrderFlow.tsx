@@ -169,7 +169,7 @@ export default function OrderFlow(p: Props) {
         {idx > 0 ? (
           <Button
             variant="outline"
-            className="h-14 w-14 shrink-0 px-0"
+            className="h-14 w-14 shrink-0 px-0 lg:w-12"
             aria-label="Back"
             onClick={() => p.onStep(STEPS[idx - 1].id)}
           >
@@ -180,7 +180,7 @@ export default function OrderFlow(p: Props) {
           <div className="t-display text-[10px] text-matcha-700">
             {step === "payment" && p.extraDollars > 0 ? "Collect" : "Total"}
           </div>
-          <div className="text-xl font-semibold tabular-nums text-matcha-900">
+          <div className="text-xl font-semibold tabular-nums text-matcha-900 lg:text-lg">
             {formatMoney(step === "payment" ? p.total + p.extraDollars : p.total)}
           </div>
         </div>
@@ -188,38 +188,38 @@ export default function OrderFlow(p: Props) {
           {step === "items" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base"
+              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
               disabled={cart.length === 0}
               onClick={() => p.onStep("adjust")}
             >
-              Next: Adjustments <ChevronRight className="h-5 w-5" />
+              Next: Adjustments <ChevronRight className="h-5 w-5 shrink-0 lg:hidden" />
             </Button>
           )}
           {step === "adjust" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base"
+              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
               onClick={() => p.onStep("name")}
             >
-              Next: Name <ChevronRight className="h-5 w-5" />
+              Next: Name <ChevronRight className="h-5 w-5 shrink-0 lg:hidden" />
             </Button>
           )}
           {step === "name" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base"
+              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
               onClick={() => p.onStep("payment")}
             >
-              Next: Payment <ChevronRight className="h-5 w-5" />
+              Next: Payment <ChevronRight className="h-5 w-5 shrink-0 lg:hidden" />
             </Button>
           )}
           {step === "payment" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base"
+              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
               onClick={p.onSubmit}
             >
-              <Check className="h-5 w-5" /> Confirm order
+              <Check className="h-5 w-5 shrink-0 lg:hidden" /> Confirm order
             </Button>
           )}
         </div>
@@ -227,6 +227,16 @@ export default function OrderFlow(p: Props) {
     </div>
   );
 }
+
+// In the narrow side panel (lg and up) tab widths follow label length so the
+// long "Adjustments" label gets room while the short ones give it up. In the
+// wide bottom sheet they stay equal. All four stay on one row.
+const STEP_WEIGHT: Record<Step, string> = {
+  items: "flex-1 lg:flex-[0.8_1_0%]",
+  adjust: "flex-1 lg:flex-[1.6_1_0%]",
+  name: "flex-1 lg:flex-[0.8_1_0%]",
+  payment: "flex-1 lg:flex-[1.1_1_0%]",
+};
 
 function StepBar({
   step,
@@ -238,19 +248,19 @@ function StepBar({
   onStep: (s: Step) => void;
 }) {
   return (
-    <ol className="sticky top-0 z-10 flex rounded-t-2xl border-b border-cream-200 bg-white p-1.5">
+    <ol className="sticky top-0 z-10 flex gap-1 rounded-t-2xl border-b border-cream-200 bg-white p-1.5">
       {STEPS.map((s, i) => {
         const active = s.id === step;
         // A check means the step holds real input — not that it was viewed.
         const checked = checks[s.id];
         return (
-          <li key={s.id} className="flex-1">
+          <li key={s.id} className={cn("min-w-0", STEP_WEIGHT[s.id])}>
             <button
               type="button"
               onClick={() => onStep(s.id)}
               aria-current={active ? "step" : undefined}
               className={cn(
-                "t-display flex min-h-12 w-full flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[11px] transition-colors",
+                "t-display flex min-h-12 w-full flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl px-1.5 text-[11px] transition-colors lg:tracking-[0.02em]",
                 active
                   ? "bg-matcha-500 text-white"
                   : "text-matcha-900 hover:bg-cream-100",

@@ -265,7 +265,7 @@ export default function LiveOrders() {
   );
 
   return (
-    <div className="lg:grid lg:grid-cols-[1fr_400px] lg:gap-6">
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_clamp(340px,31vw,352px)] lg:gap-6">
       {confirmation ? (
         <div
           role="status"
@@ -499,26 +499,28 @@ function ItemGrid({
     );
   }
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3">
       {items.map((item) => (
         <button
           key={item.id}
           onClick={() => onAdd(item)}
-          className="group relative flex h-44 flex-col rounded-2xl border border-cream-200 bg-white p-4 text-left transition-all hover:border-matcha-300 hover:shadow-md active:scale-[0.98]"
+          className="group relative flex h-44 min-w-0 flex-col rounded-2xl border border-cream-200 bg-white p-4 text-left transition-all hover:border-matcha-300 hover:shadow-md active:scale-[0.98]"
         >
           <div className="min-w-0">
-            <div className="t-display text-sm leading-tight">{item.name}</div>
+            <div className="t-display hyphens-auto break-words text-sm leading-tight [overflow-wrap:anywhere]">
+              {item.name}
+            </div>
             {item.description ? (
               <div className="t-caption mt-2 line-clamp-3 text-xs text-matcha-900/60">
                 {item.description}
               </div>
             ) : null}
           </div>
-          <div className="mt-auto flex items-end justify-between">
+          <div className="mt-auto flex items-end justify-between gap-2">
             <div className="text-base font-semibold tabular-nums">
               {formatMoney(item.price)}
             </div>
-            <span className="rounded-full bg-matcha-500 p-2 text-white opacity-90 group-hover:opacity-100">
+            <span className="shrink-0 rounded-full bg-matcha-500 p-2 text-white opacity-90 group-hover:opacity-100">
               <Plus className="h-4 w-4" />
             </span>
           </div>

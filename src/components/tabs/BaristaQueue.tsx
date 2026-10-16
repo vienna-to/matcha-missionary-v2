@@ -417,7 +417,7 @@ function OrderCard({
             {formatTime(order.submittedAt)} · {timerLabel(elapsed)}
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-1.5 max-md:grid max-md:w-full max-md:shrink max-md:grid-cols-6 max-md:[&>button]:h-10">
+        <div className="flex shrink-0 flex-wrap gap-1.5 max-md:grid max-md:w-full max-md:shrink max-md:grid-cols-6 max-md:[&>button]:h-auto max-md:[&>button]:min-h-10 max-md:[&>button]:whitespace-normal max-md:[&>button]:leading-tight">
           <Button
             size="sm"
             variant={pinned ? "primary" : "outline"}
@@ -433,16 +433,16 @@ function OrderCard({
               variant="outline"
               onClick={onRelease}
               title="Someone else can take this"
-              className="max-md:col-span-3 max-md:order-1 max-md:px-2"
+              className="max-md:col-span-3 max-md:order-1 max-md:px-3 max-md:text-[13px] max-md:tracking-[0.02em]"
             >
               <RotateCcw className="h-3.5 w-3.5" /> Release
             </Button>
           ) : (
-            <Button size="sm" variant="secondary" onClick={onClaim} className="max-md:col-span-3 max-md:order-1 max-md:px-2">
+            <Button size="sm" variant="secondary" onClick={onClaim} className="max-md:col-span-3 max-md:order-1 max-md:px-3 max-md:text-[13px] max-md:tracking-[0.02em]">
               <Play className="h-3.5 w-3.5" /> Start
             </Button>
           )}
-          <Button size="sm" variant="primary" onClick={onMarkComplete} className="max-md:col-span-3 max-md:order-2 max-md:px-2">
+          <Button size="sm" variant="primary" onClick={onMarkComplete} className="max-md:col-span-3 max-md:order-2 max-md:px-3 max-md:text-[13px] max-md:tracking-[0.02em]">
             <CheckCircle2 className="h-3.5 w-3.5" /> Mark all done
           </Button>
           <Button size="sm" variant="outline" onClick={onEdit} title="Edit" className="max-md:col-span-2 max-md:order-4">

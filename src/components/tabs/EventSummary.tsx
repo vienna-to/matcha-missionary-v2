@@ -22,6 +22,7 @@ import type { Event, EventExtra, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
 import ContractResultsDialog from "@/components/ContractResultsDialog";
 import EventMoney from "./EventMoney";
+import { barMargin, categoryAxis, useIsMobile } from "@/components/chart-axis";
 
 const ALL_EVENTS = "__all__";
 
@@ -29,6 +30,7 @@ export default function EventSummary() {
   const { state, dispatch } = useStore();
   const activeEvent = useActiveEvent();
   const [deleting, startDelete] = useTransition();
+  const isMobile = useIsMobile();
 
   // Default to active event; otherwise the most-recent event.
   const sortedEvents = useMemo(
@@ -226,10 +228,10 @@ export default function EventSummary() {
               </option>
             ))}
           </Select>
-          <Button variant="outline" size="sm" onClick={handleExport} className="max-md:h-10">
+          <Button variant="outline" size="sm" onClick={handleExport} className="max-md:h-auto max-md:min-h-10 max-md:whitespace-normal max-md:py-1.5 max-md:leading-tight">
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>
-          <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting} className="max-md:h-10">
+          <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting} className="max-md:h-auto max-md:min-h-10 max-md:whitespace-normal max-md:py-1.5 max-md:leading-tight">
             <Trash2 className="h-3.5 w-3.5" /> {deleting ? "deleting…" : "Delete event"}
           </Button>
         </div>
@@ -343,10 +345,16 @@ export default function EventSummary() {
           <p className="text-sm text-matcha-900/60">No sales yet.</p>
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(220, chartItems.length * 36)}>
-            <BarChart data={chartItems} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
+            <BarChart data={chartItems} layout="vertical" margin={barMargin(isMobile)}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
-              <XAxis type="number" stroke="#6B7280" fontSize={11} />
-              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} tickFormatter={(v: string) => v.toLowerCase()} />
+              <XAxis
+                type="number"
+                stroke="#6B7280"
+                fontSize={11}
+                allowDecimals={false}
+                domain={[0, (max: number) => Math.max(1, max)]}
+              />
+              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} {...categoryAxis(isMobile, chartItems.map((c) => c.name), 120, true)} />
               <Tooltip
                 formatter={(v: number, _name: string, item: { payload?: { menuItemId?: string } }) => {
                   const id = item?.payload?.menuItemId;
@@ -374,16 +382,16 @@ export default function EventSummary() {
           <p className="text-sm text-matcha-900/60">No sales yet.</p>
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(240, chartItems.length * 44)}>
-            <BarChart data={chartItems} layout="vertical" margin={{ left: 24, right: 16, top: 8, bottom: 8 }}>
+            <BarChart data={chartItems} layout="vertical" margin={barMargin(isMobile)}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis type="number" stroke="#6B7280" fontSize={11} tickFormatter={(v: number) => `$${v}`} />
-              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} width={120} tickFormatter={(v: string) => v.toLowerCase()} />
+              <YAxis type="category" dataKey="name" stroke="#374151" fontSize={11} {...categoryAxis(isMobile, chartItems.map((c) => c.name), 120, true)} />
               <Tooltip
                 formatter={(v: number, name: string) => [formatMoney(v as number), name]}
                 labelFormatter={(label) => String(label).toLowerCase()}
                 contentStyle={tooltipStyle}
               />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={isMobile ? { fontSize: 12, width: "100%", left: 0 } : { fontSize: 12 }} />
               <Bar dataKey="revenuePaid" name="Revenue" fill="#7A9C5E" radius={[0, 6, 6, 0]} />
               <Bar dataKey="profit" name="Profit" fill="#C7A86B" radius={[0, 6, 6, 0]} />
             </BarChart>
@@ -400,10 +408,10 @@ export default function EventSummary() {
           <p className="text-sm text-matcha-900/60">No orders yet.</p>
         ) : (
           <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={timeBuckets} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+            <LineChart data={timeBuckets} margin={isMobile ? { left: 0, right: 20, top: 8, bottom: 8 } : { left: 8, right: 16, top: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis dataKey="label" stroke="#6B7280" fontSize={11} />
-              <YAxis stroke="#6B7280" fontSize={11} allowDecimals={false} />
+              <YAxis stroke="#6B7280" fontSize={11} allowDecimals={false} {...(isMobile ? { width: 32 } : {})} />
               <Tooltip
                 formatter={(v: number) => [`${v} orders`, "Orders"]}
                 contentStyle={tooltipStyle}
@@ -713,6 +721,8 @@ type PerEventTotal = {
   name: string;
   date: string;
   shortLabel: string;
+  /** Phone axis label: full name plus month-day so same-name events differ. */
+  axisLabel: string;
   revenue: number;
   cost: number;
   profit: number;
@@ -821,6 +831,7 @@ function buildAllEventsAggregate(state: import("@/lib/types").AppState): AllEven
       date: evt.date,
       shortLabel:
         evt.name.length > 16 ? `${evt.name.slice(0, 14)}…` : evt.name,
+      axisLabel: `${evt.name} ${evt.date.slice(5)}`,
       revenue: effRevenue,
       cost: t.totalCost,
       profit: effProfit,
@@ -882,6 +893,7 @@ function AllEventsView({
   onSelectEvent: (id: string) => void;
   threshold: number;
 }) {
+  const isMobile = useIsMobile();
   const itemsByQty = [...aggregate.byItem].sort((a, b) => b.qty - a.qty);
 
   return (
@@ -976,7 +988,7 @@ function AllEventsView({
             <BarChart
               data={aggregate.perEvent}
               layout="vertical"
-              margin={{ left: 24, right: 16, top: 8, bottom: 8 }}
+              margin={barMargin(isMobile)}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis
@@ -987,10 +999,10 @@ function AllEventsView({
               />
               <YAxis
                 type="category"
-                dataKey="shortLabel"
+                dataKey={isMobile ? "axisLabel" : "shortLabel"}
                 stroke="#374151"
                 fontSize={11}
-                width={130}
+                {...categoryAxis(isMobile, aggregate.perEvent.map((e) => (isMobile ? e.axisLabel : e.shortLabel)), 130, false)}
               />
               <Tooltip
                 formatter={(v: number, name: string) => [formatMoney(v as number), name]}
@@ -1000,7 +1012,7 @@ function AllEventsView({
                 }}
                 contentStyle={tooltipStyle}
               />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={isMobile ? { fontSize: 12, width: "100%", left: 0 } : { fontSize: 12 }} />
               <Bar dataKey="revenue" name="Revenue" fill="#7A9C5E" radius={[0, 6, 6, 0]} />
               <Bar dataKey="profit" name="Profit" fill="#C7A86B" radius={[0, 6, 6, 0]} />
             </BarChart>
@@ -1126,6 +1138,7 @@ function ContractView({
   onDelete: () => void;
 }) {
   const [resultsOpen, setResultsOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   const payout = event.contractPayout ?? 0;
   // Split byItem rows into drinks (cups) and pastries. Both count toward the
@@ -1200,14 +1213,14 @@ function ContractView({
               </option>
             ))}
           </Select>
-          <Button variant="outline" size="sm" onClick={() => setResultsOpen(true)} className="max-md:h-10">
+          <Button variant="outline" size="sm" onClick={() => setResultsOpen(true)} className="max-md:h-auto max-md:min-h-10 max-md:whitespace-normal max-md:py-1.5 max-md:leading-tight">
             <Pencil className="h-3.5 w-3.5" />{" "}
             {orders.length > 0 ? "Edit results" : "Enter results"}
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} className="max-md:h-10">
+          <Button variant="outline" size="sm" onClick={handleExport} className="max-md:h-auto max-md:min-h-10 max-md:whitespace-normal max-md:py-1.5 max-md:leading-tight">
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>
-          <Button variant="danger" size="sm" onClick={onDelete} disabled={deleting} className="max-md:h-10">
+          <Button variant="danger" size="sm" onClick={onDelete} disabled={deleting} className="max-md:h-auto max-md:min-h-10 max-md:whitespace-normal max-md:py-1.5 max-md:leading-tight">
             <Trash2 className="h-3.5 w-3.5" /> {deleting ? "deleting…" : "Delete event"}
           </Button>
         </div>
@@ -1286,7 +1299,7 @@ function ContractView({
             <BarChart
               data={itemRows}
               layout="vertical"
-              margin={{ left: 24, right: 16, top: 8, bottom: 8 }}
+              margin={barMargin(isMobile)}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D2" />
               <XAxis
@@ -1300,8 +1313,7 @@ function ContractView({
                 dataKey="name"
                 stroke="#374151"
                 fontSize={11}
-                width={130}
-                tickFormatter={(v: string) => v.toLowerCase()}
+                {...categoryAxis(isMobile, itemRows.map((r) => r.name), 130, true)}
               />
               <Tooltip
                 formatter={(v: number) => [formatMoney(v as number), "Ingredient cost"]}

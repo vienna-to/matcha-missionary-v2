@@ -188,38 +188,38 @@ export default function OrderFlow(p: Props) {
           {step === "items" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
+              className="h-14 w-full min-w-0 px-3 text-base max-md:gap-1.5 max-md:px-2 max-md:text-[14px] max-md:whitespace-normal max-md:leading-tight max-md:tracking-[0.02em] lg:px-2 lg:text-sm"
               disabled={cart.length === 0}
               onClick={() => p.onStep("adjust")}
             >
-              Next: Adjustments <ChevronRight className="h-5 w-5 shrink-0 lg:hidden" />
+              Next: Adjustments <ChevronRight className="h-5 w-5 shrink-0 max-md:h-[18px] max-md:w-[18px] lg:hidden" />
             </Button>
           )}
           {step === "adjust" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
+              className="h-14 w-full min-w-0 px-3 text-base max-md:gap-1.5 max-md:px-2 max-md:text-[14px] max-md:whitespace-normal max-md:leading-tight max-md:tracking-[0.02em] lg:px-2 lg:text-sm"
               onClick={() => p.onStep("name")}
             >
-              Next: Name <ChevronRight className="h-5 w-5 shrink-0 lg:hidden" />
+              Next: Name <ChevronRight className="h-5 w-5 shrink-0 max-md:h-[18px] max-md:w-[18px] lg:hidden" />
             </Button>
           )}
           {step === "name" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
+              className="h-14 w-full min-w-0 px-3 text-base max-md:gap-1.5 max-md:px-2 max-md:text-[14px] max-md:whitespace-normal max-md:leading-tight max-md:tracking-[0.02em] lg:px-2 lg:text-sm"
               onClick={() => p.onStep("payment")}
             >
-              Next: Payment <ChevronRight className="h-5 w-5 shrink-0 lg:hidden" />
+              Next: Payment <ChevronRight className="h-5 w-5 shrink-0 max-md:h-[18px] max-md:w-[18px] lg:hidden" />
             </Button>
           )}
           {step === "payment" && (
             <Button
               size="lg"
-              className="h-14 w-full min-w-0 px-3 text-base lg:px-2 lg:text-sm"
+              className="h-14 w-full min-w-0 px-3 text-base max-md:gap-1.5 max-md:px-2 max-md:text-[14px] max-md:whitespace-normal max-md:leading-tight max-md:tracking-[0.02em] lg:px-2 lg:text-sm"
               onClick={p.onSubmit}
             >
-              <Check className="h-5 w-5 shrink-0 lg:hidden" /> Confirm order
+              <Check className="h-5 w-5 shrink-0 max-md:h-[18px] max-md:w-[18px] lg:hidden" /> Confirm order
             </Button>
           )}
         </div>
@@ -248,7 +248,7 @@ function StepBar({
   onStep: (s: Step) => void;
 }) {
   return (
-    <ol className="sticky top-0 z-10 flex gap-1 rounded-t-2xl border-b border-cream-200 bg-white p-1.5">
+    <ol className="sticky top-0 z-10 flex gap-1 rounded-t-2xl border-b border-cream-200 bg-white p-1.5 max-md:gap-px max-md:px-0.5">
       {STEPS.map((s, i) => {
         const active = s.id === step;
         // A check means the step holds real input — not that it was viewed.
@@ -260,7 +260,7 @@ function StepBar({
               onClick={() => onStep(s.id)}
               aria-current={active ? "step" : undefined}
               className={cn(
-                "t-display flex min-h-12 w-full flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl px-1.5 text-[11px] transition-colors lg:tracking-[0.02em]",
+                "t-display flex min-h-12 w-full flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl px-1.5 text-[11px] transition-colors max-md:px-0.5 max-md:text-[10px] max-md:tracking-[0.02em] max-[399px]:text-[9px] max-[399px]:tracking-normal lg:tracking-[0.02em]",
                 active
                   ? "bg-matcha-500 text-white"
                   : "text-matcha-900 hover:bg-cream-100",

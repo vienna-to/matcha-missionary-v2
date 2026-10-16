@@ -1,4 +1,4 @@
-import { expect, test as base, type Page } from "@playwright/test";
+import { expect, test as base, type Locator, type Page } from "@playwright/test";
 
 export const STATE_KEY = "matcha-missionary:state:v1";
 
@@ -32,6 +32,16 @@ export function autoAcceptDialogs(page: Page, log: string[] = []) {
   return log;
 }
 
+/** Field() renders <Label> and the control as siblings with no htmlFor, so
+ *  getByLabel can't see them (a11y note in REPORT.md). Find the control by its label text. */
+export function field(scope: Locator | Page, label: string | RegExp): Locator {
+  return scope
+    .locator('div[class~="space-y-1.5"]')
+    .filter({ hasText: label })
+    .locator("input, select, textarea")
+    .first();
+}
+
 export async function openApp(page: Page, query = "") {
   await page.goto("/" + query);
   await expect(page.getByRole("heading", { name: "Live Orders" })).toBeVisible();
@@ -51,17 +61,18 @@ export async function createEvent(
   opts: { name: string; type?: "standard" | "contract"; client?: string; payout?: number; cup?: number; donation?: number } = { name: "QA Event" },
 ) {
   await page.getByRole("button", { name: /new event/i }).first().click();
-  const dlg = page.getByRole("dialog");
+  // Modal has no role=dialog (a11y note in REPORT.md), so find it by its heading.
+  const dlg = page.locator("div.fixed.inset-0", { has: page.getByRole("heading", { name: "New event" }) });
   await expect(dlg).toBeVisible();
   if (opts.type === "contract") {
-    await dlg.getByLabel("Event type").selectOption("contract");
-    await dlg.getByLabel("Client name").fill(opts.client ?? "Acme");
-    await dlg.getByLabel(/Contracted payout/).fill(String(opts.payout ?? 500));
+    await field(dlg, "Event type").selectOption("contract");
+    await field(dlg, "Client name").fill(opts.client ?? "Acme");
+    await field(dlg, /Contracted payout/).fill(String(opts.payout ?? 500));
   } else if (opts.donation) {
-    await dlg.getByLabel(/Donation/).fill(String(opts.donation));
+    await field(dlg, /Donation/).fill(String(opts.donation));
   }
-  if (opts.cup) await dlg.getByLabel("Cup size (oz)").fill(String(opts.cup));
-  await dlg.getByLabel("Event name").fill(opts.name);
+  if (opts.cup) await field(dlg, "Cup size (oz)").fill(String(opts.cup));
+  await field(dlg, "Event name").fill(opts.name);
   await dlg.getByRole("button", { name: "Create event" }).click();
   await expect(dlg).toBeHidden();
 }

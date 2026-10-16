@@ -65,6 +65,29 @@ test.describe("5.5 helper mode", () => {
     await expect(page.getByText("Helper").first()).toBeVisible();
   });
 
+  test("fresh helper-link join in a brand-new browser context (local adapter only: owner's event is NOT shared)", async ({ browser, page }) => {
+    // The owner creates an event in their context...
+    await openApp(page);
+    await createEvent(page, { name: "Owner Event" });
+    // ...a helper opens the share link on another device (new context = empty storage).
+    const helperCtx = await browser.newContext();
+    const blocked: string[] = [];
+    await helperCtx.route(/supabase\.(co|in)|ycctyfibtbrtwhoqqyfm/, (r) => {
+      blocked.push(r.request().url());
+      return r.abort();
+    });
+    const hp = await helperCtx.newPage();
+    await hp.goto("/?workspace=MATCHA-DEMO42&helper=1");
+    await expect(hp.getByRole("heading", { name: "Live Orders" })).toBeVisible();
+    await expect(hp.locator("aside nav").getByRole("button", { name: "Finance" })).toHaveCount(0);
+    // Documented limitation: without Supabase there is no workspace to join, so the helper
+    // lands on its own seed data and cannot see "Owner Event". The Supabase join path
+    // (?workspace=CODE auto-pairing) could not be tested here (see REPORT.md).
+    await expect(hp.locator("aside").getByText("Owner Event")).toHaveCount(0);
+    expect(blocked).toEqual([]);
+    await helperCtx.close();
+  });
+
   test("exiting helper mode needs the workspace code", async ({ page }) => {
     await page.goto("/?helper=1");
     await page.locator("aside").getByRole("button", { name: "Settings" }).click();

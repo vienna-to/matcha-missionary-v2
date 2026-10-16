@@ -39,8 +39,7 @@ test.describe("5.5 mid-event menu changes", () => {
     expect(after).toBeCloseTo(2.2342 + 1.431, 3);
   });
 
-  test("editing an order after a price change keeps the price it was sold at", async ({ page }) => {
-    test.fail(true, "BUG-QA-1: Edit Order re-derives every line from the event's frozen snapshot, overwriting priceSnap/costSnap stamped at sale time");
+  test("BUG-QA-1 (fixed): editing an order after a price change keeps the price it was sold at", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
     await createEvent(page, { name: "EditPrice" });
@@ -56,8 +55,7 @@ test.describe("5.5 mid-event menu changes", () => {
     expect((await eventOrders(page, "EditPrice")).orders[0].items[0].priceSnap).toBe(8);
   });
 
-  test("a menu item added after the event was created survives an order edit", async ({ page }) => {
-    test.fail(true, "BUG-QA-1b: an item missing from the event snapshot becomes '$0 Unknown item' when its order is edited");
+  test("BUG-QA-1b (fixed): a menu item added after the event was created survives an order edit", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
     await createEvent(page, { name: "NewItem" });

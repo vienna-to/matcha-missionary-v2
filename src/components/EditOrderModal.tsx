@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Minus, Trash2, Sliders, X } from "lucide-react";
 import {
   Button,
@@ -12,7 +12,7 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
-import { useDispatch } from "@/lib/store";
+import { useDispatch, useStore } from "@/lib/store";
 import {
   COMBO_PRICE,
   type FreeReason,
@@ -56,7 +56,7 @@ type DraftItem = {
 
 export default function EditOrderModal({
   order,
-  snapshot,
+  snapshot: eventSnapshot,
   onClose,
 }: {
   order: Order;
@@ -64,6 +64,24 @@ export default function EditOrderModal({
   onClose: () => void;
 }) {
   const dispatch = useDispatch();
+  const { state } = useStore();
+  // Live Orders sells from the master menu, so a line can reference an item added
+  // after the event snapshot was taken. Fall back to the master menu for those
+  // (same rule as the reducer) so the line is shown and priced, not dropped.
+  const snapshot = useMemo<MenuSnapshot>(
+    () => ({
+      ...eventSnapshot,
+      menuItems: [
+        ...eventSnapshot.menuItems,
+        ...state.menuItems.filter((m) => !eventSnapshot.menuItems.some((s) => s.id === m.id)),
+      ],
+      ingredients: [
+        ...eventSnapshot.ingredients,
+        ...state.ingredients.filter((i) => !eventSnapshot.ingredients.some((s) => s.id === i.id)),
+      ],
+    }),
+    [eventSnapshot, state.menuItems, state.ingredients],
+  );
   const [helperMode] = useHelperMode();
   const [name, setName] = useState(order.customerName);
   const [notes, setNotes] = useState(order.notes ?? "");
@@ -100,9 +118,12 @@ export default function EditOrderModal({
   // discount. Recomputes on every keystroke in the DiscountRow / qty stepper.
   const { total, totalGross } = items.reduce(
     (acc, it) => {
+      // An existing line keeps the price it was sold at; only new lines use the menu.
       const unit = it.isCombo
         ? COMBO_PRICE
-        : snapshot.menuItems.find((m) => m.id === it.menuItemId)?.price ?? 0;
+        : order.items.find((o) => o.id === it.id)?.priceSnap ??
+          snapshot.menuItems.find((m) => m.id === it.menuItemId)?.price ??
+          0;
       acc.total += chargedUnitFromPct(unit, it.discountPct) * it.quantity;
       acc.totalGross += unit * it.quantity;
       return acc;
@@ -184,6 +205,8 @@ export default function EditOrderModal({
       type: "REPLACE_ORDER_ITEMS",
       orderId: order.id,
       items: items.map((it) => ({
+        // Existing lines keep their sale-time price and cost; new ones are tmp ids.
+        sourceItemId: order.items.some((o) => o.id === it.id) ? it.id : undefined,
         menuItemId: it.menuItemId,
         quantity: it.quantity,
         milkChoiceId: it.milkChoiceId,
@@ -239,6 +262,7 @@ export default function EditOrderModal({
                   key={it.id}
                   item={it}
                   snapshot={snapshot}
+                  stampedUnit={order.items.find((o) => o.id === it.id)?.priceSnap}
                   onEdit={() => setEditingItemId(it.id)}
                   onRemove={() => removeItem(it.id)}
                   onIncrement={(d) => updateItem(it.id, { quantity: Math.max(1, it.quantity + d) })}
@@ -343,6 +367,7 @@ export default function EditOrderModal({
 function DraftItemRow({
   item,
   snapshot,
+  stampedUnit,
   onEdit,
   onRemove,
   onIncrement,
@@ -352,6 +377,8 @@ function DraftItemRow({
 }: {
   item: DraftItem;
   snapshot: MenuSnapshot;
+  /** Price this line was sold at, when it already exists on the order. */
+  stampedUnit?: number;
   onEdit: () => void;
   onRemove: () => void;
   onIncrement: (d: number) => void;
@@ -390,7 +417,7 @@ function DraftItemRow({
   const displayName = item.isCombo
     ? `Combo: ${mi.name} + ${pastry?.name ?? "?"}`
     : mi.name;
-  const unitPrice = item.isCombo ? COMBO_PRICE : mi.price;
+  const unitPrice = item.isCombo ? COMBO_PRICE : stampedUnit ?? mi.price;
   const pct = item.discountPct ?? 0;
 
   return (

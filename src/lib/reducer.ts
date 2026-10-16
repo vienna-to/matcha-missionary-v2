@@ -57,6 +57,9 @@ export type Action =
       orderId: string;
       items: (Omit<OrderItem, "id" | "orderId" | "priceSnap" | "listPrice" | "priceCharged" | "costSnap" | "menuItemNameSnap" | "status"> & {
         status?: OrderItemStatus;
+        /** Id of the existing order line this draft came from. Lets the reducer
+         *  keep the price and cost stamped at sale time instead of re-pricing. */
+        sourceItemId?: string;
       })[];
     }
   | {
@@ -490,11 +493,51 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!order) return state;
       const evt = findEvent(state, order.eventId);
       if (!evt) return state;
-      const snap = findSnapshot(state, evt.menuSnapshotId);
-      if (!snap) return state;
-      const items: OrderItem[] = action.items.map((raw) =>
-        deriveOrderItem(raw, order.id, snap, evt.cupSizeOz),
-      );
+      const eventSnap = findSnapshot(state, evt.menuSnapshotId);
+      if (!eventSnap) return state;
+      // Live Orders sells from the master menu, so an item added after the event
+      // was created is missing from the event snapshot. Fall back to the master
+      // menu for those, or a plain edit would turn them into "$0 Unknown item".
+      const snap: MenuSnapshot = {
+        ...eventSnap,
+        menuItems: [
+          ...eventSnap.menuItems,
+          ...state.menuItems.filter((m) => !eventSnap.menuItems.some((s) => s.id === m.id)),
+        ],
+        ingredients: [
+          ...eventSnap.ingredients,
+          ...state.ingredients.filter((i) => !eventSnap.ingredients.some((s) => s.id === i.id)),
+        ],
+      };
+      const items: OrderItem[] = action.items.map((raw) => {
+        const { sourceItemId, ...rawItem } = raw;
+        const derived = deriveOrderItem(rawItem, order.id, snap, evt.cupSizeOz);
+        const prev = sourceItemId ? order.items.find((i) => i.id === sourceItemId) : undefined;
+        // Keep what was stamped at sale time when the line is the same product
+        // with the same cost-affecting choices. Quantity, discount, notes and
+        // status changes must not re-price the line.
+        const same =
+          prev &&
+          prev.menuItemId === derived.menuItemId &&
+          Boolean(prev.isCombo) === Boolean(derived.isCombo) &&
+          prev.comboPastryId === derived.comboPastryId &&
+          prev.milkChoiceId === derived.milkChoiceId &&
+          prev.creamChoiceId === derived.creamChoiceId;
+        if (!same) return derived;
+        return {
+          ...derived,
+          menuItemNameSnap: prev.menuItemNameSnap,
+          priceSnap: prev.priceSnap,
+          costSnap: prev.costSnap,
+          ...priceFields(prev.listPrice ?? prev.priceSnap, rawItem),
+          ...(prev.isCombo
+            ? {
+                comboPastryNameSnap: prev.comboPastryNameSnap,
+                comboPastryCostSnap: prev.comboPastryCostSnap,
+              }
+            : {}),
+        };
+      });
       return {
         ...state,
         orders: state.orders.map((o) =>

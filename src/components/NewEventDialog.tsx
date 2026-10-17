@@ -213,10 +213,11 @@ export default function NewEventDialog({
           )}
         </div>
         <p className="text-xs text-matcha-900/60">
-          Menu is cloned from your current master menu. Edits to the master menu after this
-          won&apos;t affect this event.
+          Orders use your current menu, so a price, recipe or availability change during the
+          event applies to orders taken after the change. Orders already placed keep the price
+          and cost they were sold at.
           {isContract
-            ? " Contract events use a fixed payout — enter cups sold per drink type after the event on Event Summary."
+            ? " Contract events use a fixed payout. Enter cups sold per drink type after the event on Event Summary, which uses the menu saved when the event was created."
             : ""}
         </p>
         <div className="flex justify-end gap-2 pt-2">

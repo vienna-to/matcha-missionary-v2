@@ -246,8 +246,9 @@ export default function SettingsTab() {
       <Card className="space-y-4">
         <h2 className="t-display text-sm">Events</h2>
         <p className="text-xs text-matcha-900/60">
-          Create a new event each pop-up day. The current master menu is cloned into the
-          new event as a frozen snapshot.
+          Create a new event each pop-up day. Orders use the current menu, so menu edits
+          apply to new orders right away. Orders already placed keep the price and cost they
+          were sold at.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => setNewEventOpen(true)}>

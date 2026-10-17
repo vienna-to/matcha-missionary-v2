@@ -59,7 +59,7 @@ export default function MenuManager() {
         <div>
           <h1 className="t-display text-xl">Menu</h1>
           <p className="t-caption mt-1 text-sm text-matcha-900/60">
-            master menu and ingredients. future events copy a snapshot at creation time.
+            master menu and ingredients. changes apply to orders taken from now on; orders already placed keep the price and cost they were sold at.
           </p>
         </div>
         <div className="flex gap-1.5 rounded-xl bg-cream-100 p-1 max-md:[&>button]:min-w-0 max-md:[&>button]:flex-1 max-md:[&>button]:px-2 max-[380px]:[&>button]:text-xs">

@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, Download, Pencil, Target, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, Pencil, Play, Target, Trash2 } from "lucide-react";
 import { Badge, Button, Card, EmptyState, Select } from "@/components/ui";
 import { useActiveEvent, useStore } from "@/lib/store";
 import { computeCollected, computeEventTotals, expandCombosInByItem } from "@/lib/calc";
@@ -228,6 +228,18 @@ export default function EventSummary() {
               </option>
             ))}
           </Select>
+          {event.isActive ? null : (
+            // Only one event is active at a time (Live Orders and the Barista Queue
+            // follow it). This is how an earlier event is resumed after a newer one
+            // was created, or after the active one was deleted.
+            <Button
+              size="sm"
+              onClick={() => dispatch({ type: "SET_ACTIVE_EVENT", id: event.id })}
+              className="max-md:col-span-2 max-md:h-auto max-md:min-h-10 max-md:py-1.5"
+            >
+              <Play className="h-3.5 w-3.5" /> Make active
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={handleExport} className="max-md:h-auto max-md:min-h-10 max-md:whitespace-normal max-md:py-1.5 max-md:leading-tight">
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>

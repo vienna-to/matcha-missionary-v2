@@ -166,13 +166,41 @@ test.describe("5.5 concurrency and persistence (local adapter: tabs share localS
 });
 
 test.describe("5.5 active event handling and empty states", () => {
-  test("a previously active event can be made active again", async ({ page }) => {
-    test.fail(true, "BUG-QA-6: no UI dispatches SET_ACTIVE_EVENT; once a newer event exists the old one can never be resumed");
+  test("a previously active event can be made active again (QA-6, fixed)", async ({ page }) => {
     await openApp(page);
     await createEvent(page, { name: "First" });
     await createEvent(page, { name: "Second" });
     await goTab(page, "Event Summary");
-    await expect(page.getByRole("button", { name: /make active|set active|activate|resume/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Make active" })).toHaveCount(0); // Second is active
+    const value = await page.locator("main select option", { hasText: /^First/ }).first().getAttribute("value");
+    await page.locator("main select").first().selectOption(value!);
+    await page.getByRole("button", { name: "Make active" }).click();
+    await expect(page.getByRole("button", { name: "Make active" })).toHaveCount(0);
+    const st = await readState(page);
+    expect(st.events.filter((e: { isActive: boolean }) => e.isActive).map((e: { name: string }) => e.name)).toEqual(["First"]);
+    // orders now go to First
+    await goTab(page, "Live Orders");
+    await placeOrder(page, { items: [{ name: "Classic Matcha" }], name: "Back", pay: "Cash" });
+    expect((await eventOrders(page, "First")).orders).toHaveLength(1);
+    expect((await eventOrders(page, "Second")).orders).toHaveLength(0);
+  });
+
+  test("after deleting the active event, an earlier one can be resumed", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    await createEvent(page, { name: "Early" });
+    await createEvent(page, { name: "Late" });
+    await goTab(page, "Event Summary");
+    await page.getByRole("button", { name: "Delete event" }).click(); // deletes Late (active)
+    await goTab(page, "Live Orders");
+    await expect(page.getByText("No active event")).toBeVisible();
+    await goTab(page, "Event Summary");
+    await page.getByRole("button", { name: "Make active" }).click();
+    await goTab(page, "Live Orders");
+    await expect(page.getByRole("heading", { name: "Live Orders" })).toBeVisible();
+    await expect(page.getByText("No active event")).toHaveCount(0);
+    await placeOrder(page, { items: [{ name: "Classic Matcha" }], name: "Resumed", pay: "Cash" });
+    expect((await eventOrders(page, "Early")).orders).toHaveLength(1);
   });
 
   test("brand-new event with zero orders: every screen shows clean zeros, no NaN", async ({ page }) => {

@@ -8,6 +8,7 @@ test.describe("5.1 required fields and validation", () => {
     const dlg = modal(page, "New event");
     const create = dlg.getByRole("button", { name: "Create event" });
     await expect(create).toBeEnabled();
+    await expect(dlg).toContainText("Orders already placed keep the price and cost they were sold at."); // QA-5 copy
     await field(dlg, "Cup size (oz)").fill("0");
     await expect(create).toBeDisabled();
     await field(dlg, "Cup size (oz)").fill("16");

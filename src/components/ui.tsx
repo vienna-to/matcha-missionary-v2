@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useState } from "react";
+import { cloneElement, forwardRef, isValidElement, useId, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export const Button = forwardRef<
@@ -222,6 +222,8 @@ export function Label({
   );
 }
 
+const LABELABLE = new Set<unknown>(["input", "select", "textarea"]);
+
 export function Field({
   label,
   children,
@@ -233,10 +235,19 @@ export function Field({
   hint?: string;
   className?: string;
 }) {
+  // Tie the label to its control so screen readers announce it and tapping the
+  // label focuses the field. Only done for the form controls below, and never
+  // overrides an id the caller already set.
+  const autoId = useId();
+  const control =
+    isValidElement<{ id?: string }>(children) && LABELABLE.has(children.type as never)
+      ? children
+      : null;
+  const controlId = control ? (control.props.id ?? autoId) : undefined;
   return (
     <div className={cn("space-y-1.5", className)}>
-      <Label>{label}</Label>
-      {children}
+      <Label htmlFor={controlId}>{label}</Label>
+      {control && !control.props.id ? cloneElement(control, { id: autoId }) : children}
       {hint ? <p className="t-caption text-xs text-matcha-900/50">{hint}</p> : null}
     </div>
   );
@@ -311,11 +322,14 @@ export function Sheet({
   open,
   onClose,
   side = "right",
+  label = "Panel",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   side?: "right" | "bottom";
+  /** Accessible name announced for the panel. */
+  label?: string;
   children: React.ReactNode;
 }) {
   if (!open) return null;
@@ -330,6 +344,9 @@ export function Sheet({
     >
       <div className="absolute inset-0 bg-black/30" />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
         onClick={(e) => e.stopPropagation()}
         className={cn(
           "relative z-10 overflow-y-auto bg-white shadow-xl",
@@ -355,6 +372,7 @@ export function Modal({
   children: React.ReactNode;
   title?: string;
 }) {
+  const titleId = useId();
   if (!open) return null;
   return (
     <div
@@ -363,11 +381,14 @@ export function Modal({
     >
       <div className="absolute inset-0 bg-black/30" />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
         onClick={(e) => e.stopPropagation()}
         className="relative z-10 w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl max-h-[90vh]"
       >
         {title ? (
-          <h3 className="t-display mb-4 text-lg">{title}</h3>
+          <h3 id={titleId} className="t-display mb-4 text-lg">{title}</h3>
         ) : null}
         {children}
       </div>
@@ -394,3 +415,11 @@ export function EmptyState({
     </div>
   );
 }
+
+// Components whose props reach a native input / select / textarea, so Field can
+// give them an id. (Registered here because Field is declared above them.)
+LABELABLE.add(Input);
+LABELABLE.add(NumberField);
+LABELABLE.add(TextField);
+LABELABLE.add(Textarea);
+LABELABLE.add(Select);

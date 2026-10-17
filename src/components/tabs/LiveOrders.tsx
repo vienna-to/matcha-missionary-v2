@@ -314,7 +314,7 @@ export default function LiveOrders() {
               <span className="tabular-nums">{formatMoney(total)} →</span>
             </button>
           ) : null}
-          <Sheet open={sheetOpen} onClose={() => setSheetOpen(false)} side="bottom">
+          <Sheet open={sheetOpen} onClose={() => setSheetOpen(false)} side="bottom" label="Current order">
             <div className="p-3">
               <div className="mb-2 flex items-center justify-between px-1">
                 <h3 className="t-display text-base">Order</h3>

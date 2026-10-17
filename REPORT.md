@@ -112,3 +112,49 @@ The helper link's `?workspace=CODE` auto-join, cross-device sync and `submit_ord
 
 ## Running it
 `npx playwright test` builds once with blank Supabase env and serves on port 3101. `E2E_REBUILD=1 npx playwright test` after changing app code. Needs system Google Chrome (no browser download).
+
+
+---
+
+# Follow-up pass (FIXES.md)
+
+Same branch, one commit per fix, nothing pushed or deployed. Final state: `npx playwright test` **37 passed, 0 expected-fails**; `npx vitest run` **90 passed** (80 before, +10); typecheck, lint and `next build` pass.
+
+| # | Item | Result | Verified in |
+|---|---|---|---|
+| 1 | Do the a9ee96a fixes cover Supabase mode? | **Yes, no second code path** | Supabase path by unit test against the real writer with a recording fake client; local by e2e |
+| 2 | "Make active" button | Done | Local e2e; Supabase path by code reading (see below) |
+| 3 | Event time validation | Done (all submit paths) | Unit + local e2e; Supabase mirror guarded |
+| 4 | Stable order numbers | Done | Unit + local e2e; Supabase by code reading |
+| 5 | Menu-edit copy | Done | Local e2e |
+| 6 | Accessibility markup | Done, low risk | Local e2e |
+| 7 | Untested Supabase paths | **Not done: no Docker** | n/a |
+
+## 1. Supabase edit path (verified, no change needed beyond a9ee96a)
+In `store.tsx` the Supabase `dispatch` applies the same reducer locally (`baseDispatch(a)`), then for `REPLACE_ORDER_ITEMS` reads the resulting order back from state and calls `writer.replaceOrderItems(orderId, order.items)` (delete + insert). There is no separate Supabase edit logic, so the reducer fix is what reaches the database. `order_items.menu_item_id` is plain text (no foreign key to the snapshot), so mid-event items insert fine, and the `tg_order_items_prices` trigger derives `price_charged` from the kept `price_snap`.
+New `src/lib/__tests__/supabase-edit-path.test.ts` runs reducer then the real `writer.replaceOrderItems` against a recording fake client and checks the inserted rows: a price change after the event leaves `price_snap`/`list_price`/`price_charged`/`cost_snap` at their sale-time values, and an item added after the event is written with its real name and price, not `Unknown item` / 0.
+Not covered: a live database round trip (needs local Supabase, item 7).
+
+## 2. Make active
+`EventSummary.tsx` standard-event header shows a **Make active** button when the selected event is not active (also works after deleting the active event). It dispatches the existing `SET_ACTIVE_EVENT`. Supabase: the store already mirrors it with `writer.setActiveEvent`, and `schema.sql` has the `tg_events_single_active` trigger that deactivates the others, so other devices follow via the normal realtime event updates. Contract events do not take orders, so they get no button (a contract event created later still deactivates the live one; use the button on the standard event to go back). Tests: resume after creating a second event, resume after deleting the active one.
+
+## 3. Event times
+New `src/lib/event-times.ts` (`validateEventTimes`): end must be after start (equal is rejected). Enforced in: New event dialog (inline red message plus disabled Create), Log past event dialog, `buildQuickAddEvent` (throws, shown by the dialog's existing error handling), reducer `CREATE_EVENT` and `UPDATE_EVENT` (ignored if invalid), and the Supabase mirror in `store.tsx` (skips the write so a rejected create cannot re-write the previous event). Overnight events are no longer possible; that was your call.
+
+## 4. Stable order numbers
+`DELETE_ORDER` now only removes the order. The reducer's renumbering and the Supabase mirror's per-order `updateOrder(orderNumber)` writes are removed (dead `renumberAfterDelete` deleted). New orders use highest number + 1 locally and `max(order_number) + 1` in `submit_order`, so deleting the highest-numbered order frees that number for the next order. Say if you would rather never reuse numbers; that needs a per-event counter column in Supabase.
+
+## 5. Copy
+New event dialog, Menu Manager header and Settings now say orders use the current menu, changes apply to orders taken afterwards, and placed orders keep the price and cost they were sold at (contract events: results use the menu saved at creation).
+
+## 6. Accessibility
+`ui.tsx`: `Modal` and `Sheet` get `role="dialog"`, `aria-modal`, and an accessible name (title / "Current order"); `Field` ties its label to Input, NumberField, TextField, Textarea and Select via `htmlFor`/`id` (never overrides an existing id, leaves other children alone). No layout or behaviour change. Not done on purpose: Escape-to-close and focus trapping, because nested modals (Edit Order inside Customize Item) could close together; recommend as a separate change.
+
+## 7. Supabase paths: not done
+Docker is not installed on this machine (`docker`, `podman`, Docker Desktop all absent), so no local Supabase. Still untested: `submit_order` RPC and retry, workspace pairing, helper-link `?workspace=` auto-join, realtime sync between devices, and the edit/delete audit trail (`order_revisions`). Install Docker Desktop and run `supabase start`, apply `supabase/schema.sql` then the `migration-*.sql` files in the order listed in earlier notes, and I can run the suite against it.
+
+## Left undone / notes
+- Item 7 above.
+- Escape/focus handling for dialogs (see 6).
+- Order numbers can be reused after deleting the newest order (see 4).
+- Commits since the first report: `Test: Supabase-mode edit path`, `Make active`, `Reject events whose end time...`, `Deleting an order no longer renumbers`, `Menu-edit copy`, `Accessibility`, plus this report.

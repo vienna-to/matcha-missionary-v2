@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Field, Input, Modal, NumberField, Select } from "@/components/ui";
 import { useStore } from "@/lib/store";
+import { validateEventTimes } from "@/lib/event-times";
 import { DEFAULT_CUP_OZ, type EventType } from "@/lib/types";
 
 function todayLocal(): string {
@@ -37,12 +38,14 @@ export default function NewEventDialog({
   const [admissionCharged, setAdmissionCharged] = useState<"" | "yes" | "no">("");
 
   const isContract = eventType === "contract";
+  const timeError = validateEventTimes(startTime, endTime);
   const placeholder = `Pop-Up ${date}`;
   const submittable =
     date.length === 10 &&
     startTime &&
     endTime &&
     cupSizeOz > 0 &&
+    !timeError &&
     (!isContract || (clientName.trim().length > 0 && contractPayout > 0));
 
   function reset() {
@@ -61,7 +64,7 @@ export default function NewEventDialog({
   }
 
   function save() {
-    if (!submittable) return;
+    if (!submittable || timeError) return;
     const goal = Number(targetRevenue);
     const donate = Number(donationPct);
     dispatch({
@@ -132,6 +135,11 @@ export default function NewEventDialog({
           <Field label="End time">
             <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
           </Field>
+          {timeError ? (
+            <p role="alert" className="col-span-2 text-sm font-semibold text-red-700">
+              {timeError}
+            </p>
+          ) : null}
           <Field label="City" hint="Used only for tax reports.">
             <Input
               value={city}

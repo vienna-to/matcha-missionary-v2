@@ -1,5 +1,6 @@
 "use client";
 
+import { validateEventTimes } from "@/lib/event-times";
 import {
   createContext,
   useCallback,
@@ -692,6 +693,8 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           w.deleteMenuItem(a.id);
           break;
         case "CREATE_EVENT":
+          // The reducer rejects bad times; don't re-write the previous event.
+          if (validateEventTimes(a.event.startTime, a.event.endTime)) break;
           setTimeout(() => {
             const latestEvt = stateRef.current.events.at(-1);
             const latestSnap = stateRef.current.menuSnapshots.at(-1);
@@ -699,6 +702,14 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           }, 0);
           break;
         case "UPDATE_EVENT":
+          if (
+            (a.patch.startTime || a.patch.endTime) &&
+            validateEventTimes(
+              a.patch.startTime ?? stateRef.current.events.find((e) => e.id === a.id)?.startTime,
+              a.patch.endTime ?? stateRef.current.events.find((e) => e.id === a.id)?.endTime,
+            )
+          )
+            break;
           w.updateEvent(a.id, a.patch);
           break;
         case "DELETE_EVENT":

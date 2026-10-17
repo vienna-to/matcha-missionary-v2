@@ -19,13 +19,28 @@ test.describe("5.1 required fields and validation", () => {
     await expect(create).toBeEnabled();
   });
 
-  test("event end time before start time is accepted (overnight events are plausible; see REPORT.md)", async ({ page }) => {
+  test("event end time before (or equal to) start time is rejected with a clear message (QA-3, fixed)", async ({ page }) => {
     await openApp(page);
     await page.getByRole("button", { name: /new event/i }).first().click();
     const dlg = modal(page, "New event");
     await field(dlg, "Start time").fill("16:00");
     await field(dlg, "End time").fill("09:00");
-    await expect(dlg.getByRole("button", { name: "Create event" })).toBeEnabled(); // no validation today
+    await expect(dlg.getByText("End time must be after the start time.")).toBeVisible();
+    await expect(dlg.getByRole("button", { name: "Create event" })).toBeDisabled();
+    await field(dlg, "End time").fill("16:00"); // equal is also rejected
+    await expect(dlg.getByRole("button", { name: "Create event" })).toBeDisabled();
+    await field(dlg, "End time").fill("17:00");
+    await expect(dlg.getByText("End time must be after the start time.")).toHaveCount(0);
+    await expect(dlg.getByRole("button", { name: "Create event" })).toBeEnabled();
+  });
+
+  test("log-past-event dialog also rejects an inverted time window", async ({ page }) => {
+    await openApp(page);
+    await page.getByRole("button", { name: /log past event/i }).click();
+    const dlg = page.locator("div.fixed.inset-0").filter({ has: page.locator("h3") }).last();
+    await field(dlg, "start time").fill("18:00");
+    await field(dlg, "end time").fill("10:00");
+    await expect(dlg.getByText("End time must be after the start time.")).toBeVisible();
   });
 
   test("order cannot be confirmed without an item or without a payment method", async ({ page }) => {

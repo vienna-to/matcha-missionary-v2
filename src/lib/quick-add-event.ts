@@ -1,4 +1,5 @@
 import { computeItemCost } from "./calc";
+import { validateEventTimes } from "./event-times";
 import { newId } from "./id";
 import type {
   AppState,
@@ -56,6 +57,8 @@ export function buildQuickAddEvent({
   city?: string;
   admissionCharged?: boolean;
 }): { event: Event; snapshot: MenuSnapshot; orders: Order[] } {
+  const timeError = validateEventTimes(startTime, endTime);
+  if (timeError) throw new Error(timeError);
   const now = new Date().toISOString();
 
   // Snapshot the entire current master menu (active + archived) — past events

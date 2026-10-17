@@ -1,3 +1,4 @@
+import { validateEventTimes } from "./event-times";
 import { computeItemCost } from "./calc";
 import { newId, nowIso } from "./id";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
@@ -391,6 +392,8 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case "CREATE_EVENT": {
+      // Safety net behind the forms: never store an event that ends before it starts.
+      if (validateEventTimes(action.event.startTime, action.event.endTime)) return state;
       // Snapshot the *current master menu* (deep copy) so further edits don't
       // mutate this event's frozen view.
       const snapshot: MenuSnapshot = {
@@ -423,13 +426,18 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
 
-    case "UPDATE_EVENT":
+    case "UPDATE_EVENT": {
+      const cur = state.events.find((e) => e.id === action.id);
+      const start = action.patch.startTime ?? cur?.startTime;
+      const end = action.patch.endTime ?? cur?.endTime;
+      if ((action.patch.startTime || action.patch.endTime) && validateEventTimes(start, end)) return state;
       return {
         ...state,
         events: state.events.map((e) =>
           e.id === action.id ? { ...e, ...action.patch, updatedAt: nowIso() } : e,
         ),
       };
+    }
 
     case "DELETE_EVENT": {
       const evt = findEvent(state, action.id);

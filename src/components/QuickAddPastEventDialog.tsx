@@ -11,6 +11,7 @@ import {
   Textarea,
 } from "@/components/ui";
 import { useStore } from "@/lib/store";
+import { validateEventTimes } from "@/lib/event-times";
 import { getClient } from "@/lib/supabase/client";
 import { buildQuickAddEvent } from "@/lib/quick-add-event";
 import {
@@ -71,8 +72,9 @@ export default function QuickAddPastEventDialog({
     0,
   );
 
+  const timeError = validateEventTimes(startTime, endTime);
   const valid =
-    name.trim().length > 0 && date.length === 10 && totalCups > 0;
+    name.trim().length > 0 && date.length === 10 && totalCups > 0 && !timeError;
 
   function reset() {
     setName("");
@@ -180,6 +182,11 @@ export default function QuickAddPastEventDialog({
           <Field label="end time">
             <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
           </Field>
+          {timeError ? (
+            <p role="alert" className="col-span-2 text-sm font-semibold text-red-700">
+              {timeError}
+            </p>
+          ) : null}
           <Field label="donation % (optional)" className="col-span-2" hint="for charity events — % of revenue donated">
             <NumberField
               min={0}

@@ -13,7 +13,7 @@ import {
 } from "react";
 import { initialSeed } from "./seed";
 import { normalizeItemPatch } from "./pricing";
-import { reducer, renumberAfterDelete, type Action } from "./reducer";
+import { reducer, type Action } from "./reducer";
 import { newId, nowIso } from "./id";
 import type {
   AppState,
@@ -744,13 +744,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           if (unsyncedRef.current.delete(a.id)) {
             setSyncStatus({ unsynced: unsyncedRef.current.size });
           }
-          // Use the pre-delete state to compute renumbering for the remaining
-          // siblings, then issue the writes after the delete completes.
-          const renumber = renumberAfterDelete(stateRef.current.orders, a.id);
           w.deleteOrder(a.id);
-          for (const r of renumber) {
-            w.updateOrder(r.id, { orderNumber: r.orderNumber });
-          }
           break;
         }
         case "REPLACE_ORDER_ITEMS":

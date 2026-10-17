@@ -254,43 +254,6 @@ function deriveOrderStatusFromItems(
   return "pending";
 }
 
-/** Reassign sequential 1..N order numbers to all remaining orders in an event
- *  (after a deletion). Caller is responsible for persisting the changes. */
-function renumberEventOrders(state: AppState, eventId: string): AppState {
-  const ordered = state.orders
-    .filter((o) => o.eventId === eventId)
-    .sort((a, b) => a.orderNumber - b.orderNumber);
-  const remap = new Map<string, number>();
-  ordered.forEach((o, idx) => {
-    if (o.orderNumber !== idx + 1) remap.set(o.id, idx + 1);
-  });
-  if (remap.size === 0) return state;
-  return {
-    ...state,
-    orders: state.orders.map((o) =>
-      remap.has(o.id) ? { ...o, orderNumber: remap.get(o.id)! } : o,
-    ),
-  };
-}
-
-/** Returns the renumbering map produced by deleting `deletedOrderId` from
- *  `eventId` — usable by the dispatch wrapper to mirror writes to Supabase. */
-export function renumberAfterDelete(
-  ordersBeforeDelete: Order[],
-  deletedOrderId: string,
-): Array<{ id: string; orderNumber: number }> {
-  const deleted = ordersBeforeDelete.find((o) => o.id === deletedOrderId);
-  if (!deleted) return [];
-  const remaining = ordersBeforeDelete
-    .filter((o) => o.eventId === deleted.eventId && o.id !== deletedOrderId)
-    .sort((a, b) => a.orderNumber - b.orderNumber);
-  const out: Array<{ id: string; orderNumber: number }> = [];
-  remaining.forEach((o, idx) => {
-    if (o.orderNumber !== idx + 1) out.push({ id: o.id, orderNumber: idx + 1 });
-  });
-  return out;
-}
-
 /**
  * Merge a server read of orders into local state. The server is authoritative
  * for every order inside `scopeEventId` (all events when undefined): orders it
@@ -588,12 +551,12 @@ export function reducer(state: AppState, action: Action): AppState {
         }),
       };
 
-    case "DELETE_ORDER": {
-      const deleted = state.orders.find((o) => o.id === action.id);
-      const filtered = { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
-      if (!deleted) return filtered;
-      return renumberEventOrders(filtered, deleted.eventId);
-    }
+    case "DELETE_ORDER":
+      // Remaining orders keep their numbers: a customer holding ticket #4 must
+      // still be #4 after #3 is removed. (Deleting the highest-numbered order
+      // frees that number for the next order, which is how the database's
+      // max(order_number) + 1 works too.)
+      return { ...state, orders: state.orders.filter((o) => o.id !== action.id) };
 
     case "ADD_INVENTORY_PURCHASE": {
       const purchase: InventoryPurchase = {

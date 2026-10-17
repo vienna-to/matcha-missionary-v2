@@ -125,7 +125,7 @@ test.describe("5.4 edit, delete, void", () => {
     await expect(page.locator("main").locator("dl > div").filter({ hasText: "Sales revenue" }).first()).toContainText("$26.60"); // 20.10 + 6.50
   });
 
-  test("deleting an order renumbers later orders (by design; see REPORT.md risk note)", async ({ page }) => {
+  test("deleting an order keeps the other orders' numbers (QA-4, fixed)", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
     await createEvent(page, { name: "Renumber" });
@@ -133,6 +133,6 @@ test.describe("5.4 edit, delete, void", () => {
     await goTab(page, "Barista Queue");
     await baristaCard(page, 2).getByTitle("Remove").click();
     const r = await eventOrders(page, "Renumber");
-    expect(r.orders.map((o: { orderNumber: number }) => o.orderNumber)).toEqual([1, 2]); // reducer.renumberEventOrders closes the gap on purpose
+    expect(r.orders.map((o: { orderNumber: number }) => o.orderNumber)).toEqual([1, 3]);
   });
 });

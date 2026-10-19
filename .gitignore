@@ -40,3 +40,8 @@ e2e/.artifacts/
 e2e/.results.json
 test-results/
 playwright-report/
+
+# Supabase-mode e2e build output
+.next-sb/
+e2e/.sb-artifacts/
+e2e/.sb-results.json

@@ -128,7 +128,7 @@ Same branch, one commit per fix, nothing pushed or deployed. Final state: `npx p
 | 4 | Stable order numbers | Done | Unit + local e2e; Supabase by code reading |
 | 5 | Menu-edit copy | Done | Local e2e |
 | 6 | Accessibility markup | Done, low risk | Local e2e |
-| 7 | Untested Supabase paths | **Not done: no Docker** | n/a |
+| 7 | Untested Supabase paths | **Partly done, see "Local Supabase pass" below** (Docker was installed afterwards) | Live local DB for pairing, helper link, order submission, item 1, audit trail; **Make active and realtime still unverified** |
 
 ## 1. Supabase edit path (verified, no change needed beyond a9ee96a)
 In `store.tsx` the Supabase `dispatch` applies the same reducer locally (`baseDispatch(a)`), then for `REPLACE_ORDER_ITEMS` reads the resulting order back from state and calls `writer.replaceOrderItems(orderId, order.items)` (delete + insert). There is no separate Supabase edit logic, so the reducer fix is what reaches the database. `order_items.menu_item_id` is plain text (no foreign key to the snapshot), so mid-event items insert fine, and the `tg_order_items_prices` trigger derives `price_charged` from the kept `price_snap`.
@@ -154,7 +154,41 @@ New event dialog, Menu Manager header and Settings now say orders use the curren
 Docker is not installed on this machine (`docker`, `podman`, Docker Desktop all absent), so no local Supabase. Still untested: `submit_order` RPC and retry, workspace pairing, helper-link `?workspace=` auto-join, realtime sync between devices, and the edit/delete audit trail (`order_revisions`). Install Docker Desktop and run `supabase start`, apply `supabase/schema.sql` then the `migration-*.sql` files in the order listed in earlier notes, and I can run the suite against it.
 
 ## Left undone / notes
-- Item 7 above.
+- Item 7 above (superseded in part by the Local Supabase pass below).
 - Escape/focus handling for dialogs (see 6).
 - Order numbers can be reused after deleting the newest order (see 4).
 - Commits since the first report: `Test: Supabase-mode edit path`, `Make active`, `Reject events whose end time...`, `Deleting an order no longer renumbers`, `Menu-edit copy`, `Accessibility`, plus this report.
+
+# Local Supabase pass
+
+Docker Desktop was installed afterwards, so the Supabase paths were run against a **local** Supabase (`supabase start`: API `http://127.0.0.1:54321`, database `127.0.0.1:54322`, containers `supabase_*_sbwork`). `schema.sql` and all 20 `migration-*.sql` files applied cleanly, in git-history order. The production project `ycctyfibtbrtwhoqqyfm` and the production deployment were never contacted: the server script (`e2e/serve-supabase.mjs`) refuses any URL that is not localhost, and the browser guard in `e2e/supabase/sb.ts` aborts and fails a test on any request to a hosted Supabase host. Nothing pushed or deployed.
+
+## Results
+
+| Area | Result | Spec |
+|---|---|---|
+| Isolation (app talks only to `127.0.0.1:54321`) | **Verified** | `10-pairing-order` |
+| Workspace pairing: create, remembered on reload, join from a second device, unknown code rejected, duplicate code rejected, bad `?workspace=` link lands on join with an error | **Verified** (6 tests) | `10-pairing-order` |
+| Helper link `?workspace=CODE&helper=1`: auto-joins, params stripped, restricted tabs, pairing saved | **Verified** | `10-pairing-order` |
+| Order submission through the `submit_order` RPC: order, items, snapshots, numbering 1 then 2 | **Verified** | `10-pairing-order` |
+| **Item 1**: edit a placed order after a price change (note-only edit, then quantity edit) keeps `price_snap`/`list_price`/`price_charged`/`cost_snap` at sale-time values | **Verified in the live DB** | `20-edit-pricing-audit` |
+| **Item 1**: item added after the event keeps its real name and price through an edit (no "Unknown item", `menu_item_id` resolves to the real menu item) | **Verified in the live DB** | `20-edit-pricing-audit` |
+| **Item 1**: two-line order keeps each line's own price and cost after an edit | **Verified in the live DB** | `20-edit-pricing-audit` |
+| Audit trail: each edit writes an `order_revisions` pre-image (`replace_items`, `update`); deleting an order removes it and its items and leaves a `delete` revision with the full snapshot | **Verified in the live DB** | `20-edit-pricing-audit` |
+| **Item 2: Make active** against the live DB (button re-activates, `tg_events_single_active` leaves exactly one active, behaviour after deleting the active event) | **NOT VERIFIED** | `30-make-active` written, no result |
+| **Realtime sync between two clients** (order appears on the other device, status and delete propagate, menu price change propagates) | **NOT VERIFIED** | `40-realtime` written, no result |
+
+Passed: `10-pairing-order` 7 of 7, `20-edit-pricing-audit` 3 of 3. I did not run the unit tests, typecheck, lint or build again after adding the harness, and the existing local-mode suite (`npx playwright test`, 37 tests) was not re-run: it reads state from localStorage, so it cannot run against Supabase mode, which is why the Supabase checks are separate specs.
+
+## Why Make active and realtime are unverified
+`30-make-active.spec.ts` and `40-realtime.spec.ts` are committed but have **not produced a pass or a fail**. On this 8 GB machine the run was killed once for low memory, and the later attempts stalled at the first test with no result, while the shell tools were returning empty output. I could not tell a hang from a kill, so I am not claiming the result either way. The code path (`SET_ACTIVE_EVENT` then `writer.setActiveEvent` then the `tg_events_single_active` trigger) is the same one reviewed earlier by reading, but it has still not been run against the database. Until those two specs run, treat item 2 on Supabase and realtime sync as untested.
+
+## Finding: editing an order is not atomic in Supabase
+`writer.replaceOrderItems` deletes the order's items and then inserts the new ones as two requests. Between them the order has **no items** in the database; my first test read inside that gap. Another device on realtime could briefly show an edited order with no items, and if the insert fails after the delete the order is left empty (the app reports a save error). Not changed. Suggested fix: one database function (like `submit_order`) that replaces the items in a single transaction.
+
+## Running it yourself
+1. `supabase start` in a scratch directory (the repo has no `supabase/config.toml`; the schema is applied with `psql` from `supabase/schema.sql`, then the `migration-*.sql` files in git-history order: disable-rls, add-event-kind, add-menu-sort, remove-card, add-donation-pct, add-inventory, add-combo, discount-priority, add-event-contract, add-inventory-archived, add-event-tax-fields, add-menu-taxable, add-order-revisions, flip-menu-taxable-default, add-ingredient-sort, atomic-order, order-item-prices, order-tips-and-extras, submit-order-v2, free-reason-friend).
+2. `E2E_SB_ANON=<the local anon key> npx playwright test -c playwright.supabase.config.ts <spec> --workers=1`. Run one spec file at a time on a small machine. The specs expect the database container to be named `supabase_db_sbwork` (override with `E2E_SB_DB_CONTAINER`).
+3. The first Docker image pull failed once on a network drop (DNS errors); retrying worked.
+4. A new Supabase workspace has no menu: the specs load it with Settings, "Load sample data", then "Clear sample event".
+5. The build writes to `.next-sb` (new `NEXT_DIST_DIR` support in `next.config.ts`). Building this way also rewrites `next-env.d.ts` and `tsconfig.json`; revert those with `git checkout` before committing.

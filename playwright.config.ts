@@ -10,6 +10,8 @@ const PORT = 3101;
 
 export default defineConfig({
   testDir: "./e2e",
+  // e2e/supabase needs a local Supabase; run it with playwright.supabase.config.ts.
+  testIgnore: "**/supabase/**",
   timeout: 30_000,
   expect: { timeout: 8_000 },
   workers: 1,

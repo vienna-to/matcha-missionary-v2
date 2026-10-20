@@ -71,12 +71,14 @@ test.describe("5.1 required fields and validation", () => {
 });
 
 test.describe("5.2 quantities and rapid orders", () => {
-  test("quantity cannot go below 1; a very large quantity prices and saves correctly", async ({ page }) => {
+  test("minus at quantity 1 removes the line; a very large quantity prices and saves correctly", async ({ page }) => {
     await openApp(page);
     await createEvent(page, { name: "Qty" });
     await page.locator("main").getByRole("button", { name: /^Classic Matcha/ }).first().click();
     const panel = page.locator("aside").last();
-    await panel.getByRole("button", { name: "Fewer" }).click();
+    await panel.getByRole("button", { name: "Fewer" }).click(); // minus at 1 removes the line (changed on purpose)
+    await expect(panel.getByRole("button", { name: "Fewer" })).toHaveCount(0);
+    await page.locator("main").getByRole("button", { name: /^Classic Matcha/ }).first().click(); // add it back
     await expect(panel.locator("div.tabular-nums", { hasText: /^1$/ }).first()).toBeVisible();
     for (let i = 0; i < 59; i++) await panel.getByRole("button", { name: "More" }).click();
     await expect(panel.getByText("$402.00").first()).toBeVisible(); // 60 x 6.70

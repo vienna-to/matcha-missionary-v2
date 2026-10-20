@@ -197,7 +197,7 @@ Passed: `10-pairing-order` 7 of 7, `20-edit-pricing-audit` 3 of 3. I did not run
 
 Nothing pushed or deployed. Production Supabase and Vercel were never touched; every database check ran on a local Supabase.
 
-**STATUS: INCOMPLETE.** The final gates were not run and the fix 6 tests are not green (details below). Do not treat this branch as verified.
+**STATUS (final for this batch):** all seven fixes are committed. Checks run on the final code: typecheck clean, `next lint` no warnings or errors, unit tests 95 passed, production build succeeded (the e2e rebuild), fix 6 specs pass against a local Supabase. **One gap: the full local Playwright suite was not seen green after the last two test edits** (see "Gate results").
 
 | # | Fix | Commit state | Verified |
 |---|---|---|---|
@@ -206,7 +206,7 @@ Nothing pushed or deployed. Production Supabase and Vercel were never touched; e
 | 3 | Minus at quantity 1 removes the line (new-order panel and Edit Order) | committed | local e2e, 2 tests pass |
 | 4 | Edit Order customize panel open by default (new-order flow untouched) | committed | local e2e passes |
 | 5 | Make active leaves the UI current | committed | live local Supabase repro failed before and passes after; unit tests; the 3 Make active specs passed |
-| 6 | Atomic item replacement | committed, **not green** | see below |
+| 6 | Atomic item replacement | committed | unit tests; live local DB test; two-device UI test fails on the old code and passes on the new (see below) |
 | 7 | Edit Order row overlap | committed | local e2e at 360, 390 and 1280 px pass; screenshots checked by eye |
 
 ## Fix 5 root cause
@@ -217,11 +217,16 @@ A Realtime UPDATE payload leaves out unchanged large out-of-line jsonb columns; 
 - Unit tests pass: one rpc call with the right payload, fallback when the function is missing, no blind delete after a real failure.
 - Earlier in this session a live-database test passed: while the transaction was open, readers saw only the complete old item set, then only the complete new set.
 - Finding: on this stack DELETE events do not reach other devices (the subscription filters by workspace_id and a DELETE payload carries only the id), so another device applied only the INSERTs and showed old and new rows together until the next 5 s poll. That is the likely cause of the reported flash. The store now re-reads the whole order (debounced 250 ms) on item INSERTs it does not hold and on DELETEs.
-- **NOT green:** the last run of `e2e/supabase/60-atomic-edit.spec.ts` on the final code had BOTH tests fail. The two-device test failed on clicking "Done" in the Add item dialog (my test, not examined further). The database-level test, which passed earlier, also failed; I did not look at why. The earlier version of the two-device test passed on both old and new code, so it proved nothing; the rewritten version (replace a line with a new id) has never been shown to fail on the old code and pass on the new. Either finish that or rely on the database-level test and delete the UI test.
+- **Live DB test (passes):** while the replacement transaction is open, readers see only the complete old set; after commit only the complete new set.
+- **Two-device UI test (passes on the new code, FAILS on the old code):** device A replaces both lines of an order with a fresh line (new id) while every order_items INSERT is slowed by 0.5 s on the local DB. Run against the pre-fix-6 store and writer, device B rendered `[C1K1, C1K2, C0K1]`, i.e. old classic + old cheesecake + the new cheesecake on screen together (the reported flash). On the current code it renders `[C1K1, C0K1]`. An earlier version of this test (which kept a line's id) passed on both, so it proved nothing; it was replaced.
 
-## Not done
-- Final gates: lint, full local suite (`npx playwright test`), unit tests together, and a build. Typecheck was clean at the last edit. The e2e build compiled fine for the fix 7 run.
-- Make active spec was flaky once (see next section).
+## Gate results
+- Typecheck: clean. `next lint`: no warnings or errors. Unit tests (vitest): 95 passed (90 before).
+- Full local Playwright run (fresh production build): 42 passed, 1 real failure, plus 18 failures that were the Supabase specs being picked up by the local config. Fixes made after that run, **not re-run to green because the rerun was killed for low memory**:
+  - `e2e/20-orders-edge.spec.ts` "quantity cannot go below 1" asserted the old behaviour; fix 3 changes it on purpose (minus at 1 removes the line), so the test now asserts that.
+  - `playwright.config.ts` now ignores `e2e/supabase/**` (those run only with `playwright.supabase.config.ts` against a local Supabase).
+  Expected result after these two edits is 43 passed, but that has not been observed. Run `npx playwright test` once before merging.
+- Supabase-mode specs (`npx playwright test -c playwright.supabase.config.ts`, needs a local Supabase): last results were 60-atomic 2/2 pass; 30-make-active 3/3 and 50-activate-refresh 1/1 passed earlier in this batch. 10-pairing, 20-edit-pricing, 40-realtime were not re-run in this batch after the fix 5 and 6 code changes.
 
 ## Separate, unexplained issue: wrong event deleted (needs its own investigation)
 In one run of `30-make-active`, creating two events quickly ("Early" then "Late") and then using Delete event on Event Summary deleted "Early" in the database while the UI showed "Late" selected. It passed in two other runs. Unproven guess: a late Realtime echo of the first event's INSERT (is_active true) flipped the active event locally just before Event Summary opened, so it defaulted to the wrong event. Not fixed in this batch. The test now waits for the sidebar card and 2 s of settle time, which may hide it.

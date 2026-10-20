@@ -265,7 +265,10 @@ export default function EditOrderModal({
                   stampedUnit={order.items.find((o) => o.id === it.id)?.priceSnap}
                   onEdit={() => setEditingItemId(it.id)}
                   onRemove={() => removeItem(it.id)}
-                  onIncrement={(d) => updateItem(it.id, { quantity: Math.max(1, it.quantity + d) })}
+                  onIncrement={(d) =>
+                    // Minus at quantity 1 removes the line instead of doing nothing.
+                    it.quantity + d < 1 ? removeItem(it.id) : updateItem(it.id, { quantity: it.quantity + d })
+                  }
                   onSetDiscount={(pct) =>
                     updateItem(it.id, { discountPct: pct > 0 ? pct : undefined })
                   }
@@ -435,11 +438,11 @@ function DraftItemRow({
           ) : null}
         </button>
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={() => onIncrement(-1)}>
+          <Button size="sm" variant="outline" aria-label="Fewer" onClick={() => onIncrement(-1)}>
             <Minus className="h-3.5 w-3.5" />
           </Button>
           <div className="min-w-7 text-center text-sm font-medium tabular-nums">{item.quantity}</div>
-          <Button size="sm" variant="outline" onClick={() => onIncrement(1)}>
+          <Button size="sm" variant="outline" aria-label="More" onClick={() => onIncrement(1)}>
             <Plus className="h-3.5 w-3.5" />
           </Button>
         </div>

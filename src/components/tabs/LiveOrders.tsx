@@ -167,7 +167,12 @@ export default function LiveOrders() {
   function incrementLine(cid: string, delta: number) {
     const line = cart.find((l) => l.cid === cid);
     if (!line) return;
-    updateLine(cid, { quantity: Math.max(1, line.quantity + delta) });
+    // Minus at quantity 1 removes the line instead of doing nothing.
+    if (line.quantity + delta < 1) {
+      removeLine(cid);
+      return;
+    }
+    updateLine(cid, { quantity: line.quantity + delta });
   }
 
   /** Fresh order, back on step 1 with the menu grid ready to tap. */

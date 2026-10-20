@@ -113,7 +113,7 @@ export default function EventMoney({
         <Line label="Total collected" value={formatMoney(collected.totalCollected)} strong />
       </dl>
       <p className="t-caption mt-1 text-xs text-matcha-900/60">
-        Total collected is sales revenue plus tips. Tips are never counted in revenue, profit or donations.
+        Total collected is sales revenue plus tips. Tips are never counted in revenue, profit or revenue share.
       </p>
 
       {collected.byMethod.length > 0 ? (

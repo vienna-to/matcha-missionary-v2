@@ -281,7 +281,7 @@ export default function EventSummary() {
         <Metric label="Total cost" value={formatMoney(totals.totalCost)} subtext={`incl. ${formatMoney(totals.fixedCosts)} fixed`} />
         {donationPct > 0 ? (
           <Metric
-            label="Donation"
+            label="Revenue share"
             value={formatMoney(donationAmount)}
             subtext={`${donationPct}% of revenue`}
           />
@@ -292,8 +292,8 @@ export default function EventSummary() {
           subtext={
             donationPct > 0
               ? netMargin !== null
-                ? `${formatPct(netMargin)} after donation`
-                : "after donation"
+                ? `${formatPct(netMargin)} after revenue share`
+                : "after revenue share"
               : totals.margin !== null
                 ? `${formatPct(totals.margin)} margin`
                 : undefined
@@ -498,7 +498,7 @@ export default function EventSummary() {
               {donationPct > 0 ? (
                 <>
                   <tr className="border-t border-cream-100 text-matcha-900/70">
-                    <td className="py-2 pr-4">− Donation ({donationPct}% of revenue)</td>
+                    <td className="py-2 pr-4">− Revenue share ({donationPct}% of revenue)</td>
                     <td />
                     <td />
                     <td className="py-2 pr-4 text-right tabular-nums">−{formatMoney(donationAmount)}</td>
@@ -507,7 +507,7 @@ export default function EventSummary() {
                     <td />
                   </tr>
                   <tr className="border-t-2 border-cream-200">
-                    <td className="py-2 pr-4 font-semibold">Net (after donation)</td>
+                    <td className="py-2 pr-4 font-semibold">Net (after revenue share)</td>
                     <td />
                     <td />
                     <td className="py-2 pr-4 text-right font-semibold tabular-nums">{formatMoney(totals.revenuePaid - donationAmount)}</td>
@@ -950,9 +950,9 @@ function AllEventsView({
           subtext="ingredients + per-event fixed"
         />
         <Metric
-          label="Donations"
+          label="Revenue share"
           value={formatMoney(aggregate.totalDonations)}
-          subtext={aggregate.totalDonations > 0 ? "charity events" : "none recorded"}
+          subtext={aggregate.totalDonations > 0 ? "charity and partner events" : "none recorded"}
         />
         <Metric
           label="Inventory spending"
@@ -965,7 +965,7 @@ function AllEventsView({
           subtext={
             aggregate.netMargin !== null
               ? `${formatPct(aggregate.netMargin)} net margin`
-              : "after donations + inventory"
+              : "after revenue share + inventory"
           }
         />
       </div>
@@ -1084,7 +1084,7 @@ function AllEventsView({
                 </tr>
                 {aggregate.totalDonations > 0 ? (
                   <tr className="border-t border-cream-100 text-matcha-900/70">
-                    <td className="py-2 pr-4">− Donations</td>
+                    <td className="py-2 pr-4">− Revenue share</td>
                     <td />
                     <td className="py-2 pr-4 text-right tabular-nums">−{formatMoney(aggregate.totalDonations)}</td>
                     <td />

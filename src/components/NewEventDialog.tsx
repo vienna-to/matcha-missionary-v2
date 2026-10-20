@@ -196,7 +196,11 @@ export default function NewEventDialog({
                   placeholder="e.g. 500"
                 />
               </Field>
-              <Field label="Donation % (optional)" className="col-span-2">
+              <Field
+                label="Revenue share % (optional)"
+                className="col-span-2"
+                hint="Share of event revenue that goes to a charity or a collab partner."
+              >
                 <Input
                   type="number"
                   inputMode="decimal"

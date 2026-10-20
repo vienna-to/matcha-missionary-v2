@@ -69,7 +69,7 @@ export async function createEvent(
     await field(dlg, "Client name").fill(opts.client ?? "Acme");
     await field(dlg, /Contracted payout/).fill(String(opts.payout ?? 500));
   } else if (opts.donation) {
-    await field(dlg, /Donation/).fill(String(opts.donation));
+    await field(dlg, /Revenue share/).fill(String(opts.donation));
   }
   if (opts.cup) await field(dlg, "Cup size (oz)").fill(String(opts.cup));
   await field(dlg, "Event name").fill(opts.name);

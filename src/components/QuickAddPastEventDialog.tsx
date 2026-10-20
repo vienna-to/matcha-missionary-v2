@@ -187,7 +187,7 @@ export default function QuickAddPastEventDialog({
               {timeError}
             </p>
           ) : null}
-          <Field label="donation % (optional)" className="col-span-2" hint="for charity events — % of revenue donated">
+          <Field label="revenue share % (optional)" className="col-span-2" hint="share of event revenue that goes to a charity or a collab partner">
             <NumberField
               min={0}
               max={100}

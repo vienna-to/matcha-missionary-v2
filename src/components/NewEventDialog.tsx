@@ -210,7 +210,7 @@ export default function NewEventDialog({
                   value={donationPct}
                   onChange={(e) => setDonationPct(e.target.value)}
                   onWheel={(e) => (e.target as HTMLInputElement).blur()}
-                  placeholder="e.g. 10 — for charity events where X% of revenue is donated"
+                  placeholder="e.g. 10"
                 />
               </Field>
             </>

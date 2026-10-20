@@ -491,7 +491,8 @@ function CustomizeItemModal({
   onClose: () => void;
 }) {
   const [local, setLocal] = useState<DraftItem>(draft);
-  const [showCustomize, setShowCustomize] = useState(false);
+  // Edit Order only: open by default so sugar, ice and special requests are one glance away.
+  const [showCustomize, setShowCustomize] = useState(true);
   const drinkOptions = hasDrinkAdjustments(item);
 
   const milks = item.allowedMilkIds

@@ -35,3 +35,23 @@ test.describe("stepper: minus at quantity 1 removes the line", () => {
     expect(orders[0].items.map((i: { menuItemNameSnap: string }) => i.menuItemNameSnap)).toEqual(["Matcha Cheesecake"]);
   });
 });
+
+test.describe("Edit Order: customize panel is open by default", () => {
+  test("sugar, ice and special requests are visible without tapping Customize", async ({ page }) => {
+    await openApp(page);
+    await createEvent(page, { name: "Customize open" });
+    await placeOrder(page, { items: [{ name: "Classic Matcha" }], name: "Open", pay: "Cash" });
+    await goTab(page, "Barista Queue");
+    await baristaCard(page, 1).getByTitle("Edit").click();
+    const dlg = modal(page, /Edit order #1/);
+    await dlg.getByText("Classic Matcha").first().click(); // opens the item's customize modal
+    const item = modal(page, "Classic Matcha");
+    await expect(item.getByRole("button", { name: /Hide customize/ })).toBeVisible();
+    await expect(item.getByText("Sugar", { exact: true })).toBeVisible();
+    await expect(item.getByText("Ice", { exact: true })).toBeVisible();
+    await expect(item.locator("textarea, input[type=text]").last()).toBeVisible();
+    // and it still collapses on demand
+    await item.getByRole("button", { name: /Hide customize/ }).click();
+    await expect(item.getByText("Sugar", { exact: true })).toHaveCount(0);
+  });
+});

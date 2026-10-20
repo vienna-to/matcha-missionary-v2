@@ -16,10 +16,15 @@ import type { AppState, Order } from "@/lib/types";
  */
 type Row = Record<string, unknown>;
 
-function recorder() {
+function recorder(rpcError: { code: string; message: string } | null = null) {
   const inserts: Row[][] = [];
   const deletes: string[] = [];
+  const rpcs: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const client = {
+    rpc: (fn: string, args: Record<string, unknown>) => {
+      rpcs.push({ fn, args });
+      return Promise.resolve({ data: rpcError ? null : { items: (args.p_items as Row[]).length }, error: rpcError });
+    },
     from: (table: string) => ({
       insert: (rows: Row[] | Row) => {
         if (table === "order_items") inserts.push(Array.isArray(rows) ? rows : [rows]);
@@ -37,7 +42,7 @@ function recorder() {
       },
     }),
   } as unknown as SupabaseClient;
-  return { client, inserts, deletes };
+  return { client, inserts, deletes, rpcs };
 }
 
 function setup() {
@@ -77,10 +82,16 @@ describe("Supabase mode: edit order writes sale-time price and cost to order_ite
     });
     const next = st.orders.find((o) => o.id === "ord_sb")!;
 
-    const { client, inserts, deletes } = recorder();
+    const { client, inserts, deletes, rpcs } = recorder();
     await writer(client, "ws").replaceOrderItems(next.id, next.items);
-    expect(deletes).toEqual(["ord_sb"]);
-    const rows = inserts.flat();
+    // ONE atomic call; no separate delete / insert requests
+    expect(rpcs).toHaveLength(1);
+    expect(rpcs[0].fn).toBe("replace_order_items");
+    expect(rpcs[0].args.p_order_id).toBe("ord_sb");
+    expect(rpcs[0].args.p_workspace_id).toBe("ws");
+    expect(deletes).toEqual([]);
+    expect(inserts).toEqual([]);
+    const rows = rpcs[0].args.p_items as Row[];
     expect(rows).toHaveLength(1);
     expect(rows[0].price_snap).toBe(8);
     expect(rows[0].list_price).toBe(8);
@@ -105,12 +116,42 @@ describe("Supabase mode: edit order writes sale-time price and cost to order_ite
       items: [{ sourceItemId: line.id, menuItemId: added.id, quantity: 1, specialRequests: "extra cold" }],
     });
     const next = st.orders.find((o) => o.id === "ord_sb")!;
-    const { client, inserts } = recorder();
+    const { client, rpcs } = recorder();
     await writer(client, "ws").replaceOrderItems(next.id, next.items);
-    const row = inserts.flat()[0];
+    const row = (rpcs[0].args.p_items as Row[])[0];
     expect(row.menu_item_name_snap).toBe("Pop Special");
     expect(row.price_snap).toBe(5);
     expect(row.menu_item_id).toBe(added.id);
     expect(row.special_requests).toBe("extra cold");
+  });
+});
+
+describe("replaceOrderItems before the migration has run", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("falls back to delete then insert when replace_order_items() does not exist", async () => {
+    const { s, ev } = setup();
+    const live = { id: "live", menuItems: s.menuItems, ingredients: s.ingredients, createdAt: "" };
+    const line = deriveOrderItem({ menuItemId: "mi_classic", quantity: 1 }, "ord_sb", live, 16);
+    const st = submit(s, ev.id, [line]);
+    const o = st.orders.find((x) => x.id === "ord_sb")!;
+    const { client, inserts, deletes, rpcs } = recorder({ code: "PGRST202", message: "function not found" });
+    await writer(client, "ws").replaceOrderItems(o.id, o.items);
+    expect(rpcs).toHaveLength(1); // tried once, no pointless retries for a missing function
+    expect(deletes).toEqual(["ord_sb"]);
+    expect(inserts.flat()).toHaveLength(1);
+  });
+
+  it("a real failure of the atomic call does not fall through to the non-atomic path", async () => {
+    const { s, ev } = setup();
+    const live = { id: "live", menuItems: s.menuItems, ingredients: s.ingredients, createdAt: "" };
+    const line = deriveOrderItem({ menuItemId: "mi_classic", quantity: 1 }, "ord_sb", live, 16);
+    const st = submit(s, ev.id, [line]);
+    const o = st.orders.find((x) => x.id === "ord_sb")!;
+    const { client, inserts, deletes } = recorder({ code: "XX000", message: "boom" });
+    await writer(client, "ws").replaceOrderItems(o.id, o.items);
+    expect(deletes).toEqual([]); // the rolled-back call left the old items; never delete them blind
+    expect(inserts).toEqual([]);
   });
 });

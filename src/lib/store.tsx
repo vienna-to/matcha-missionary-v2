@@ -149,6 +149,9 @@ const UNSYNCED_RETRY_EVERY_TICKS = 6; // ~30s
 /** A poll/refetch result is discarded if we wrote locally this recently: the
  *  write may still be in flight and the read could predate it. */
 const WRITE_GUARD_MS = 2_000;
+/** Wait this long after the last item event of an order before re-reading it,
+ *  so an edit's DELETE + INSERT burst collapses into one consistent read. */
+const ORDER_REFRESH_DEBOUNCE_MS = 250;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -423,6 +426,18 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
     const wid = pairing.workspaceId;
     let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    // Debounced whole-order reads for item replacements (see onOrderItem).
+    const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const refreshOrderSoon = (orderId: string) => {
+      clearTimeout(refreshTimers.get(orderId));
+      refreshTimers.set(
+        orderId,
+        setTimeout(() => {
+          refreshTimers.delete(orderId);
+          if (!disposed) void fetchFullOrder(orderId);
+        }, ORDER_REFRESH_DEBOUNCE_MS),
+      );
+    };
     const unsub = subscribeAll(supabase, wid, {
       onIngredient: (kind, row) => {
         if (kind === "DELETE") baseDispatch({ type: "RT_DELETE_INGREDIENT", id: row.id });
@@ -465,13 +480,29 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
       onOrderItem: (kind, row) => {
         if (kind === "DELETE") {
           const r = row as { id: string; order_id?: string };
+          // A DELETE payload only carries the id, so find the order locally.
+          const orderId =
+            r.order_id ?? stateRef.current.orders.find((o) => o.items.some((it) => it.id === r.id))?.id;
+          if (orderId && stateRef.current.orders.some((o) => o.id === orderId)) {
+            // An edit replaces items as a burst of DELETE + INSERT events. Don't
+            // apply them one by one (that shows an empty or mixed order); read
+            // the whole order once the burst has settled.
+            refreshOrderSoon(orderId);
+            return;
+          }
           baseDispatch({ type: "RT_DELETE_ORDER_ITEM", id: r.id, orderId: r.order_id });
           return;
         }
         const item = fromOrderItem(row as DbOrderItem);
-        if (!stateRef.current.orders.some((o) => o.id === item.orderId)) {
+        const known = stateRef.current.orders.find((o) => o.id === item.orderId);
+        if (!known) {
           // Item arrived before (or without) its order event.
           void fetchFullOrder(item.orderId);
+          return;
+        }
+        if (kind === "INSERT" && !known.items.some((it) => it.id === item.id)) {
+          // A row we don't hold: part of an item replacement from another device.
+          refreshOrderSoon(item.orderId);
           return;
         }
         baseDispatch({ type: "RT_UPSERT_ORDER_ITEM", item });
@@ -519,6 +550,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
     return () => {
       disposed = true;
       clearTimeout(reconnectTimer);
+      for (const t of refreshTimers.values()) clearTimeout(t);
       unsub();
     };
   }, [pairing.phase, pairing, supabase, channelNonce, fetchFullOrder]);

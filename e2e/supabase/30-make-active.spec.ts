@@ -1,5 +1,5 @@
 import { createEvent, goTab } from "../support";
-import { acceptDialogs, expect, pairNewWorkspace, seedMenu, sql, test } from "./sb";
+import { acceptDialogs, exec, expect, pairNewWorkspace, seedMenu, sql, test } from "./sb";
 
 /**
  * FIXES.md item 2 against a live database: "Make active" writes is_active=true and
@@ -52,7 +52,7 @@ test.describe("item 2: Make active (Supabase)", () => {
     await createEvent(page, { name: "B" });
     await createEvent(page, { name: "C" });
     await expect.poll(() => active(ws)).toEqual(["C"]);
-    sql(`update public.events set is_active = true where workspace_id='${ws}' and name='A' returning id`);
+    exec(`update public.events set is_active = true where workspace_id='${ws}' and name='A'`);
     expect(active(ws)).toEqual(["A"]);
   });
 
@@ -63,6 +63,9 @@ test.describe("item 2: Make active (Supabase)", () => {
     await createEvent(page, { name: "Early" });
     await createEvent(page, { name: "Late" });
     await expect.poll(() => active(ws)).toEqual(["Late"]);
+    // let the realtime echoes of both creates land before opening the summary
+    await expect(page.locator("aside").getByRole("button", { name: /^Active event/ })).toContainText("Late");
+    await page.waitForTimeout(2_000);
 
     await goTab(page, "Event Summary");
     await page.getByRole("button", { name: "Delete event" }).click(); // deletes Late (active)

@@ -21,6 +21,13 @@ export function sql(query: string): any[] {
   return JSON.parse(out.trim());
 }
 
+/** Run a statement that cannot be wrapped as a subquery (UPDATE / DELETE ...). */
+export function exec(statement: string): void {
+  execFileSync("docker", ["exec", "-i", DB_CONTAINER, "psql", "-U", "postgres", "-d", "postgres", "-q", "-c", statement], {
+    encoding: "utf8",
+  });
+}
+
 /** Fail fast if this is not the local stack. */
 export function assertLocalDb() {
   const [r] = sql("select inet_server_addr()::text as addr, current_database() as db");

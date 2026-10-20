@@ -479,7 +479,31 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
     tag("deleteOrder")(error);
   },
   async replaceOrderItems(orderId: string, items: OrderItem[]) {
-    // Simple approach: delete + insert (atomic from the client's view; small set).
+    // Preferred path: ONE transaction (public.replace_order_items) swaps the
+    // old rows for the new ones, so no reader (another device, the 5s poll)
+    // ever sees the order with no items or with a mix of old and new rows.
+    const rpc = () =>
+      supabase.rpc("replace_order_items", {
+        p_order_id: orderId,
+        p_workspace_id: workspaceId,
+        p_items: items.map((it) => toOrderItemInsert(workspaceId, it)),
+      });
+    let r = await rpc();
+    if (!r.error) return;
+    if (!isMissingRpc(r.error)) {
+      // A failed call rolled back, so the old items are still intact: safe to retry.
+      r = await retryWithBackoff("replaceOrderItems:rpc", rpc);
+      if (!r.error) return;
+      if (!isMissingRpc(r.error)) {
+        tag("replaceOrderItems:rpc")(r.error);
+        return;
+      }
+    }
+    // The migration hasn't been run on this database yet: fall back to the
+    // old two-step write so editing keeps working (but see its caveat).
+    console.warn(
+      "[supabase replaceOrderItems] replace_order_items() not found, run supabase/migration-replace-order-items.sql. Using non-atomic fallback.",
+    );
     const { error: e1 } = await supabase
       .from("order_items")
       .delete()

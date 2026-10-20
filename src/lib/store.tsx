@@ -32,7 +32,7 @@ import {
   clearPairing,
 } from "./supabase/client";
 import {
-  fromEvent,
+  fromRealtimeEvent,
   fromEventExtra,
   fromIngredient,
   fromInventoryPurchase,
@@ -437,7 +437,10 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
           baseDispatch({ type: "RT_DELETE_EVENT", id: row.id });
           return;
         }
-        const evt = fromEvent(row as DbEvent);
+        const evt = fromRealtimeEvent(
+          row as DbEvent,
+          stateRef.current.events.find((e) => e.id === row.id),
+        );
         const snap = (row as DbEvent).menu_snapshot as MenuSnapshot | undefined;
         baseDispatch({ type: "RT_UPSERT_EVENT", event: evt, snapshot: snap });
       },

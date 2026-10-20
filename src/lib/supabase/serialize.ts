@@ -229,6 +229,24 @@ export function fromEvent(r: DbEvent): Event {
   };
 }
 
+/**
+ * Event from a Realtime payload. An UPDATE payload leaves out unchanged large
+ * (out-of-line) jsonb columns, and the menu snapshot is one, so after e.g.
+ * "Make active" the row arrives with no `menu_snapshot`. Building the event from
+ * it alone would point it at a snapshot id that does not exist (the event page
+ * and the sidebar card then lose their data until a reload). Keep what we hold
+ * for any such column that is missing.
+ */
+export function fromRealtimeEvent(r: DbEvent, existing?: Event): Event {
+  const evt = fromEvent(r);
+  if (!existing) return evt;
+  return {
+    ...evt,
+    menuSnapshotId: r.menu_snapshot ? evt.menuSnapshotId : existing.menuSnapshotId,
+    fixedCosts: r.fixed_costs === undefined ? existing.fixedCosts : evt.fixedCosts,
+  };
+}
+
 export function fromOrder(r: DbOrder, items: OrderItem[]): Order {
   return {
     id: r.id,

@@ -197,7 +197,7 @@ Passed: `10-pairing-order` 7 of 7, `20-edit-pricing-audit` 3 of 3. I did not run
 
 Nothing pushed or deployed. Production Supabase and Vercel were never touched; every database check ran on a local Supabase.
 
-**STATUS (final for this batch):** all seven fixes are committed. Checks run on the final code: typecheck clean, `next lint` no warnings or errors, unit tests 95 passed, production build succeeded (the e2e rebuild), fix 6 specs pass against a local Supabase. **One gap: the full local Playwright suite was not seen green after the last two test edits** (see "Gate results").
+**STATUS (final for this batch):** all seven fixes are committed and the checks on the final code are green: full local Playwright suite **43 of 43 passed** (0 failed, 0 skipped, 0 flaky, 2.2 min, one worker), typecheck clean, `next lint` no warnings or errors, unit tests 95 passed, production build succeeded, fix 6 specs pass against a local Supabase. The Supabase-database specs are run separately (see "Gate results").
 
 | # | Fix | Commit state | Verified |
 |---|---|---|---|
@@ -222,10 +222,9 @@ A Realtime UPDATE payload leaves out unchanged large out-of-line jsonb columns; 
 
 ## Gate results
 - Typecheck: clean. `next lint`: no warnings or errors. Unit tests (vitest): 95 passed (90 before).
-- Full local Playwright run (fresh production build): 42 passed, 1 real failure, plus 18 failures that were the Supabase specs being picked up by the local config. Fixes made after that run, **not re-run to green because the rerun was killed for low memory**:
+- Full local Playwright suite: **43 passed, 0 failed** on the final code (`b8e2a87`). An earlier run on a fresh production build had 42 passed, 1 real failure and 18 failures from the Supabase specs being picked up by the local config. Both were fixed:
   - `e2e/20-orders-edge.spec.ts` "quantity cannot go below 1" asserted the old behaviour; fix 3 changes it on purpose (minus at 1 removes the line), so the test now asserts that.
   - `playwright.config.ts` now ignores `e2e/supabase/**` (those run only with `playwright.supabase.config.ts` against a local Supabase).
-  Expected result after these two edits is 43 passed, but that has not been observed. Run `npx playwright test` once before merging.
 - Supabase-mode specs (`npx playwright test -c playwright.supabase.config.ts`, needs a local Supabase): last results were 60-atomic 2/2 pass; 30-make-active 3/3 and 50-activate-refresh 1/1 passed earlier in this batch. 10-pairing, 20-edit-pricing, 40-realtime were not re-run in this batch after the fix 5 and 6 code changes.
 
 ## Separate, unexplained issue: wrong event deleted (needs its own investigation)

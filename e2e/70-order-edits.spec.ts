@@ -1,5 +1,5 @@
 import { autoAcceptDialogs, createEvent, expect, goTab, openApp, placeOrder, test } from "./support";
-import { baristaCard, eventOrders, modal } from "./extra";
+import { addMenuItem, baristaCard, eventOrders, modal } from "./extra";
 
 test.describe("stepper: minus at quantity 1 removes the line", () => {
   test("new-order panel", async ({ page }) => {
@@ -54,4 +54,61 @@ test.describe("Edit Order: customize panel is open by default", () => {
     await item.getByRole("button", { name: /Hide customize/ }).click();
     await expect(item.getByText("Sugar", { exact: true })).toHaveCount(0);
   });
+});
+
+test.describe("Edit Order row layout: name and controls never overlap", () => {
+  for (const [label, width, height] of [
+    ["phone 390px", 390, 844],
+    ["narrow phone 360px", 360, 800],
+    ["desktop 1280px", 1280, 900],
+  ] as const) {
+    test(label, async ({ page }, testInfo) => {
+      // Set up at desktop width (phones use a different nav), then resize before opening the editor.
+      await openApp(page);
+      await createEvent(page, { name: "Row layout" });
+      await addMenuItem(page, "Matcha Missionary Supreme Latte", 6);
+      await goTab(page, "Live Orders");
+      await placeOrder(page, { items: [{ name: "Matcha Missionary Supreme Latte" }], name: "Wide", pay: "Cash" });
+      await goTab(page, "Barista Queue");
+      await page.setViewportSize({ width, height });
+      await baristaCard(page, 1).getByTitle("Edit").click();
+      const dlg = modal(page, /Edit order #1/);
+      const row = dlg.locator("div.rounded-xl.p-2\\.5").first();
+      await expect(row).toBeVisible();
+
+      const parts: Record<string, ReturnType<typeof row.locator>> = {
+        name: row.locator("button").first(),
+        fewer: row.getByRole("button", { name: "Fewer" }),
+        more: row.getByRole("button", { name: "More" }),
+        percent: row.getByTitle(/discount/i),
+        adjust: row.locator('button:has(svg[class*="lucide-sliders"])'),
+        trash: row.locator('button:has(svg[class*="lucide-trash"])'),
+      };
+      const boxes: Record<string, { x: number; y: number; width: number; height: number }> = {};
+      for (const [k, loc] of Object.entries(parts)) {
+        const b = await loc.boundingBox();
+        expect(b, `${k} is visible`).not.toBeNull();
+        boxes[k] = b!;
+      }
+      const rowBox = (await row.boundingBox())!;
+      const names = Object.keys(boxes);
+      for (let i = 0; i < names.length; i++) {
+        const a = boxes[names[i]];
+        // inside the row, horizontally
+        expect(a.x, `${names[i]} left edge`).toBeGreaterThanOrEqual(rowBox.x - 1);
+        expect(a.x + a.width, `${names[i]} right edge`).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+        for (let j = i + 1; j < names.length; j++) {
+          const c = boxes[names[j]];
+          const overlapX = Math.min(a.x + a.width, c.x + c.width) - Math.max(a.x, c.x);
+          const overlapY = Math.min(a.y + a.height, c.y + c.height) - Math.max(a.y, c.y);
+          expect(overlapX > 1 && overlapY > 1, `${names[i]} overlaps ${names[j]}`).toBe(false);
+        }
+      }
+      // the whole item name is on screen, not clipped by the row
+      const nameText = row.getByText("Matcha Missionary Supreme Latte");
+      const nameBox = (await nameText.boundingBox())!;
+      expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+      void testInfo;
+    });
+  }
 });

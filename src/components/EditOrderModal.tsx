@@ -426,8 +426,11 @@ function DraftItemRow({
   return (
     <div className="rounded-xl border border-cream-200 bg-cream-50/50 p-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={onEdit} className="min-w-0 flex-1 text-left">
-          <div className="text-sm font-medium">{displayName}</div>
+        {/* The name gets a real minimum width and wraps inside it. When the row is too
+            narrow for name + controls, the controls drop to their own line instead of
+            overlapping the name. */}
+        <button onClick={onEdit} className="min-w-[9rem] flex-1 text-left">
+          <div className="break-words text-sm font-medium [overflow-wrap:anywhere]">{displayName}</div>
           {summary.length > 0 ? (
             <div className="mt-0.5 text-xs text-matcha-900/60">{summary.join(" · ")}</div>
           ) : null}
@@ -437,7 +440,9 @@ function DraftItemRow({
             </div>
           ) : null}
         </button>
-        <div className="flex items-center gap-1">
+        {/* All controls in one group so they wrap to the next line together. */}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <Button size="sm" variant="outline" aria-label="Fewer" onClick={() => onIncrement(-1)}>
             <Minus className="h-3.5 w-3.5" />
           </Button>
@@ -462,6 +467,7 @@ function DraftItemRow({
         <Button size="sm" variant="ghost" onClick={onRemove}>
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
+        </div>
       </div>
       {discountOpen && !helperMode ? (
         <DiscountRow

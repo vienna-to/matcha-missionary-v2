@@ -113,8 +113,7 @@ test.describe("atomic item replacement", () => {
       await row("Matcha Cheesecake").getByRole("button", { name: "Fewer" }).click();
       await dlg.getByRole("button", { name: /Add item/ }).click();
       const add = modal(page, "Add item");
-      await add.getByRole("button", { name: /Matcha Cheesecake/ }).click();
-      await add.getByRole("button", { name: "Done" }).click();
+      await add.getByRole("button", { name: /Matcha Cheesecake/ }).click(); // picking closes the dialog
       await dlg.getByRole("button", { name: "Save" }).click();
       await expect(dlg).toBeHidden();
 

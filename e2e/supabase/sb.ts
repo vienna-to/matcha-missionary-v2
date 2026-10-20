@@ -116,6 +116,9 @@ export async function seedMenu(page: Page, workspaceId: string) {
     .toBe(0);
   const [m] = sql(`select count(*)::int n from public.menu_items where workspace_id='${workspaceId}'`);
   expect(m.n).toBeGreaterThan(0);
+  // The DB has the menu; wait until the app does too, or an event created next gets an empty menu.
+  await page.locator("aside nav").getByRole("button", { name: "Menu Manager" }).click();
+  await expect(page.getByText("Classic Matcha").first()).toBeVisible({ timeout: 20_000 });
   await page.locator("aside nav").getByRole("button", { name: "Live Orders" }).click();
 }
 

@@ -72,6 +72,9 @@ create table if not exists public.events (
   start_time          text,
   end_time            text,
   target_revenue      numeric,
+  -- Collab split (migration-add-collab-split.sql): partner's profit share % and their ingredient contribution $
+  collab_profit_pct   numeric check (collab_profit_pct is null or (collab_profit_pct >= 0 and collab_profit_pct <= 100)),
+  collab_contribution numeric check (collab_contribution is null or collab_contribution >= 0),
   is_active           boolean not null default false,
   -- Frozen menu snapshot — see TypeScript MenuSnapshot
   menu_snapshot       jsonb not null,

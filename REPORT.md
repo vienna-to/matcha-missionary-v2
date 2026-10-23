@@ -352,3 +352,31 @@ The two migrations are independent, so production can have neither, either one, 
 
 ### Gates (integration branch)
 Typecheck clean; `next lint` clean; vitest **209 passed** (137 on custom-items + 26 from prepared-ingredients + 46 new); `next build` succeeds; full local Playwright suite **54 passed** on the second run. The first full run had 53 passed and 1 failure in `40-contract-helper-misc` "two devices submitting at the same moment" (a two-tab localStorage race test that passed 3 of 3 times when re-run alone and passed in the second full run); it looks timing-sensitive under load and was not touched by this work, but it is worth knowing about. Supabase-mode suite **26 passed** against a local Supabase (now stopped; both migrations applied to the LOCAL database only).
+
+
+## Collab profit / expense split (branch `feature/collab-split`, off main; not pushed)
+
+### What it does
+A collab event has a partner who gets a share of the **profit** and who also pays part of the **ingredients**. Event Summary (single event) gets a "Collab split" panel:
+
+    profit            = revenue - costs                 (the number the page already calls Profit)
+    partner take-home = profit x split% - partner contribution
+    your take-home    = profit - partner take-home
+
+Two inputs per event, both editable at any time (and removable with "Remove collab"): **Partner profit share %** (0 to 100) and **Partner ingredient contribution $** (a dollar amount, never a percentage). The panel shows profit, the partner's share, the contribution, then the two take-homes. Worked example from the brief ($500 revenue, $100 costs, 40%, $50): partner = 0.40 x 400 - 50 = **$110**, you = **$290** (unit test).
+
+### Decisions (flag any you disagree with)
+- **Fit with the event model:** two optional fields on the event, `collabProfitPct` and `collabContribution` (columns `events.collab_profit_pct`, `events.collab_contribution`). An event is a collab when either is set; a blank half counts as 0. No separate "is collab" flag to keep in sync. Existing events are untouched.
+- **The old revenue share (`donationPct`) is kept, not replaced.** It is a different thing (a cut of *revenue* for charity events, shown as Net profit and rolled into the all-events totals), and existing events use it. The collab split works from the profit before any revenue share; if both are set the panel says so. Say if you want them merged or the old field retired.
+- **"Profit" is the page's existing profit**, i.e. revenue minus total cost *including any fixed costs on the event* (Total cost = ingredients + fixed). With no fixed costs it is exactly revenue minus ingredient costs. If you want the split to ignore fixed costs, that is a one-line change.
+- A contribution larger than the partner's share makes their take-home **negative** (and yours larger than the profit); the formula is applied as written and the panel adds a one-line note. A loss is split by the same formula.
+- Not shown for contract events (no per-drink profit) and not added to the New Event dialog (add it from Event Summary after creating, same as the revenue share editor). Not included in the All-events aggregate or the CSV / tax export.
+- The brief ended mid-sentence ("the two final take-home numbers (partner's and"); I read it as "...and yours".
+
+### Migration (NOT applied to production)
+`supabase/migration-add-collab-split.sql`: two nullable numeric columns with checks (share 0 to 100, contribution >= 0), `notify pgrst`. Safe to re-run; also added to `schema.sql`. The app works before it is run: creating and editing events never names the new columns unless a split is set; saving a split without them retries the rest of the edit, shows a red banner naming the file, and the split lasts on that device only.
+
+### Tests / gates
+- Unit: `collab-split.test.ts` (11: worked example, take-homes always sum to profit, negative take-home, 0%, loss, input parsing), `collab-persistence.test.ts` (7: row round trip, ordinary create never sends new columns, clearing writes nulls, writer fallback with/without the migration). vitest **227 passed**; typecheck and `next lint` clean.
+- Local e2e `96-collab-split.spec.ts` (2): validation, add / edit / reload / remove, numbers match the formula from the stamped order costs. Full local suite **55 of 56** on the first run; the one failure was the known-flaky "two devices submitting at the same moment" (passes 3 of 3 alone). 
+- Supabase mode against a LOCAL Supabase: `e2e/supabase/100-collab-split.spec.ts` (2). With the migration: stored in `events`, shown correctly, survives reload, edit and removal reach the database, running the migration twice is harmless, and the database rejects share 101, share -1 and contribution -5. Without it: an ordinary event still creates and saves, the split raises the banner, and other event edits (revenue share) still save. Local Supabase stopped afterwards. Production Supabase was never touched.

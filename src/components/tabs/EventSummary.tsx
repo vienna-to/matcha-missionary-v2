@@ -22,6 +22,7 @@ import type { Event, EventExtra, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
 import ContractResultsDialog from "@/components/ContractResultsDialog";
 import EventMoney from "./EventMoney";
+import CollabSplit from "./CollabSplit";
 import RevenueShareEditor from "./RevenueShareEditor";
 import { barMargin, categoryAxis, useIsMobile } from "@/components/chart-axis";
 
@@ -257,6 +258,11 @@ export default function EventSummary() {
       ) : null}
 
       <RevenueShareEditor key={`${event.id}:${event.donationPct ?? 0}`} event={event} />
+      <CollabSplit
+        key={`${event.id}:${event.collabProfitPct ?? ""}:${event.collabContribution ?? ""}`}
+        event={event}
+        profit={totals.profit}
+      />
 
       {/* Metrics */}
       <div className={cn(

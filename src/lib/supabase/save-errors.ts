@@ -115,6 +115,14 @@ export function isMissingPreparedColumn(error: unknown): boolean {
   return /sub_recipe|['"]kind['"]/.test(isMissingColumnError(error));
 }
 
+/** events.collab_profit_pct / collab_contribution are missing (migration-add-collab-split.sql not run). */
+export function isMissingCollabColumn(error: unknown): boolean {
+  return /collab_profit_pct|collab_contribution/.test(isMissingColumnError(error));
+}
+
+export const COLLAB_MIGRATION_HINT =
+  "Run supabase/migration-add-collab-split.sql in the Supabase SQL editor. Until then the collab split only lasts on this device (it is lost on reload).";
+
 export const ROLE_MIGRATION_HINT =
   "Run supabase/migration-add-ingredient-custom-role.sql in the Supabase SQL editor. Until then the role only lasts on this device (it is lost on reload) and the custom drink builder guesses from ingredient names.";
 

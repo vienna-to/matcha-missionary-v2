@@ -10,13 +10,6 @@ describe("computeCollabSplit", () => {
     expect(s.yourTakeHome).toBeCloseTo(290, 10);
   });
 
-  it("the two take-homes always add up to the profit plus nothing else", () => {
-    for (const [p, pct, c] of [[400, 40, 50], [123.45, 33, 7.5], [0, 50, 0], [999, 100, 999]]) {
-      const s = computeCollabSplit(p, pct, c);
-      expect(s.partnerTakeHome + s.yourTakeHome).toBeCloseTo(p, 9);
-    }
-  });
-
   it("no contribution: a plain percentage split", () => {
     const s = computeCollabSplit(200, 25, 0);
     expect(s.partnerTakeHome).toBe(50);
@@ -39,6 +32,65 @@ describe("computeCollabSplit", () => {
     const s = computeCollabSplit(-100, 50, 0);
     expect(s.partnerTakeHome).toBe(-50);
     expect(s.yourTakeHome).toBe(-50);
+  });
+});
+
+const cents = (n: number) => Math.round(n * 100);
+
+describe("the two take-homes always sum to the profit, to the cent", () => {
+  const CASES: Array<[string, number, number, number]> = [
+    ["profit 39.95 at 50% (a half cent)", 39.95, 50, 0],
+    ["profit 39.95 at 50%, $10 contribution", 39.95, 50, 10],
+    ["profit 39.95 at 40%, $6 contribution", 39.95, 40, 6],
+    ["profit 39.95 at 33%", 39.95, 33, 0],
+    ["profit with sub-cent noise 39.9537", 39.9537, 50, 0],
+    ["profit 0.01 at 50%", 0.01, 50, 0],
+    ["profit 0.03 at 50%", 0.03, 50, 0],
+    ["profit 100 at 33.333%", 100, 33.333, 7.77],
+    ["profit 12.35 at 12.5%", 12.35, 12.5, 0.1],
+    ["profit 1234.56 at 7.5%", 1234.56, 7.5, 33.33],
+    ["a loss, -39.95 at 50%", -39.95, 50, 0],
+    ["contribution above the share", 39.95, 10, 20],
+    ["100% split", 39.95, 100, 3],
+  ];
+  for (const [label, profit, pct, contribution] of CASES) {
+    it(label, () => {
+      const s = computeCollabSplit(profit, pct, contribution);
+      // exact in whole cents: partner + yours === profit
+      expect(cents(s.partnerTakeHome) + cents(s.yourTakeHome)).toBe(cents(s.profit));
+      // and the profit shown is the real profit to the nearest cent
+      expect(cents(s.profit)).toBe(Math.round(profit * 100));
+      // the displayed lines agree with each other: share - contribution = partner
+      expect(cents(s.partnerShare) - cents(s.contribution)).toBe(cents(s.partnerTakeHome));
+      // your take-home is a subtraction from profit, not a percentage of anything
+      expect(cents(s.yourTakeHome)).toBe(cents(s.profit) - cents(s.partnerTakeHome));
+    });
+  }
+
+  it("the exact case from the screen: 39.95 profit never shows two take-homes that add to 39.94", () => {
+    const s = computeCollabSplit(39.95, 50, 10);
+    expect(s.partnerTakeHome).toBe(9.98);
+    expect(s.yourTakeHome).toBe(29.97);
+    expect(s.partnerTakeHome.toFixed(2)).toBe("9.98");
+    expect(cents(s.partnerTakeHome) + cents(s.yourTakeHome)).toBe(3995);
+  });
+
+  it("half cents round away from zero (partner share of 19.975 is 19.98, and -19.975 is -19.98)", () => {
+    expect(computeCollabSplit(39.95, 50, 0).partnerShare).toBe(19.98);
+    expect(computeCollabSplit(-39.95, 50, 0).partnerShare).toBe(-19.98);
+  });
+
+  it("holds for thousands of arbitrary profits, percentages and contributions", () => {
+    let seed = 12345;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+    for (let i = 0; i < 5000; i++) {
+      const profit = Math.round((rnd() * 2000 - 200) * 10000) / 10000; // includes sub-cent profits and losses
+      const pct = Math.round(rnd() * 100000) / 1000; // 0 to 100, three decimals
+      const contribution = Math.round(rnd() * 20000) / 100;
+      const s = computeCollabSplit(profit, pct, contribution);
+      expect(cents(s.partnerTakeHome) + cents(s.yourTakeHome)).toBe(cents(s.profit));
+      expect(cents(s.partnerShare) - cents(s.contribution)).toBe(cents(s.partnerTakeHome));
+    }
   });
 });
 

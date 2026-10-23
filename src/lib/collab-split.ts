@@ -5,31 +5,43 @@ import type { Event } from "./types";
  *
  *   profit             = revenue - costs        (the event's existing profit)
  *   partner take-home  = profit x split% - partner ingredient contribution
- *   your take-home     = profit - partner take-home
+ *   your take-home     = profit - partner take-home      (a subtraction, never its own %)
  *
  * The contribution is a dollar amount typed per event (the expense split is
  * decided ad hoc and does not always cover every ingredient), never a percentage.
+ *
+ * Everything is worked out in whole cents and rounded once, so the two
+ * take-homes ALWAYS add up to the profit shown, to the cent.
  */
 export type CollabSplit = {
+  /** Profit rounded to cents: the number the split works from and the number shown. */
   profit: number;
   splitPct: number;
   contribution: number;
-  /** The partner's cut of the profit, before the contribution is taken off. */
+  /** The partner's cut of the profit (rounded to cents), before the contribution is taken off. */
   partnerShare: number;
   partnerTakeHome: number;
   yourTakeHome: number;
 };
 
+/** Round a number of cents to a whole cent, halves away from zero, ignoring float noise (1997.4999999 is a half). */
+function roundCents(cents: number): number {
+  return Math.sign(cents) * Math.round(Number(Math.abs(cents).toFixed(6)));
+}
+
 export function computeCollabSplit(profit: number, splitPct: number, contribution: number): CollabSplit {
-  const partnerShare = profit * (splitPct / 100);
-  const partnerTakeHome = partnerShare - contribution;
+  const profitC = roundCents(profit * 100);
+  const shareC = roundCents((profitC * splitPct) / 100);
+  const contributionC = roundCents(contribution * 100);
+  const partnerC = shareC - contributionC;
+  const yourC = profitC - partnerC;
   return {
-    profit,
+    profit: profitC / 100,
     splitPct,
-    contribution,
-    partnerShare,
-    partnerTakeHome,
-    yourTakeHome: profit - partnerTakeHome,
+    contribution: contributionC / 100,
+    partnerShare: shareC / 100,
+    partnerTakeHome: partnerC / 100,
+    yourTakeHome: yourC / 100,
   };
 }
 

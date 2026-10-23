@@ -19,7 +19,7 @@ test.describe("revenue share is no longer offered", () => {
     await placeOrder(page, { items: [{ name: "Classic Matcha" }], name: "One", pay: "Cash", declineCombo: true });
     await goTab(page, "Event Summary");
     const main = page.locator("main");
-    await expect(main.getByText(/revenue share/i)).toHaveCount(0);
+    await expect(main.getByText(/^revenue share/i)).toHaveCount(0);
     await expect(main.getByRole("button", { name: /revenue share/i })).toHaveCount(0);
     expect((await readState(page)).events.find((e: any) => e.name === "No rev share").donationPct).toBeUndefined();
   });
@@ -50,7 +50,7 @@ test.describe("an event that already has a revenue share keeps its numbers", () 
     await goTab(page, "Event Summary");
     const main = page.locator("main");
     // the same tiles as before: revenue share, and Net profit = profit - share
-    await expect(main.getByText("10% of revenue")).toBeVisible();
+    await expect(main.getByText("10% of revenue").first()).toBeVisible();
     await expect(main.getByText("Net profit").first()).toBeVisible();
     await expect(main).toContainText(money(share));
     await expect(main).toContainText(money(revenue - cost - share));

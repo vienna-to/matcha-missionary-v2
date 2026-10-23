@@ -248,7 +248,7 @@ In one run of `30-make-active`, creating two events quickly ("Early" then "Late"
 **Snapshot behaviour.** Cost, price and name are stamped when the line is created. Editing an order keeps a custom line's stamped values (quantity, discount and notes changes do not re-price); a unit test changes the ingredient price after the sale and checks the line keeps its cost.
 
 **Known limits (decide if they matter).**
-- Cost counts only the selected bases and toppings, as specified. Cup, lid, straw, ice and agave are not included, so a custom drink's cost is understated by roughly what those cost on a menu drink (about $0.45 with the seed prices). Say if they should be added.
+- Cost counts only the selected bases and toppings, as specified. Cup, lid, straw, ice and agave are not included, so a custom drink's cost is understated by roughly what those cost on a menu drink (about $0.54 on a 16 oz drink with the seed prices). Say if they should be added.
 - Two milks as two bases cost two milk amounts (the spec's "sum").
 - Classification of an ingredient as base or topping is by pool and name. A new ingredient named something unexpected (for example "Taro paste") is not offered until it matches, or Menu Manager gets a flag for it.
 - Custom drinks are not eligible for combo suggestions and are not taxable in the CSV export (unknown items default to non-taxable).

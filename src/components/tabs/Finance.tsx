@@ -5,6 +5,7 @@ import { AlertTriangle, Archive, ArchiveRestore, Pencil, Plus, Trash2 } from "lu
 import { Badge, Button, Card, Field, Input, NumberField, TextField } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { defaultItemCost, defaultItemMargin, ingredientCostPerCanonical } from "@/lib/calc";
+import { ingredientPrice } from "@/lib/prepared";
 import { compareMenuItems, type Ingredient, type InventoryPurchase } from "@/lib/types";
 import { UNIT_LABELS, UNIT_TABLE } from "@/lib/units";
 import { formatMoney, formatPct } from "@/lib/utils";
@@ -179,13 +180,14 @@ export default function Finance() {
             </thead>
             <tbody>
               {state.ingredients.map((ing: Ingredient) => {
-                const perUnit = ingredientCostPerCanonical(ing);
+                const perUnit = ingredientCostPerCanonical(ing, state.ingredients);
                 const canonical = UNIT_TABLE[ing.unit].canonical;
                 return (
                   <tr key={ing.id} className="border-t border-cream-100">
                     <td className="py-2 pr-4 font-medium lowercase">{ing.name}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">
-                      {formatMoney(ing.packagePrice)}
+                      {formatMoney(ingredientPrice(ing, state.ingredients))}
+                      {ing.kind === "prepared" ? <span className="ml-1 text-[10px] text-matcha-900/50">/ batch</span> : null}
                     </td>
                     <td className="py-2 pr-4 text-right tabular-nums">
                       {ing.packageAmount}

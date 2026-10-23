@@ -91,3 +91,13 @@ export function preparedCostSummary(ing: Ingredient, ingredients: Ingredient[]) 
   const batch = preparedBatchCost(ing, ingredients);
   return { batch, perYieldUnit: ing.packageAmount > 0 ? batch / ing.packageAmount : 0 };
 }
+
+/** What to show as an ingredient's "package price": typed for raw, the cost of one batch for prepared. */
+export function ingredientPrice(ing: Ingredient, ingredients: Ingredient[]): number {
+  return ing.kind === "prepared" ? preparedBatchCost(ing, ingredients) : ing.packagePrice;
+}
+
+/** Cost per package unit (per yield unit for prepared), for lists and sorting. */
+export function ingredientUnitCost(ing: Ingredient, ingredients: Ingredient[]): number {
+  return ing.packageAmount > 0 ? ingredientPrice(ing, ingredients) / ing.packageAmount : 0;
+}

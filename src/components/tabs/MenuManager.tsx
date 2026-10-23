@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Archive, Trash2, AlertTriangle, GripVertical, ArrowUpDown } from "lucide-react";
+import { Plus, Pencil, Archive, Trash2, AlertTriangle, GripVertical, ArrowUpDown, Layers } from "lucide-react";
 import {
   DndContext,
   KeyboardSensor,
@@ -39,6 +39,7 @@ import {
   SIZES,
   SIZE_LABELS,
   compareMenuItems,
+  type CustomRole,
   type Ingredient,
   type IngredientLine,
   type MenuItem,
@@ -47,6 +48,13 @@ import {
 } from "@/lib/types";
 import { UNITS_BY_CATEGORY, UNIT_LABELS, unitCategory } from "@/lib/units";
 import { defaultItemCost, defaultItemMargin } from "@/lib/calc";
+import {
+  ingredientPrice,
+  ingredientUnitCost,
+  preparedCostSummary,
+  preparedUsing,
+  subRecipeChoices,
+} from "@/lib/prepared";
 import { formatMoney, formatPct } from "@/lib/utils";
 
 type SubTab = "items" | "ingredients";
@@ -767,11 +775,10 @@ function dirLabel(mode: IngSort, dir: SortDir): string {
   }
 }
 
-const unitCost = (i: Ingredient) =>
-  i.packageAmount > 0 ? i.packagePrice / i.packageAmount : 0;
 const ts = (s: string) => (s ? Date.parse(s) || 0 : 0);
 
 function sortIngredients(list: Ingredient[], mode: IngSort, dir: SortDir): Ingredient[] {
+  const all = list;
   // Array.prototype.sort is stable, so ties keep their manual order.
   const manual = [...list].sort(
     (a, b) =>
@@ -786,9 +793,9 @@ function sortIngredients(list: Ingredient[], mode: IngSort, dir: SortDir): Ingre
     case "name":
       return manual.sort((a, b) => sign * a.name.localeCompare(b.name));
     case "price":
-      return num((i) => i.packagePrice);
+      return num((i) => ingredientPrice(i, all));
     case "unit_cost":
-      return num(unitCost);
+      return num((i) => ingredientUnitCost(i, all));
     case "qty":
       return num((i) => i.packageAmount);
     case "edited":
@@ -801,6 +808,7 @@ function sortIngredients(list: Ingredient[], mode: IngSort, dir: SortDir): Ingre
 function IngredientsList() {
   const { state, dispatch } = useStore();
   const [creating, setCreating] = useState(false);
+  const [recipeForId, setRecipeForId] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<IngSort>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -893,7 +901,7 @@ function IngredientsList() {
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <table className="min-w-full text-sm max-md:min-w-[38rem]">
+            <table className="min-w-full text-sm max-md:min-w-[46rem]">
               <thead>
                 <tr className="t-display text-left text-xs text-matcha-900/60">
                   <th className="w-6 py-2" />
@@ -902,6 +910,10 @@ function IngredientsList() {
                   <th className="py-2 pr-3">Package amount</th>
                   <th className="py-2 pr-3">Unit</th>
                   <th className="py-2 pr-3 text-right">$/unit</th>
+                  <th className="py-2 pr-3" title="How the custom drink builder uses this ingredient">
+                    Custom drink
+                  </th>
+                  <th className="py-2 pr-3">Type</th>
                   <th />
                 </tr>
               </thead>
@@ -914,7 +926,10 @@ function IngredientsList() {
                     <IngredientRow
                       key={ing.id}
                       ing={ing}
+                      all={state.ingredients}
                       dragEnabled={dragEnabled}
+                      usedBy={preparedUsing(ing.id, state.ingredients)}
+                      onEditRecipe={() => setRecipeForId(ing.id)}
                       onChange={(patch) =>
                         dispatch({ type: "UPDATE_INGREDIENT", id: ing.id, patch })
                       }
@@ -924,6 +939,11 @@ function IngredientsList() {
                         );
                         if (used) {
                           alert("Used by a menu item — remove from items first.");
+                          return;
+                        }
+                        const inPrepared = preparedUsing(ing.id, state.ingredients);
+                        if (inPrepared.length > 0) {
+                          alert(`Used in the recipe of ${inPrepared.map((p) => p.name).join(", ")} — remove it there first.`);
                           return;
                         }
                         if (confirm(`Delete ingredient "${ing.name}"?`)) {
@@ -938,6 +958,18 @@ function IngredientsList() {
           </DndContext>
         </div>
       </Card>
+
+      {recipeForId && state.ingredients.find((i) => i.id === recipeForId) ? (
+        <PreparedRecipeModal
+          ingredient={state.ingredients.find((i) => i.id === recipeForId)!}
+          all={state.ingredients}
+          onClose={() => setRecipeForId(null)}
+          onSave={(patch) => {
+            dispatch({ type: "UPDATE_INGREDIENT", id: recipeForId, patch });
+            setRecipeForId(null);
+          }}
+        />
+      ) : null}
 
       {creating ? (
         <Modal open onClose={() => setCreating(false)} title="New ingredient">
@@ -956,19 +988,26 @@ function IngredientsList() {
 
 function IngredientRow({
   ing,
+  all,
   dragEnabled,
+  usedBy,
+  onEditRecipe,
   onChange,
   onDelete,
 }: {
   ing: Ingredient;
+  all: Ingredient[];
   dragEnabled: boolean;
+  /** Prepared ingredients whose recipe uses this one. */
+  usedBy: Ingredient[];
+  onEditRecipe: () => void;
   onChange: (patch: Partial<Ingredient>) => void;
   onDelete: () => void;
 }) {
+  const prepared = ing.kind === "prepared";
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: ing.id, disabled: !dragEnabled });
-  const perUnit =
-    ing.packageAmount > 0 ? ing.packagePrice / ing.packageAmount : 0;
+  const perUnit = ingredientUnitCost(ing, all);
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -999,13 +1038,25 @@ function IngredientRow({
         />
       </td>
       <td className="py-1.5 pr-3">
-        <NumberField
-          className="h-8"
-          step="0.01"
-          min={0}
-          value={ing.packagePrice}
-          onChange={(n) => onChange({ packagePrice: n })}
-        />
+        {prepared ? (
+          // Computed from the recipe, never typed.
+          <span
+            className="t-caption block text-xs tabular-nums text-matcha-900/70"
+            title="Cost of one batch, from its recipe"
+            data-testid={`batch-cost-${ing.name}`}
+          >
+            {formatMoney(ingredientPrice(ing, all))}
+            <span className="ml-1 text-[10px] text-matcha-900/50">/ batch</span>
+          </span>
+        ) : (
+          <NumberField
+            className="h-8"
+            step="0.01"
+            min={0}
+            value={ing.packagePrice}
+            onChange={(n) => onChange({ packagePrice: n })}
+          />
+        )}
       </td>
       <td className="py-1.5 pr-3">
         <NumberField
@@ -1032,6 +1083,67 @@ function IngredientRow({
       <td className="py-1.5 pr-3 text-right font-mono text-xs text-matcha-900/70 tabular-nums">
         ${perUnit.toFixed(4)}
       </td>
+      <td className="py-1.5 pr-3">
+        {ing.pool === "milk" ? (
+          // Milk is added to a tea drink automatically, never picked.
+          <span className="t-caption text-xs text-matcha-900/60">milk (automatic)</span>
+        ) : (
+          <Select
+            className="h-8"
+            aria-label={`Custom drink role for ${ing.name}`}
+            value={ing.customRole ?? ""}
+            onChange={(e) => onChange({ customRole: e.target.value as CustomRole })}
+          >
+            {ing.customRole === undefined ? (
+              <option value="" disabled>
+                Not set
+              </option>
+            ) : null}
+            <option value="base">Base (tea)</option>
+            <option value="topping">Topping</option>
+            <option value="none">Neither</option>
+          </Select>
+        )}
+      </td>
+      <td className="py-1.5 pr-3">
+        <div className="flex items-center gap-1">
+          <Select
+            className="h-8"
+            aria-label={`Type of ${ing.name}`}
+            value={prepared ? "prepared" : "raw"}
+            disabled={!prepared && usedBy.length > 0}
+            title={
+              !prepared && usedBy.length > 0
+                ? `Used in the recipe of ${usedBy.map((p) => p.name).join(", ")}, so it has to stay raw`
+                : undefined
+            }
+            onChange={(e) => {
+              if (e.target.value === "prepared") {
+                onChange({ kind: "prepared", subRecipe: [], packagePrice: 0 });
+                onEditRecipe();
+              } else if (
+                confirm(`Turn "${ing.name}" back into a raw ingredient? Its recipe is removed and you set a price yourself.`)
+              ) {
+                onChange({ kind: "raw", subRecipe: [] });
+              }
+            }}
+          >
+            <option value="raw">Raw</option>
+            <option value="prepared">Prepared</option>
+          </Select>
+          {prepared ? (
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label={`Recipe for ${ing.name}`}
+              title="Edit recipe and yield"
+              onClick={onEditRecipe}
+            >
+              <Layers className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+        </div>
+      </td>
       <td className="py-1.5">
         <Button size="sm" variant="ghost" onClick={onDelete}>
           <Trash2 className="h-3.5 w-3.5" />
@@ -1054,22 +1166,32 @@ function NewIngredientForm({
   const [packagePrice, setPackagePrice] = useState(0);
   const [packageAmount, setPackageAmount] = useState(0);
   const [unit, setUnit] = useState<Unit>("g");
+  const [role, setRole] = useState<CustomRole | "">("");
+  const [prepared, setPrepared] = useState(false);
   return (
     <div className="space-y-3">
       <Field label="Name">
         <Input value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <div className="grid grid-cols-3 gap-2">
-        <Field label="Package $">
-          <NumberField
-            step="0.01"
-            min={0}
-            value={packagePrice}
-            commit="change"
-            onChange={setPackagePrice}
-          />
-        </Field>
-        <Field label="Amount">
+      <Field label="Type" hint={prepared ? "Made from raw ingredients. Add its recipe with the recipe button after creating it." : undefined}>
+        <Select value={prepared ? "prepared" : "raw"} onChange={(e) => setPrepared(e.target.value === "prepared")}>
+          <option value="raw">Raw (you type the price)</option>
+          <option value="prepared">Prepared (cost worked out from a recipe)</option>
+        </Select>
+      </Field>
+      <div className={prepared ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}>
+        {prepared ? null : (
+          <Field label="Package $">
+            <NumberField
+              step="0.01"
+              min={0}
+              value={packagePrice}
+              commit="change"
+              onChange={setPackagePrice}
+            />
+          </Field>
+        )}
+        <Field label={prepared ? "Yield of one batch" : "Amount"}>
           <NumberField
             step="0.01"
             min={0}
@@ -1088,6 +1210,14 @@ function NewIngredientForm({
           </Select>
         </Field>
       </div>
+      <Field label="Custom drink role" hint="Teas are bases; creams and purées are toppings. Packaging and flavors that are not a topping: Neither.">
+        <Select value={role} onChange={(e) => setRole(e.target.value as CustomRole | "")}>
+          <option value="">Not set</option>
+          <option value="base">Base (tea)</option>
+          <option value="topping">Topping</option>
+          <option value="none">Neither</option>
+        </Select>
+      </Field>
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel}>
           Cancel
@@ -1097,9 +1227,11 @@ function NewIngredientForm({
             onCreate({
               name: name.trim(),
               pool: null,
-              packagePrice,
+              ...(role ? { customRole: role } : {}),
+              packagePrice: prepared ? 0 : packagePrice,
               packageAmount,
               unit,
+              ...(prepared ? { kind: "prepared" as const, subRecipe: [] } : {}),
             })
           }
           disabled={!name.trim() || packageAmount <= 0}
@@ -1108,5 +1240,112 @@ function NewIngredientForm({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Recipe and yield of a prepared ingredient: which RAW ingredients, and how
+ * much of each, make ONE batch, and how much one batch yields. Shows the cost
+ * of a batch and per unit as it is edited. Only raw ingredients can be listed
+ * (one level of nesting).
+ */
+function PreparedRecipeModal({
+  ingredient,
+  all,
+  onSave,
+  onClose,
+}: {
+  ingredient: Ingredient;
+  all: Ingredient[];
+  onSave: (patch: Partial<Ingredient>) => void;
+  onClose: () => void;
+}) {
+  const choices = subRecipeChoices(ingredient.id, all);
+  const [lines, setLines] = useState<IngredientLine[]>(ingredient.subRecipe ?? []);
+  const [yieldAmount, setYieldAmount] = useState(ingredient.packageAmount);
+  const [yieldUnit, setYieldUnit] = useState<Unit>(ingredient.unit);
+
+  const draft: Ingredient = { ...ingredient, subRecipe: lines, packageAmount: yieldAmount, unit: yieldUnit };
+  const { batch, perYieldUnit } = preparedCostSummary(draft, all);
+
+  function addLine() {
+    const first = choices[0];
+    if (!first) return;
+    setLines((ls) => [...ls, { ingredientId: first.id, amount: 1, unit: first.unit }]);
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Recipe: ${ingredient.name}`}>
+      <div className="space-y-4">
+        <p className="t-caption text-xs text-matcha-900/60">
+          list the raw ingredients in one batch, then how much one batch makes. its cost per unit is
+          worked out from today&apos;s ingredient prices, so it follows every price change.
+        </p>
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <h4 className="text-sm font-semibold">One batch uses</h4>
+            <Button size="sm" variant="outline" onClick={addLine} disabled={choices.length === 0}>
+              <Plus className="h-3.5 w-3.5" /> Add ingredient
+            </Button>
+          </div>
+          {choices.length === 0 ? (
+            <p className="text-xs text-matcha-900/60">No raw ingredients to use yet. Add some first.</p>
+          ) : lines.length === 0 ? (
+            <p className="text-xs text-matcha-900/60">No ingredients yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {lines.map((line, idx) => (
+                <LineRow
+                  key={idx}
+                  line={line}
+                  ingredients={choices}
+                  onChange={(l) => setLines((ls) => ls.map((x, i) => (i === idx ? l : x)))}
+                  onRemove={() => setLines((ls) => ls.filter((_, i) => i !== idx))}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="One batch makes (yield)">
+            <NumberField step="0.1" min={0} value={yieldAmount} commit="change" onChange={setYieldAmount} />
+          </Field>
+          <Field label="Yield unit">
+            <Select
+              value={yieldUnit}
+              onChange={(e) => setYieldUnit(e.target.value as Unit)}
+              aria-label="Yield unit"
+            >
+              {Object.entries(UNIT_LABELS).map(([u, lab]) => (
+                <option key={u} value={u}>
+                  {lab}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="t-caption space-y-1 rounded-xl bg-matcha-50 px-3 py-2 text-xs text-matcha-900/80">
+          <div className="flex items-center justify-between">
+            <span>cost of one batch</span>
+            <span className="tabular-nums" data-testid="recipe-batch-cost">{formatMoney(batch)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>cost per {UNIT_LABELS[yieldUnit]}</span>
+            <span className="tabular-nums" data-testid="recipe-unit-cost">${perYieldUnit.toFixed(4)}</span>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={yieldAmount <= 0}
+            onClick={() => onSave({ subRecipe: lines, packageAmount: yieldAmount, unit: yieldUnit })}
+          >
+            Save recipe
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

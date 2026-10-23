@@ -13,8 +13,12 @@ import type {
 } from "@/lib/types";
 import {
   isMissingTable,
+  isMissingPreparedColumn,
+  isMissingRoleColumn,
   missingColumns,
   MIGRATION_HINT,
+  PREPARED_MIGRATION_HINT,
+  ROLE_MIGRATION_HINT,
   reportSaveError,
 } from "./save-errors";
 import {
@@ -44,6 +48,23 @@ function tag(label: string) {
   return (e: unknown) => {
     if (e) console.error(`[supabase ${label}]`, e);
   };
+}
+
+/** Supabase clients that were seen to lack the prepared-ingredient columns (kind, sub_recipe). */
+const preparedColumnsMissing = new WeakSet<SupabaseClient>();
+
+const PREPARED_FIELDS = ["kind", "subRecipe", "packagePrice", "packageAmount", "unit"] as const;
+
+function without<T extends object>(o: T, keys: readonly string[]): T {
+  const out = { ...o } as Record<string, unknown>;
+  for (const k of keys) delete out[k];
+  return out as T;
+}
+
+function reportPreparedNotSaved(name: string) {
+  reportSaveError(
+    `The prepared ingredient "${name}" could not be saved: the database is out of date. ${PREPARED_MIGRATION_HINT}`,
+  );
 }
 
 /**
@@ -313,16 +334,77 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
 
   // ---------- ingredients ----------
   async addIngredient(ing: Ingredient) {
-    const { error } = await supabase.from("ingredients").insert(toIngredientInsert(workspaceId, ing));
-    tag("addIngredient")(error);
+    // Two independent migrations add ingredient columns (custom_role, and kind +
+    // sub_recipe). Either may be missing, so retry without whichever the database
+    // reports missing; a prepared ingredient is never saved without its columns.
+    let row = ing;
+    let roleDropped = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (ing.kind === "prepared" && preparedColumnsMissing.has(supabase)) {
+        reportPreparedNotSaved(ing.name);
+        return;
+      }
+      const { error } = await supabase.from("ingredients").insert(toIngredientInsert(workspaceId, row));
+      if (!error) {
+        // said only once it is certain the ingredient itself was saved
+        if (roleDropped) reportSaveError(`"${ing.name}" was saved without its custom drink role. ${ROLE_MIGRATION_HINT}`);
+        return;
+      }
+      if (isMissingRoleColumn(error) && row.customRole !== undefined) {
+        const { customRole: _dropped, ...rest } = row;
+        void _dropped;
+        row = rest;
+        roleDropped = true;
+        continue;
+      }
+      if (isMissingPreparedColumn(error) && ing.kind === "prepared") {
+        preparedColumnsMissing.add(supabase);
+        reportPreparedNotSaved(ing.name);
+        return; // never as a raw ingredient: it would cost $0
+      }
+      tag("addIngredient")(error);
+      return;
+    }
   },
-  async updateIngredient(id: string, patch: Partial<Ingredient>) {
-    const { error } = await supabase
-      .from("ingredients")
-      .update(toIngredientPatch(patch))
-      .eq("id", id)
-      .eq("workspace_id", workspaceId);
-    tag("updateIngredient")(error);
+  /**
+   * `existing` is the ingredient as it was before this edit. It lets the writer
+   * recognise an ingredient that is prepared on this device but could not be
+   * saved as prepared (columns missing): such an ingredient must never have its
+   * yield, unit or price written onto the database's raw row.
+   */
+  async updateIngredient(id: string, patch: Partial<Ingredient>, existing?: Ingredient) {
+    const becomingRaw = patch.kind === "raw";
+    const treatAsPrepared = patch.kind === "prepared" || (existing?.kind === "prepared" && !becomingRaw);
+    const strip = (x: Partial<Ingredient>) =>
+      treatAsPrepared ? without(x, PREPARED_FIELDS) : without(x, ["kind", "subRecipe"]);
+    let p: Partial<Ingredient> = preparedColumnsMissing.has(supabase) ? strip(patch) : patch;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (Object.keys(p).length === 0) return;
+      const { error } = await supabase
+        .from("ingredients")
+        .update(toIngredientPatch(p))
+        .eq("id", id)
+        .eq("workspace_id", workspaceId);
+      if (!error) return;
+      if (isMissingRoleColumn(error) && p.customRole !== undefined) {
+        // everything else in the patch still has to be saved
+        p = without(p, ["customRole"]);
+        reportSaveError(`The custom drink role could not be saved. ${ROLE_MIGRATION_HINT}`);
+        continue;
+      }
+      if (isMissingPreparedColumn(error) && (p.kind !== undefined || p.subRecipe !== undefined)) {
+        preparedColumnsMissing.add(supabase);
+        reportSaveError(
+          `A prepared ingredient change could not be saved: the database is out of date. ${PREPARED_MIGRATION_HINT}`,
+        );
+        // Keep the unrelated part of the edit, but never a price, yield or unit that
+        // belongs to a prepared ingredient (it would overwrite the raw row).
+        p = strip(p);
+        continue;
+      }
+      tag("updateIngredient")(error);
+      return;
+    }
   },
   async deleteIngredient(id: string) {
     const { error } = await supabase

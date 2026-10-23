@@ -229,3 +229,126 @@ A Realtime UPDATE payload leaves out unchanged large out-of-line jsonb columns; 
 
 ## Separate, unexplained issue: wrong event deleted (needs its own investigation)
 In one run of `30-make-active`, creating two events quickly ("Early" then "Late") and then using Delete event on Event Summary deleted "Early" in the database while the UI showed "Late" selected. It passed in two other runs. Unproven guess: a late Realtime echo of the first event's INSERT (is_active true) flipped the active event locally just before Event Summary opened, so it defaulted to the wrong event. Not fixed in this batch. The test now waits for the sidebar card and 2 s of settle time, which may hide it.
+
+## Feature: custom / off-menu drink (branch `feature/custom-items`, two rounds)
+
+**What it is.** A "+ Custom drink" option in order entry (Live Orders header and the order panel's Items step), in Edit Order (Add item picker) and in the combo picker ("CUSTOM DRINK..."). Order entry and Edit Order are separate code paths (the cart in `LiveOrders`/`OrderFlow`, and the draft list in `EditOrderModal`); both are done and both go through the same `deriveOrderItem`, which stamps price and cost.
+
+### Rules (after the revision round)
+- **Price**: 6.70 flat + 0.20 per topping. Bases never change it (2 bases + 2 toppings = 7.10).
+- **Cost = tea + milk + toppings + packaging**, every amount from recipes the menu already has, nothing hardcoded:
+  - **Tea**: the standard amount of each selected tea. Several teas split it evenly (2 = half each, 3 = a third each).
+  - **Milk**: added automatically to a tea drink, one full standard amount whatever the number of teas. "Milk only" is the base for a drink with no tea. The milk choice (whole / lactose free) works like a menu drink's and re-costs the line.
+  - **Toppings**: the standard amount of each.
+  - **Packaging**: read from the recipes, not a dollar figure: the ingredients that are not a tea, milk, cream or topping and that more than half of the active drinks use (with the seed menu: cup, lid, straw, ice, agave, about $0.54 on a 16 oz drink). It follows ingredient price changes and menu changes. A one-off ingredient (the chocolate spread) is used by too few drinks to count.
+  - Everything scales by the event cup size / 16 oz exactly like a menu drink (that includes packaging lines, as it does for menu drinks).
+- **Where "standard amounts" come from** (unchanged and reused, not invented): the amount the first drink recipe (active first, then menu order) uses for that ingredient. Standard milk = the milk line of the first drink that has one, with that drink's default milk. A cream no recipe uses (banana cream in the seed menu) takes the cream pool's amount.
+- **Combo**: $10 flat covers a custom drink at $6.70 or $6.90; each topping beyond the first adds $0.20 (3 toppings = $10.40). Offered as a suggestion when a custom drink and a pastry are in the cart, and in the combo picker. The combo price is stamped on the line, and combo revenue and cost still add up in the Event Summary drink/pastry split.
+- Custom drinks are non-taxable in the CSV like unknown items; cost, price and name are snapshotted at order time (sale-time values survive later ingredient price changes and Edit Order saves).
+
+### Base / topping flag (this round's migration)
+- New column `ingredients.custom_role` (`base` | `topping` | `none` | null). Migration: `supabase/migration-add-ingredient-custom-role.sql` (also added to `schema.sql` for fresh installs).
+- Menu Manager > Ingredients has a "Custom drink" column to set each ingredient to Base (tea), Topping or Neither (and the New ingredient form has the same field). Milk-pool ingredients show "milk (automatic)" and are never offered.
+- The builder's two dropdowns list only ingredients whose role is base or topping and that a drink recipe uses (otherwise they cannot be costed), plus "Milk only" in the bases.
+- **The migration backfills** roles once so existing menus keep working: creams and purees become toppings; matcha / hojicha / tea / earl grey / genmaicha / sencha / chai (never the milk pool) become bases. Review them in Menu Manager. Rows it does not match stay null.
+- **Without the column the app keeps working.** An ingredient whose role was never set (null / column missing) falls back to the old name guess, so the builder still shows teas and toppings. Setting a role before the migration is run reports a red banner ("run migration-add-ingredient-custom-role.sql"), saves the rest of that edit, and keeps the role only on that device until reload. Adding an ingredient with a role falls back to saving it without the role. Ordinary ingredient edits never send the column.
+
+### MIGRATION: apply to production before the flag and dropdowns are fully working
+- **`supabase/migration-add-ingredient-custom-role.sql` must be run in the production Supabase SQL editor.** It has NOT been applied to production (nothing here touched production). Run it once; it is safe to re-run. The app can be deployed before or after it.
+- **What depends on it**: the stored base/topping/neither flag, the Menu Manager control persisting across reloads and devices, and the dropdowns being driven by saved flags rather than the name guess.
+- **What does NOT depend on it**: the packaging in cost, the automatic milk, the even tea split, milk only, and the combo pricing. Those are app logic only and work today, with or without the column. (Custom orders themselves need no migration either: a custom line is an ordinary `order_items` row whose text `menu_item_id` encodes the selection.)
+- Separate, still pending from earlier work: `migration-grant-anon-extras-revisions.sql` and `migration-replace-order-items.sql` (unrelated to this feature).
+
+### Verified
+- Unit: 137 pass (115 before this round + 8 role/serializer/writer-fallback + custom-item tests rewritten to 34 for packaging, automatic milk, even tea split, milk-only, flag-driven dropdown, role fallback, combo price, combo suggestion, split of combo revenue and cost).
+- Local e2e (blank Supabase env): 50 pass (6 custom-drink tests: dropdowns list only teas / toppings, cost and price preview, milk only, Menu Manager flag changes the dropdowns, custom combo $10.40, Edit Order add, base required).
+- **Against a LOCAL Supabase** (applied only to the local database, then stopped; nothing touched production): `e2e/supabase/70-custom-item.spec.ts`, 2/2.
+  1. Column absent: the builder works from the name guess, a custom order saves, setting a role shows the migration banner while another ingredient edit still saves.
+  2. Seeded with the column absent, migration applied: the backfill marked Hojicha / Matcha / Earl Grey as base, Ube cream / Strawberry puree as topping, and left Whole milk, Agave and the cup null; a role set in Menu Manager persists across a reload; the dropdown follows it; a custom order, a $10.40 custom combo and an Edit Order add (through the atomic `replace_order_items` function) are stored with the right `menu_item_id`, price, cost and milk name, the original line keeps its sale-time cost through the edit, and everything reads back after a full reload.
+  - The other Supabase specs were re-run too: 20 passed in total (10 pairing, 20 edit/pricing, 30 make-active, 40 realtime, 50 activate-refresh, 60 atomic edit, 70 custom).
+  - `40-realtime` had never produced a result before (see the earlier note); on its first run it failed because the spec polled `order_items.status`, while Start sets `orders.status`. The spec was wrong, not the app; fixed and it passes.
+
+### Known limits
+- A new ingredient with a name the guess does not recognise is not offered until its role is set (the guess only applies to never-set rows; use the Menu Manager control).
+- The components of an existing custom line cannot be changed in Edit Order; remove the line and add a new custom drink.
+- Which drink counts as "standard" is the first in menu order, so reordering the menu can change a standard amount (for example the milk amount).
+- Packaging detection is "used by more than half of the active drinks". A menu with very few drinks, or where packaging differs a lot per drink, may need the menu tidied.
+- Helper mode shows the price but never cost or margin in the builder.
+
+### Gates (final code of this round)
+Typecheck clean; `next lint` clean; vitest 137 passed; `next build` succeeds; full local Playwright suite 50 passed (43 + revenue-share editor 1 + custom drink 6); Supabase-mode suite 20 passed against a local Supabase (now stopped).
+
+## Feature: prepared (composite) ingredients (branch `feature/prepared-ingredients`, off main)
+
+**What it is.** An ingredient is either RAW (cost typed in, as always) or PREPARED: made from raw ingredients, with its cost per unit worked out from that recipe. A drink uses a prepared ingredient as ONE line, picked from the same ingredient list and the same recipe picker as any raw ingredient. When a raw price changes, it flows into the prepared ingredient and every drink that uses it.
+
+### How cost worked before, and what changed
+- A raw ingredient costs `packagePrice / packageAmount` per canonical unit (g / ml / piece). A menu item is a list of lines (ingredient, amount, unit); `computeItemCost` (src/lib/calc.ts) sums each line's cost, swaps the milk / cream pool choice, and scales every line by the event cup size / 16 oz. Nothing was stored for an ingredient's cost: it is computed from the current ingredient list each time.
+- **Snapshotting (unchanged, and prepared ingredients honour it for free).** Placing an order calls `computeItemCost` in `deriveOrderItem` and stores the result as the line's `costSnap`. Edit Order keeps that stamp for an unchanged line. Because a prepared ingredient's price is computed inside the same function, from the same ingredient list, the stamped cost already includes it and later raw price changes cannot rewrite a past order. The event's frozen menu snapshot copies the ingredient objects (including the new fields).
+- **New in the cost code:** `ingredientCostPerCanonical(ing, ingredients)` and `lineCost(line, ing, ingredients)` take the ingredient list; for a prepared ingredient the per-unit cost is `(sum of its raw sub-recipe line costs for one batch) / (yield)`. `computeItemCost` passes its list through, so existing menu-item costing is unchanged for raw ingredients (tested: a raw-only drink costs exactly what it did).
+
+### Model
+- `Ingredient.kind` (`raw` default | `prepared`) and `Ingredient.subRecipe` (the raw ingredients and amounts of ONE batch).
+- **The yield is stored in the existing `package_amount` + `unit` columns** (for example 32 and fl_oz), and `package_price` is 0 for a prepared ingredient. Nothing about cost is stored; it is always computed.
+- **One level only, enforced in three places** (`src/lib/prepared.ts`): the recipe picker lists only raw ingredients (not prepared ones, not itself); the reducer and the store drop any sub-recipe line that names a prepared ingredient, itself or a missing ingredient (so the database receives what the reducer applied); and a raw ingredient that is used in a prepared ingredient's recipe cannot be turned into a prepared one (its Type control is disabled with a reason, and the rule also holds in the reducer). A prepared ingredient found inside another's recipe (for example from older data) adds $0 rather than nesting. Deleting an ingredient that is in a prepared recipe is blocked with a message.
+
+### Menu Manager
+- Ingredients list: new **Type** column (Raw / Prepared). A prepared row shows its cost per batch and per unit (computed, not editable), its yield and yield unit (editable, same fields), and a **Recipe** button. Switching a raw ingredient to Prepared opens the recipe editor; switching back asks first, removes the recipe, and you set a price.
+- **Recipe editor**: list raw ingredients and amounts for one batch, set the yield and unit, see the cost of a batch and per unit update live, Save.
+- New ingredient form has a Type choice (a prepared one asks for its yield, then use the Recipe button).
+- Finance shows prepared ingredients with their computed batch cost and per-unit cost. Sorting by price / unit cost / quantity uses the computed values.
+
+### MIGRATION: apply to production before prepared ingredients work
+- **`supabase/migration-add-prepared-ingredients.sql` must be run in the production Supabase SQL editor.** It has NOT been applied to production (nothing here touched production). It adds `ingredients.kind` (text, default `raw`, every existing row stays raw) and `ingredients.sub_recipe` (jsonb). Run once; safe to re-run. Also added to `schema.sql` for fresh installs.
+- **Until it is run, prepared ingredients cannot be saved.** The app still works for everything raw (no change in behaviour or cost), so it can be deployed before the migration. If someone creates a prepared ingredient before the migration, the app says so in a red banner ("run migration-add-prepared-ingredients.sql"), does NOT save it as a raw ingredient (that would cost $0), and, when converting an existing raw ingredient, does not zero its price in the database. The prepared ingredient then exists only on that device and is lost on reload, so do not use one in drinks you rely on until the migration has been run.
+
+### Verified
+- Unit tests: 121 pass (95 on main + 26 new). New: per-unit cost = sum of raw lines / yield (including a yield in another unit, a line in pounds, a zero yield); a drink using a prepared ingredient as one line costs raw lines + per-unit cost x amount (also in fl oz and at a different cup size); one-level enforcement (prepared, self and unknown lines dropped; a used raw ingredient cannot become prepared; the rest of that edit still applies; a prepared ingredient inside a recipe adds 0); a raw price change flows into the prepared ingredient and the drink by exactly the expected amount; an order stamps the cost at that moment and a later raw price change does not change it (also through an Edit Order quantity change), while a new order uses the new price; the event's frozen snapshot keeps the prepared definition and its prices; serializer round trip and the writer fallback without the columns.
+- Local e2e: 47 pass (3 new prepared-ingredient tests through the real UI: define a recipe and yield with live cost, use it as one line in Classic Matcha and place an order with the exact expected `costSnap`; double the agave price and see the batch cost and the next order's cost follow while the earlier order keeps its cost; the picker excludes prepared ingredients and the used raw ingredient's Type is locked).
+- **Against a LOCAL Supabase** (migration applied to the local database only, then stopped; nothing touched production): `e2e/supabase/80-prepared.spec.ts`, 2/2. (1) Columns dropped: raw ingredients seed and edit as ever; creating a prepared one shows the migration banner and is NOT stored (0 rows), and a raw price edit still saves. (2) Seeded without the columns, migration applied: every existing ingredient is `raw`; a prepared ingredient is stored with `kind=prepared`, `sub_recipe` listing the two raw ingredient ids, yield 500 ml, price 0; Classic Matcha stores one line for it; an order's `cost_snap` equals raw lines + 30 ml x (batch / 500); the event snapshot carries the prepared definition; after a reload it is still prepared with the same batch cost; doubling the agave price updates the batch cost, a new order's `cost_snap` rises by exactly the agave share (5 ml direct + 6 ml in the syrup), and the first order's stored `cost_snap` is unchanged. The other Supabase specs were re-run: 20 passed in total.
+- `40-realtime` is wrong on main (it polls `order_items.status`, but Start sets `orders.status`), so it fails on main. Fixed here with the same one-line change as on `feature/custom-items` (identical hunk, so the two branches merge cleanly).
+
+### Known limits
+- The custom drink builder was not touched on this branch. On the integration branch it costs prepared ingredients from their recipe (see the Integration section at the end).
+- A prepared ingredient used in a drink, then converted back to raw, becomes a raw ingredient with price 0 until a price is entered (the app asks before converting).
+- If a raw ingredient is deleted on another device while it is in a prepared recipe, that line adds $0 until the recipe is edited (deleting it here is blocked).
+- The milk / cream pool can still only be set in seed data, as before; a prepared ingredient can carry a pool like a raw one.
+
+### Gates (final code)
+Typecheck clean; `next lint` clean; vitest 121 passed; `next build` succeeds; full local Playwright suite 47 passed; Supabase-mode suite 20 passed against a local Supabase (now stopped).
+
+
+## Integration: custom drinks + prepared ingredients (branch `integration/custom-prepared`, off main)
+
+`feature/custom-items` and `feature/prepared-ingredients` were both cut from main (`5a823aa`) and merged here, custom first, then prepared. NOT pushed, NOT deployed; the two sections above describe each feature; this section is what the integration added or decided.
+
+### Conflicts and how they were resolved (8 files)
+- **Keep both** (`types.ts`, `schema.sql`, `serialize.ts`, `reducer.ts`, `REPORT.md`): both features' additions kept. `Ingredient` now carries `customRole`, `kind` and `subRecipe`; `ingredients` has `custom_role`, `kind` and `sub_recipe`.
+- **`MenuManager.tsx`**: the ingredient table has both a **Custom drink** (role) column and a **Type** (Raw / Prepared) column, and the New ingredient form has both the Type and the Custom drink role fields.
+- **`save-errors.ts`**: one shared "column missing" check with two predicates (`isMissingRoleColumn`, `isMissingPreparedColumn`) and both migration hints.
+- **`writer.ts`**: one ingredient write path that handles ANY combination of the two migrations (below).
+- `calc.ts` and `40-realtime.spec.ts` merged automatically (the realtime fix was identical on both branches).
+
+### The writer fallback (any combination of the two migrations)
+The two migrations are independent, so production can have neither, either one, or both. Whatever the combination:
+- A **prepared ingredient is never saved as a raw row** (it would cost $0). If the prepared columns are missing it is not saved at all, with a red banner naming `migration-add-prepared-ingredients.sql`.
+- A **price, yield or unit that belongs to a prepared ingredient is never written onto the database's raw row**. This covers a hazard the separate branches did not: after a failed raw-to-prepared conversion, the ingredient is prepared only on that device, and a later recipe or yield edit used to be sent to the database as plain `package_amount` / `unit`, overwriting the raw row. The writer now remembers (per client) that the prepared columns are missing, takes the ingredient's pre-edit state from the store, and strips those fields.
+- A missing `custom_role` column only drops the role (reported after the ingredient itself is known to be saved); everything else in the edit still saves. Both missing: both are reported; the edit still saves what is safe.
+- An ordinary edit of a raw ingredient never sends any new column.
+
+### The cross-feature cost bug, fixed
+- `custom-item.ts` called `lineCost` without the ingredient list, so a PREPARED ingredient used as a tea, topping, milk or packaging in a custom drink cost $0. It now passes the list: a prepared topping costs (standard amount x computed per-unit cost), a prepared base is costed and split evenly with other teas, and a raw price change flows raw -> prepared -> custom drink. The placed order still keeps its stamped cost.
+- **How a prepared ingredient gets a role**: exactly like a raw one, with the Custom drink role control (it is on every non-milk row, prepared included). A prepared ingredient with no role is **not offered**, and the custom drink builder now says so ("Not offered: X (prepared, no custom drink role). Set a role in Menu Manager"), instead of silently missing from the dropdowns.
+- **Packaging**: a prepared ingredient with no role is never counted as packaging, even if most drinks use it (it is something made, a syrup or cream, not a cup or lid; counting it would add it to every custom drink). If it is explicitly marked **Neither**, it is treated like agave: a standard ingredient in most drinks, and it is costed from its recipe, not $0.
+
+### New tests
+- **Unit** (`custom-with-prepared.test.ts`, 14): prepared topping and prepared base costed from their recipes with exact expected numbers (and not $0), even split with another tea with milk staying full, a raw cream price change flowing into the custom drink by exactly the expected amount, cup-size scaling, milk-only with a prepared topping; the role dropdown lists a prepared ingredient flagged base/topping, hides an unflagged one (and the builder reports it) or one marked Neither; packaging rules (unflagged prepared excluded, Neither included and costed, raw packaging unchanged); an order stamped from the recipe and kept after a later raw price change. Mutation-checked: removing the list argument makes 6 of them fail.
+- **Unit** (`ingredient-writer-matrix.test.ts`, 32): the writer for each of 4 database states (neither / role only / prepared only / both) x 8 operations: plain raw add and edit; raw with a role; role set with another edit; prepared add; raw to prepared; a device-only prepared ingredient edited afterwards; prepared back to raw; an ordinary edit never touching new columns. Mutation-checked: letting the writer send a prepared yield/price fails 4.
+- **Local e2e** (`95-custom-prepared.spec.ts`): through the real UI, a prepared ingredient used in a recipe is not offered until it has a role (and the builder says so), then is offered; both the Type and the Custom drink role controls exist on its row and in the New ingredient form; the custom drink cost preview and the stamped `costSnap` come from its recipe; doubling a raw price changes the next order only.
+- **Supabase-mode** (`90-integration.spec.ts`, 4, against the local database): the same scenario with neither migration, only the role migration, only the prepared migration, and both. Every state: a prepared ingredient is stored only when its columns exist (otherwise 0 rows and a banner), a role is stored only when its column exists, a raw ingredient converted to prepared is never zeroed or overwritten in the database when the columns are missing, and ordinary raw edits always save. Both migrations applied: roles and prepared ingredients persist across a reload, the custom drink with a prepared topping is stored (`custom:` id, price 6.90, `cost_snap` matching the recipe-based expectation), a raw price change flows through for the next order only, and everything reads back.
+
+### Migrations (both still NOT applied to production; independent, either order, either may stay unapplied)
+- `supabase/migration-add-ingredient-custom-role.sql` (role flag + backfill) and `supabase/migration-add-prepared-ingredients.sql` (kind + sub_recipe). Apply both to production before the base/topping dropdowns driven by saved roles and prepared ingredients fully work. Until each is applied the app keeps working and reports (see above). Still pending from earlier, unrelated: `migration-grant-anon-extras-revisions.sql` and `migration-replace-order-items.sql`.
+
+### Gates (integration branch)
+Typecheck clean; `next lint` clean; vitest **209 passed** (137 on custom-items + 26 from prepared-ingredients + 46 new); `next build` succeeds; full local Playwright suite **54 passed** on the second run. The first full run had 53 passed and 1 failure in `40-contract-helper-misc` "two devices submitting at the same moment" (a two-tab localStorage race test that passed 3 of 3 times when re-run alone and passed in the second full run); it looks timing-sensitive under load and was not touched by this work, but it is worth knowing about. Supabase-mode suite **26 passed** against a local Supabase (now stopped; both migrations applied to the LOCAL database only).

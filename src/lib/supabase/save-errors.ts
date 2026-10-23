@@ -95,5 +95,31 @@ export function isMissingTable(error: unknown): boolean {
   );
 }
 
+/** PostgREST "column not in schema cache" (PGRST204) / Postgres "undefined column" (42703). */
+function isMissingColumnError(error: unknown): string {
+  const e = error as { code?: string; message?: string } | null;
+  if (!e) return "";
+  const msg = String(e.message ?? "");
+  const looksMissing =
+    e.code === "PGRST204" || e.code === "42703" || /schema cache|does not exist/i.test(msg);
+  return looksMissing ? msg : "";
+}
+
+/** The ingredients.custom_role column is missing (migration-add-ingredient-custom-role.sql not run). */
+export function isMissingRoleColumn(error: unknown): boolean {
+  return isMissingColumnError(error).includes("custom_role");
+}
+
+/** ingredients.kind / ingredients.sub_recipe are missing (migration-add-prepared-ingredients.sql not run). */
+export function isMissingPreparedColumn(error: unknown): boolean {
+  return /sub_recipe|['"]kind['"]/.test(isMissingColumnError(error));
+}
+
+export const ROLE_MIGRATION_HINT =
+  "Run supabase/migration-add-ingredient-custom-role.sql in the Supabase SQL editor. Until then the role only lasts on this device (it is lost on reload) and the custom drink builder guesses from ingredient names.";
+
+export const PREPARED_MIGRATION_HINT =
+  "Run supabase/migration-add-prepared-ingredients.sql in the Supabase SQL editor. Until then a prepared ingredient exists only on this device and is lost on reload, so do not use it in drinks you rely on.";
+
 export const MIGRATION_HINT =
   "Run supabase/migration-order-item-prices.sql, supabase/migration-order-tips-and-extras.sql, supabase/migration-submit-order-v2.sql and supabase/migration-free-reason-friend.sql in the Supabase SQL editor.";

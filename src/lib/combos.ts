@@ -1,7 +1,8 @@
 import { newId } from "./id";
 import { isPastry } from "./order-labels";
 import type { CartLine } from "./order-steps";
-import { COMBO_PRICE, type MenuItem, type MenuSnapshot } from "./types";
+import { comboUnitPrice, findMenuItem, isCustomItemId } from "./custom-item";
+import type { MenuItem, MenuSnapshot } from "./types";
 
 /**
  * Combo suggestion: a drink line and a pastry line that are not already a
@@ -40,11 +41,12 @@ export function findComboSuggestion(
   snapshot: MenuSnapshot,
   dismissed: ReadonlySet<string>,
 ): ComboSuggestion | null {
-  const lookup = (l: CartLine): MenuItem | undefined =>
-    snapshot.menuItems.find((m) => m.id === l.menuItemId);
+  const lookup = (l: CartLine): MenuItem | undefined => findMenuItem(snapshot, l.menuItemId);
   const plain = cart.filter(isPlain);
   const isDrink = (m: MenuItem | undefined) =>
-    Boolean(m) && !isPastry(m) && !(m!.category === "other" && m!.size === "other");
+    Boolean(m) &&
+    !isPastry(m) &&
+    (isCustomItemId(m!.id) || !(m!.category === "other" && m!.size === "other"));
   const drinks = plain.filter((l) => isDrink(lookup(l)));
   const pastries = plain.filter((l) => isPastry(lookup(l)));
 
@@ -56,7 +58,7 @@ export function findComboSuggestion(
       if (!dm || !pm) continue;
       const pairs = Math.min(d.quantity, p.quantity);
       const separateTotal = (dm.price + pm.price) * pairs;
-      const comboTotal = COMBO_PRICE * pairs;
+      const comboTotal = comboUnitPrice(d.menuItemId) * pairs;
       // Only suggest when the combo is actually cheaper for the customer.
       if (comboTotal >= separateTotal) continue;
       return {

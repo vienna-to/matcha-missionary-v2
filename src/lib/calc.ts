@@ -13,16 +13,46 @@ import {
   type PaymentMethod,
   PAYMENT_METHODS,
 } from "./types";
+import { customUnitPrice, isCustomItemId } from "./custom-id";
 import { sameCategory, toCanonical } from "./units";
 import { lineList, lineRevenue, orderTip, priceKind, tipMethod } from "./pricing";
 
-export function ingredientCostPerCanonical(ing: Ingredient): number {
+export const isPrepared = (ing: Ingredient): boolean => ing.kind === "prepared";
+
+/**
+ * Cost of one batch of a prepared ingredient: the sum of its sub-recipe lines,
+ * each priced from the RAW ingredient it names. Only one level: a line that
+ * names a prepared ingredient (or one that no longer exists) adds nothing.
+ */
+export function preparedBatchCost(ing: Ingredient, ingredients: Ingredient[]): number {
+  const byId = new Map(ingredients.map((i) => [i.id, i]));
+  let total = 0;
+  for (const line of ing.subRecipe ?? []) {
+    const raw = byId.get(line.ingredientId);
+    if (!raw || isPrepared(raw) || raw.id === ing.id) continue;
+    const c = lineCost(line, raw);
+    if (Number.isFinite(c)) total += c;
+  }
+  return total;
+}
+
+/**
+ * Cost per canonical unit (g / ml / piece). Raw: package price / package size.
+ * Prepared: (cost of one batch of its sub-recipe) / (its yield). `ingredients`
+ * is the list to price a prepared ingredient's sub-recipe from; without it a
+ * prepared ingredient cannot be priced and costs 0.
+ */
+export function ingredientCostPerCanonical(ing: Ingredient, ingredients: Ingredient[] = []): number {
+  if (isPrepared(ing)) {
+    const yieldCanonical = toCanonical(ing.packageAmount, ing.unit);
+    return yieldCanonical > 0 ? preparedBatchCost(ing, ingredients) / yieldCanonical : 0;
+  }
   return ing.packagePrice / toCanonical(ing.packageAmount, ing.unit);
 }
 
-export function lineCost(line: IngredientLine, ing: Ingredient): number {
+export function lineCost(line: IngredientLine, ing: Ingredient, ingredients: Ingredient[] = []): number {
   if (!sameCategory(line.unit, ing.unit)) return NaN;
-  return ingredientCostPerCanonical(ing) * toCanonical(line.amount, line.unit);
+  return ingredientCostPerCanonical(ing, ingredients) * toCanonical(line.amount, line.unit);
 }
 
 /**
@@ -67,7 +97,7 @@ export function computeItemCost(
     }
     const scaledLine =
       scale === 1 ? line : { ...line, amount: line.amount * scale };
-    const c = lineCost(scaledLine, use);
+    const c = lineCost(scaledLine, use, ingredients);
     if (Number.isFinite(c)) total += c;
   }
   return total;
@@ -359,6 +389,8 @@ export function expandCombosInByItem(
     counts: { ...EMPTY_PRICE_COUNTS },
   });
   const splits = new Map<string, Split>();
+  // Custom drinks are not in the menu snapshot; remember their sale-time name.
+  const customNames = new Map<string, string>();
   let unsplittableComboCount = 0;
 
   for (const o of orders) {
@@ -367,7 +399,8 @@ export function expandCombosInByItem(
       if (!oi.isCombo || !oi.comboPastryId) continue;
       const drink = snapshot.menuItems.find((m) => m.id === oi.menuItemId);
       const pastry = snapshot.menuItems.find((m) => m.id === oi.comboPastryId);
-      const drinkPrice = drink?.price ?? 0;
+      const drinkPrice = drink?.price ?? customUnitPrice(oi.menuItemId) ?? 0;
+      if (isCustomItemId(oi.menuItemId)) customNames.set(oi.menuItemId, oi.menuItemNameSnap);
       const pastryPrice = pastry?.price ?? 0;
       const totalPrice = drinkPrice + pastryPrice;
       if (totalPrice <= 0) {
@@ -409,15 +442,16 @@ export function expandCombosInByItem(
     let existing = result.find((it) => it.menuItemId === miId);
     if (!existing) {
       const mi = snapshot.menuItems.find((m) => m.id === miId);
-      if (!mi) continue;
+      const customPrice = customUnitPrice(miId);
+      if (!mi && customPrice === undefined) continue;
       existing = {
         menuItemId: miId,
-        name: mi.name,
-        category: mi.category,
-        sortOrder: mi.sortOrder ?? Number.POSITIVE_INFINITY,
+        name: mi?.name ?? customNames.get(miId) ?? "Custom drink",
+        category: mi?.category ?? "other",
+        sortOrder: mi?.sortOrder ?? Number.POSITIVE_INFINITY,
         qty: 0,
         ...EMPTY_PRICE_COUNTS,
-        priceSnap: mi.price,
+        priceSnap: mi?.price ?? customPrice ?? 0,
         costSnapAvg: 0,
         revenuePaid: 0,
         revenueGross: 0,

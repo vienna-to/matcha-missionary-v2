@@ -1,10 +1,11 @@
 import { validateEventTimes } from "./event-times";
 import { computeItemCost } from "./calc";
+import { comboUnitPrice, customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
+import { normalizeIngredientPatch, normalizeNewIngredient } from "./prepared";
 import { newId, nowIso } from "./id";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
 import {
-  COMBO_PRICE,
   type AppState,
   type Event,
   type EventExtra,
@@ -148,7 +149,12 @@ export function deriveOrderItem(
   snapshot: MenuSnapshot,
   cupSizeOz?: number,
 ): OrderItem {
-  const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
+  const mi = findMenuItem(snapshot, raw.menuItemId);
+  // A custom drink has an automatic milk (the milk choice swaps it, like a
+  // menu drink) but no cream choice: its creams are the selected toppings.
+  if (isCustomItemId(raw.menuItemId)) {
+    raw = { ...raw, creamChoiceId: undefined };
+  }
   // Pastries take no milk / cream / sugar / ice: drop them (and skip the
   // default-milk snapshot) so nothing drink-related is ever saved on them.
   // Special requests are kept.
@@ -170,7 +176,10 @@ export function deriveOrderItem(
   const creamNameSnap = drinkOptions
     ? resolveCreamName(raw.creamChoiceId, mi, snapshot.ingredients)
     : undefined;
-  const drinkCost = mi
+  const customSpec = parseCustomItemId(raw.menuItemId);
+  const drinkCost = customSpec
+    ? customItemCost(customSpec, snapshot, cupSizeOz, raw.milkChoiceId)
+    : mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
         creamChoiceId: raw.creamChoiceId,
@@ -192,8 +201,8 @@ export function deriveOrderItem(
       orderId,
       menuItemId: raw.menuItemId,
       menuItemNameSnap: mi?.name ?? "Unknown drink",
-      priceSnap: COMBO_PRICE,
-      ...priceFields(COMBO_PRICE, raw),
+      priceSnap: comboUnitPrice(raw.menuItemId),
+      ...priceFields(comboUnitPrice(raw.menuItemId), raw),
       costSnap: drinkCost + pastryCost,
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,
@@ -296,7 +305,7 @@ export function reducer(state: AppState, action: Action): AppState {
         -1,
       );
       const ing: Ingredient = {
-        ...action.ing,
+        ...normalizeNewIngredient(state.ingredients, action.ing),
         id: newId("ing"),
         sortOrder: action.ing.sortOrder ?? maxIngOrder + 1,
         createdAt: nowIso(),
@@ -305,13 +314,16 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, ingredients: [...state.ingredients, ing] };
     }
 
-    case "UPDATE_INGREDIENT":
+    case "UPDATE_INGREDIENT": {
+      // One level of nesting only: the patch is brought within the prepared-ingredient rules.
+      const patch = normalizeIngredientPatch(state.ingredients, action.id, action.patch);
       return {
         ...state,
         ingredients: state.ingredients.map((i) =>
-          i.id === action.id ? { ...i, ...action.patch, updatedAt: nowIso() } : i,
+          i.id === action.id ? { ...i, ...patch, updatedAt: nowIso() } : i,
         ),
       };
+    }
 
     case "DELETE_INGREDIENT":
       return {

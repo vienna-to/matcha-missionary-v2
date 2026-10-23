@@ -401,3 +401,26 @@ Tests: `97-revenue-share-retired.spec.ts` (not offered in New event or on the su
 
 ### Gates
 Typecheck clean, `next lint` clean, `next build` succeeds, vitest **242 passed**, full local Playwright: **55 passed** in the full run, and the 2 failures in that run were selector mistakes in the new 97 spec itself, fixed and then passing on a rerun of that spec alone (20 s); I did not repeat the whole 5-minute suite afterwards. The known-flaky two-tab test passed in the full run, Supabase-mode suite **28 passed** against a local Supabase (now stopped). Production Supabase was never touched; no migration in this change.
+
+
+## Collab split at event creation (branch `feature/collab-split-at-creation`, off main; not pushed)
+
+### What changed
+The two collab terms can now be entered when the event is created, as well as later on Event Summary:
+- **New event dialog** (standard events): "Partner profit share % (optional)" (0 to 100) and "Partner ingredient contribution $ (optional)" (0 or more). Both blank = not a collab, exactly as before. Contract events do not show them (no per-drink profit; the Event Summary panel is not shown for them either).
+- **Log past event dialog**: the same two fields (a past event has a known profit, so the split is useful immediately).
+- The terms are stored in the same `collab_profit_pct` / `collab_contribution` columns and shown by the unchanged Event Summary panel, which also still adds, edits and removes them.
+
+### One calculation, one validation
+- Calculation: the dialogs store only the terms; Event Summary computes the split with the same `computeCollabSplit` (whole cents, your take-home = profit - partner take-home), so the take-homes sum exactly to profit.
+- Validation: new `parseCollabFields` in `lib/collab-split.ts` is now used by the New event dialog, Log past event and the Event Summary panel (previously inline in the panel). Both blank = null (not a collab); one blank = that half is 0; share outside 0 to 100, a negative contribution or a non-number blocks Create. The two inputs are one shared component, `CollabInputs`.
+- At creation revenue and costs are $0, so the panel opens showing profit $0.00, the share, the contribution, and a negative partner take-home of the contribution (nothing earned yet) which fills in as orders arrive. That is the formula applied as written, not a bug.
+
+### Migration: none needed, with one safeguard
+No new migration: the columns come from `migration-add-collab-split.sql`, which is still NOT applied to production. But creating an event with terms before that migration would have made the whole event insert fail (the insert names the new columns), and orders point at the event. So both create paths now fall back: `writer.createEvent` and Log past event retry the insert WITHOUT the collab columns, so the event (and its orders) are always saved, and a red banner says the collab terms were not saved and names the migration file. An event created without terms never names the columns, so nothing changes for ordinary events either way.
+
+### Tests / gates
+- Unit (255 total, up from 242): `parseCollabFields` cases, an event created with terms gives the same split as the panel (and $0 profit gives no earned share), `CREATE_EVENT` keeps / omits the terms, Quick add carries them, `writer.createEvent` with and without the migration, `withoutCollabColumns`.
+- Local e2e `98-collab-at-creation.spec.ts` (4): terms entered at creation are stored, the panel shows them with $0 profit right away, then follows three orders with the exact computed numbers and the take-homes summing to profit, edit / remove still work; blank fields are an ordinary event; validation blocks Create and contract events show no fields; Log past event stores them and shows the split.
+- Local Supabase (stopped afterwards): `100-collab-split.spec.ts` gained 2: with the migration the terms land in `events` and show after a reload; without it the event row and its order are still created and the banner appears. Whole Supabase-mode suite **30 passed**.
+- Typecheck, `next lint`, `next build` clean; vitest **255 passed**; full local Playwright **61 passed** on a clean build. Production Supabase was never touched.

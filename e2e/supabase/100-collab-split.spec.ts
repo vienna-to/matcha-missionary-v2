@@ -125,4 +125,37 @@ test.describe("collab split (local Supabase)", () => {
     expect(sql(`select donation_pct::float d from public.events where workspace_id='${ws}' and name='No migration'`)[0].d).toBe(10);
     await expect(main.getByText("10% of revenue").first()).toBeVisible();
   });
+
+  test("terms entered at creation are stored with the migration", async ({ page }) => {
+    acceptDialogs(page);
+    await setMigration(true);
+    const { workspaceId: ws } = await pairNewWorkspace(page);
+    await seedMenu(page, ws);
+    await createEvent(page, { name: "Plain db" });
+    await expect.poll(() => sql(`select count(*)::int n from public.events where workspace_id='${ws}' and name='Plain db'`)[0].n).toBe(1);
+    expect(evRow(ws, "Plain db")).toEqual({ pct: null, c: null });
+    await createEvent(page, { name: "Upfront db", collab: { pct: "40", contribution: "50" } }); // newest = shown on Event Summary
+    await expect.poll(() => evRow(ws, "Upfront db")).toEqual({ pct: 40, c: 50 });
+    await goTab(page, "Event Summary");
+    await page.reload();
+    await goTab(page, "Event Summary");
+    await expect(page.locator("main").getByTestId("collab-contribution")).toHaveText(money(50));
+
+  });
+
+  test("terms entered at creation without the migration: the event is still created (orders point at it), the terms are reported", async ({ page }) => {
+    acceptDialogs(page);
+    await setMigration(false);
+    const second = await pairNewWorkspace(page);
+    await seedMenu(page, second.workspaceId);
+    await createEvent(page, { name: "Upfront no migration", collab: { pct: "40", contribution: "50" } });
+    await expect
+      .poll(() => sql(`select count(*)::int n from public.events where workspace_id='${second.workspaceId}' and name='Upfront no migration'`)[0].n)
+      .toBe(1);
+    await expect(page.getByRole("alert").filter({ hasText: "migration-add-collab-split.sql" }).first()).toBeVisible();
+    await placeOrder(page, { items: [{ name: "Classic Matcha" }], name: "One", pay: "Cash", declineCombo: true });
+    await expect
+      .poll(() => sql(`select count(*)::int n from public.orders o join public.events e on e.id=o.event_id where e.workspace_id='${second.workspaceId}' and e.name='Upfront no migration'`)[0].n)
+      .toBe(1);
+  });
 });

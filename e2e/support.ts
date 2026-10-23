@@ -58,7 +58,7 @@ export async function goTab(page: Page, label: string) {
 
 export async function createEvent(
   page: Page,
-  opts: { name: string; type?: "standard" | "contract"; client?: string; payout?: number; cup?: number } = { name: "QA Event" },
+  opts: { name: string; type?: "standard" | "contract"; client?: string; payout?: number; cup?: number; collab?: { pct?: string; contribution?: string } } = { name: "QA Event" },
 ) {
   await page.getByRole("button", { name: /new event/i }).first().click();
   // Modal has no role=dialog (a11y note in REPORT.md), so find it by its heading.
@@ -70,6 +70,8 @@ export async function createEvent(
     await field(dlg, /Contracted payout/).fill(String(opts.payout ?? 500));
   }
   if (opts.cup) await field(dlg, "Cup size (oz)").fill(String(opts.cup));
+  if (opts.collab?.pct !== undefined) await field(dlg, "Partner profit share").fill(opts.collab.pct);
+  if (opts.collab?.contribution !== undefined) await field(dlg, "Partner ingredient contribution").fill(opts.collab.contribution);
   await field(dlg, "Event name").fill(opts.name);
   await dlg.getByRole("button", { name: "Create event" }).click();
   await expect(dlg).toBeHidden();

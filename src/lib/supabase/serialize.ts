@@ -70,6 +70,9 @@ export type DbEvent = {
   end_time: string | null;
   target_revenue: number | null;
   donation_pct: number | null;
+  /** Absent until migration-add-collab-split.sql has run. */
+  collab_profit_pct?: number | null;
+  collab_contribution?: number | null;
   is_active: boolean;
   kind: Event["kind"];
   event_type: Event["eventType"];
@@ -220,6 +223,8 @@ export function fromEvent(r: DbEvent): Event {
     endTime: r.end_time ?? "",
     targetRevenue: r.target_revenue ?? undefined,
     donationPct: r.donation_pct == null ? undefined : Number(r.donation_pct),
+    collabProfitPct: r.collab_profit_pct == null ? undefined : Number(r.collab_profit_pct),
+    collabContribution: r.collab_contribution == null ? undefined : Number(r.collab_contribution),
     menuSnapshotId: r.menu_snapshot?.id ?? r.id,
     fixedCosts: r.fixed_costs ?? [],
     isActive: r.is_active,
@@ -504,6 +509,9 @@ export function toEventInsert(
     end_time: evt.endTime || null,
     target_revenue: nul(evt.targetRevenue),
     donation_pct: nul(evt.donationPct),
+    // Only sent when set, so creating an ordinary event still works before the migration has run.
+    ...(evt.collabProfitPct !== undefined ? { collab_profit_pct: evt.collabProfitPct } : {}),
+    ...(evt.collabContribution !== undefined ? { collab_contribution: evt.collabContribution } : {}),
     is_active: evt.isActive,
     kind: evt.kind ?? "live",
     event_type: evt.eventType ?? "standard",
@@ -526,6 +534,8 @@ export function toEventPatch(patch: Partial<Event>): Partial<DbEvent> {
   if (patch.endTime !== undefined) r.end_time = patch.endTime || null;
   if (patch.targetRevenue !== undefined) r.target_revenue = nul(patch.targetRevenue);
   if (patch.donationPct !== undefined) r.donation_pct = nul(patch.donationPct);
+  if ("collabProfitPct" in patch) r.collab_profit_pct = nul(patch.collabProfitPct);
+  if ("collabContribution" in patch) r.collab_contribution = nul(patch.collabContribution);
   if (patch.fixedCosts !== undefined) r.fixed_costs = patch.fixedCosts;
   if (patch.isActive !== undefined) r.is_active = patch.isActive;
   if (patch.eventType !== undefined) r.event_type = patch.eventType;

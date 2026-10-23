@@ -14,8 +14,10 @@ import type {
 import {
   isMissingTable,
   isMissingPreparedColumn,
+  isMissingCollabColumn,
   isMissingRoleColumn,
   missingColumns,
+  COLLAB_MIGRATION_HINT,
   MIGRATION_HINT,
   PREPARED_MIGRATION_HINT,
   ROLE_MIGRATION_HINT,
@@ -457,6 +459,16 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .update(toEventPatch(patch))
       .eq("id", id)
       .eq("workspace_id", workspaceId);
+    if (error && isMissingCollabColumn(error)) {
+      // Keep every other edit: retry without the collab fields, then say what was not saved.
+      const { collab_profit_pct: _p, collab_contribution: _c, ...rest } = toEventPatch(patch);
+      if (Object.keys(rest).length > 0) {
+        const retry = await supabase.from("events").update(rest).eq("id", id).eq("workspace_id", workspaceId);
+        tag("updateEvent")(retry.error);
+      }
+      reportSaveError(`The collab split could not be saved. ${COLLAB_MIGRATION_HINT}`);
+      return;
+    }
     tag("updateEvent")(error);
   },
   async deleteEvent(id: string) {

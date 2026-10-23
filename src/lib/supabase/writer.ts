@@ -13,8 +13,10 @@ import type {
 } from "@/lib/types";
 import {
   isMissingTable,
+  isMissingRoleColumn,
   missingColumns,
   MIGRATION_HINT,
+  ROLE_MIGRATION_HINT,
   reportSaveError,
 } from "./save-errors";
 import {
@@ -313,7 +315,14 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
 
   // ---------- ingredients ----------
   async addIngredient(ing: Ingredient) {
-    const { error } = await supabase.from("ingredients").insert(toIngredientInsert(workspaceId, ing));
+    let { error } = await supabase.from("ingredients").insert(toIngredientInsert(workspaceId, ing));
+    if (error && isMissingRoleColumn(error)) {
+      // Database predates the role column: save the ingredient without it.
+      const { customRole: _dropped, ...rest } = ing;
+      void _dropped;
+      reportSaveError(`"${ing.name}" was saved without its custom drink role. ${ROLE_MIGRATION_HINT}`);
+      ({ error } = await supabase.from("ingredients").insert(toIngredientInsert(workspaceId, rest)));
+    }
     tag("addIngredient")(error);
   },
   async updateIngredient(id: string, patch: Partial<Ingredient>) {
@@ -322,6 +331,20 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .update(toIngredientPatch(patch))
       .eq("id", id)
       .eq("workspace_id", workspaceId);
+    if (error && patch.customRole !== undefined && isMissingRoleColumn(error)) {
+      // Everything else in the patch still has to be saved.
+      const { customRole: _dropped, ...rest } = patch;
+      void _dropped;
+      reportSaveError(`The custom drink role could not be saved. ${ROLE_MIGRATION_HINT}`);
+      if (Object.keys(rest).length === 0) return;
+      const r2 = await supabase
+        .from("ingredients")
+        .update(toIngredientPatch(rest))
+        .eq("id", id)
+        .eq("workspace_id", workspaceId);
+      tag("updateIngredient")(r2.error);
+      return;
+    }
     tag("updateIngredient")(error);
   },
   async deleteIngredient(id: string) {

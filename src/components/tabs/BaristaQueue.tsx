@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button, Card, EmptyState } from "@/components/ui";
 import { useActiveEvent, useStore } from "@/lib/store";
+import { findMenuItem } from "@/lib/custom-item";
 import { useHelperMode } from "@/lib/helper-mode";
 import { lineList, lineRevenue } from "@/lib/pricing";
 import { playPing, unlockAudio } from "@/lib/audio";
@@ -686,7 +687,7 @@ function ItemModifiers({
   item: OrderItem;
   snapshot: MenuSnapshot;
 }) {
-  const drink = snapshot.menuItems.find((m) => m.id === item.menuItemId);
+  const drink = findMenuItem(snapshot, item.menuItemId);
   const ingredients: Ingredient[] = snapshot.ingredients;
 
   const mods: string[] = [];

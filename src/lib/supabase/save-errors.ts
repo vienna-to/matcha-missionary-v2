@@ -95,5 +95,19 @@ export function isMissingTable(error: unknown): boolean {
   );
 }
 
+/** The ingredients.custom_role column is missing (migration-add-ingredient-custom-role.sql not run). */
+export function isMissingRoleColumn(error: unknown): boolean {
+  const e = error as { code?: string; message?: string } | null;
+  if (!e) return false;
+  const msg = String(e.message ?? "");
+  return (
+    (e.code === "PGRST204" || e.code === "42703" || /schema cache|does not exist/i.test(msg)) &&
+    msg.includes("custom_role")
+  );
+}
+
+export const ROLE_MIGRATION_HINT =
+  "Run supabase/migration-add-ingredient-custom-role.sql in the Supabase SQL editor. Until then the role only lasts on this device (it is lost on reload) and the custom drink builder guesses from ingredient names.";
+
 export const MIGRATION_HINT =
   "Run supabase/migration-order-item-prices.sql, supabase/migration-order-tips-and-extras.sql, supabase/migration-submit-order-v2.sql and supabase/migration-free-reason-friend.sql in the Supabase SQL editor.";

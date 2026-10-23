@@ -13,6 +13,7 @@ import {
   type PaymentMethod,
   PAYMENT_METHODS,
 } from "./types";
+import { customUnitPrice, isCustomItemId } from "./custom-id";
 import { sameCategory, toCanonical } from "./units";
 import { lineList, lineRevenue, orderTip, priceKind, tipMethod } from "./pricing";
 
@@ -359,6 +360,8 @@ export function expandCombosInByItem(
     counts: { ...EMPTY_PRICE_COUNTS },
   });
   const splits = new Map<string, Split>();
+  // Custom drinks are not in the menu snapshot; remember their sale-time name.
+  const customNames = new Map<string, string>();
   let unsplittableComboCount = 0;
 
   for (const o of orders) {
@@ -367,7 +370,8 @@ export function expandCombosInByItem(
       if (!oi.isCombo || !oi.comboPastryId) continue;
       const drink = snapshot.menuItems.find((m) => m.id === oi.menuItemId);
       const pastry = snapshot.menuItems.find((m) => m.id === oi.comboPastryId);
-      const drinkPrice = drink?.price ?? 0;
+      const drinkPrice = drink?.price ?? customUnitPrice(oi.menuItemId) ?? 0;
+      if (isCustomItemId(oi.menuItemId)) customNames.set(oi.menuItemId, oi.menuItemNameSnap);
       const pastryPrice = pastry?.price ?? 0;
       const totalPrice = drinkPrice + pastryPrice;
       if (totalPrice <= 0) {
@@ -409,15 +413,16 @@ export function expandCombosInByItem(
     let existing = result.find((it) => it.menuItemId === miId);
     if (!existing) {
       const mi = snapshot.menuItems.find((m) => m.id === miId);
-      if (!mi) continue;
+      const customPrice = customUnitPrice(miId);
+      if (!mi && customPrice === undefined) continue;
       existing = {
         menuItemId: miId,
-        name: mi.name,
-        category: mi.category,
-        sortOrder: mi.sortOrder ?? Number.POSITIVE_INFINITY,
+        name: mi?.name ?? customNames.get(miId) ?? "Custom drink",
+        category: mi?.category ?? "other",
+        sortOrder: mi?.sortOrder ?? Number.POSITIVE_INFINITY,
         qty: 0,
         ...EMPTY_PRICE_COUNTS,
-        priceSnap: mi.price,
+        priceSnap: mi?.price ?? customPrice ?? 0,
         costSnapAvg: 0,
         revenuePaid: 0,
         revenueGross: 0,

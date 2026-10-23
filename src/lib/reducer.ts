@@ -1,10 +1,10 @@
 import { validateEventTimes } from "./event-times";
 import { computeItemCost } from "./calc";
+import { comboUnitPrice, customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
 import { newId, nowIso } from "./id";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
 import {
-  COMBO_PRICE,
   type AppState,
   type Event,
   type EventExtra,
@@ -148,7 +148,12 @@ export function deriveOrderItem(
   snapshot: MenuSnapshot,
   cupSizeOz?: number,
 ): OrderItem {
-  const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
+  const mi = findMenuItem(snapshot, raw.menuItemId);
+  // A custom drink has an automatic milk (the milk choice swaps it, like a
+  // menu drink) but no cream choice: its creams are the selected toppings.
+  if (isCustomItemId(raw.menuItemId)) {
+    raw = { ...raw, creamChoiceId: undefined };
+  }
   // Pastries take no milk / cream / sugar / ice: drop them (and skip the
   // default-milk snapshot) so nothing drink-related is ever saved on them.
   // Special requests are kept.
@@ -170,7 +175,10 @@ export function deriveOrderItem(
   const creamNameSnap = drinkOptions
     ? resolveCreamName(raw.creamChoiceId, mi, snapshot.ingredients)
     : undefined;
-  const drinkCost = mi
+  const customSpec = parseCustomItemId(raw.menuItemId);
+  const drinkCost = customSpec
+    ? customItemCost(customSpec, snapshot, cupSizeOz, raw.milkChoiceId)
+    : mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
         creamChoiceId: raw.creamChoiceId,
@@ -192,8 +200,8 @@ export function deriveOrderItem(
       orderId,
       menuItemId: raw.menuItemId,
       menuItemNameSnap: mi?.name ?? "Unknown drink",
-      priceSnap: COMBO_PRICE,
-      ...priceFields(COMBO_PRICE, raw),
+      priceSnap: comboUnitPrice(raw.menuItemId),
+      ...priceFields(comboUnitPrice(raw.menuItemId), raw),
       costSnap: drinkCost + pastryCost,
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,

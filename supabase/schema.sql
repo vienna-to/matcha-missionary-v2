@@ -33,6 +33,7 @@ create table if not exists public.ingredients (
   unit            text not null check (unit in ('g','oz','kg','lb','ml','fl_oz','cup','piece','bag')),
   pool            text check (pool in ('milk','cream')),
   sort_order      integer,
+  custom_role     text check (custom_role in ('base','topping','none')),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );

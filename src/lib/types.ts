@@ -70,6 +70,11 @@ export type IngredientLine = {
   unit: Unit;
 };
 
+/** What an ingredient is in the custom drink builder: a "base" (a tea such as
+ *  matcha or hojicha), a "topping" (cream, purée), or "none" (not offered).
+ *  Undefined = never set; the builder then guesses from the name. */
+export type CustomRole = "base" | "topping" | "none";
+
 export type Ingredient = {
   id: string;
   name: string;
@@ -77,6 +82,8 @@ export type Ingredient = {
   packageAmount: number;
   unit: Unit;
   pool?: Pool;
+  /** Role in the custom drink builder. Undefined on rows from before the flag existed. */
+  customRole?: CustomRole;
   /** Ascending manual sort key for the Ingredients list. Missing = sort last. */
   sortOrder?: number;
   createdAt: string;

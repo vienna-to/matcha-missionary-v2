@@ -142,6 +142,11 @@ export function packagingLines(
       seen.add(line.ingredientId);
       const ingredient = byId.get(line.ingredientId);
       if (!ingredient || ingredient.pool || componentKind(ingredient)) continue;
+      // A prepared ingredient is something that was made (a syrup, a cream), not
+      // packaging. Unless it was explicitly marked "neither" (a house ingredient that is
+      // in every drink, like agave), it is left out rather than silently added to every
+      // custom drink; give it a base or topping role to offer it in the builder.
+      if (ingredient.kind === "prepared" && ingredient.customRole === undefined) continue;
       if (!sameCategory(line.unit, ingredient.unit)) continue;
       const users = drinks.filter((d) => d.ingredientLines.some((l) => l.ingredientId === ingredient.id)).length;
       if (users * 2 > drinks.length) out.push({ ingredient, line });
@@ -165,6 +170,8 @@ export function customComponents(snapshot: MenuSnapshot): {
   toppings: CustomComponent[];
   /** The milk added to every tea drink, or the "milk only" base; null when no recipe has milk. */
   milk: { ingredient: Ingredient; line: IngredientLine } | null;
+  /** Prepared ingredients a drink uses that have no custom drink role yet, so are not offered. */
+  unassignedPrepared: Ingredient[];
 } {
   const bases: CustomComponent[] = [];
   const toppings: CustomComponent[] = [];
@@ -177,14 +184,26 @@ export function customComponents(snapshot: MenuSnapshot): {
   }
   const byName = (a: CustomComponent, b: CustomComponent) =>
     a.ingredient.name.localeCompare(b.ingredient.name);
-  return { bases: bases.sort(byName), toppings: toppings.sort(byName), milk: standardMilk(snapshot) };
+  const used = new Set(snapshot.menuItems.filter((m) => !isPastryItem(m)).flatMap((m) => m.ingredientLines.map((l) => l.ingredientId)));
+  const unassignedPrepared = snapshot.ingredients.filter(
+    (i) => i.kind === "prepared" && i.customRole === undefined && !componentKind(i) && used.has(i.id),
+  );
+  return { bases: bases.sort(byName), toppings: toppings.sort(byName), milk: standardMilk(snapshot), unassignedPrepared };
 }
 
 /** Recipes are authored at REFERENCE_CUP_OZ; a per-event cup size scales every
  *  line, exactly as computeItemCost does for a menu drink. */
-function scaledCost(line: IngredientLine, ing: Ingredient, cupSizeOz?: number, share = 1): number {
+function scaledCost(
+  line: IngredientLine,
+  ing: Ingredient,
+  ingredients: Ingredient[],
+  cupSizeOz?: number,
+  share = 1,
+): number {
   const scale = cupSizeOz !== undefined ? cupSizeOz / REFERENCE_CUP_OZ : 1;
-  const v = lineCost({ ...line, amount: line.amount * scale * share }, ing);
+  // `ingredients` is needed to price a PREPARED ingredient from its recipe; without
+  // it a prepared ingredient would cost $0.
+  const v = lineCost({ ...line, amount: line.amount * scale * share }, ing, ingredients);
   return Number.isFinite(v) ? v : 0;
 }
 
@@ -202,16 +221,16 @@ export function customCostParts(
   const teas = bases.filter((c) => spec.baseIds.includes(c.ingredient.id));
   const tops = toppings.filter((c) => spec.toppingIds.includes(c.ingredient.id));
   // Several teas split the tea amount evenly; milk is one full amount.
-  const tea = teas.reduce((s, c) => s + scaledCost(c.line, c.ingredient, cupSizeOz, 1 / teas.length), 0);
+  const tea = teas.reduce((s, c) => s + scaledCost(c.line, c.ingredient, snapshot.ingredients, cupSizeOz, 1 / teas.length), 0);
   const chosenMilk = milkChoiceId
     ? snapshot.ingredients.find((i) => i.id === milkChoiceId && i.pool === "milk")
     : undefined;
   const milkCost = milk
-    ? scaledCost(milk.line, chosenMilk && sameCategory(milk.line.unit, chosenMilk.unit) ? chosenMilk : milk.ingredient, cupSizeOz)
+    ? scaledCost(milk.line, chosenMilk && sameCategory(milk.line.unit, chosenMilk.unit) ? chosenMilk : milk.ingredient, snapshot.ingredients, cupSizeOz)
     : 0;
-  const toppingCost = tops.reduce((s, c) => s + scaledCost(c.line, c.ingredient, cupSizeOz), 0);
+  const toppingCost = tops.reduce((s, c) => s + scaledCost(c.line, c.ingredient, snapshot.ingredients, cupSizeOz), 0);
   const packaging = packagingLines(snapshot).reduce(
-    (s, p) => s + scaledCost(p.line, p.ingredient, cupSizeOz),
+    (s, p) => s + scaledCost(p.line, p.ingredient, snapshot.ingredients, cupSizeOz),
     0,
   );
   return { tea, milk: milkCost, toppings: toppingCost, packaging, total: tea + milkCost + toppingCost + packaging };

@@ -45,7 +45,7 @@ export function CustomBuilder({
   /** Show this price instead of the drink's own (the combo price). */
   priceOverride?: number;
 }) {
-  const { bases, toppings, milk } = useMemo(() => customComponents(snapshot), [snapshot]);
+  const { bases, toppings, milk, unassignedPrepared } = useMemo(() => customComponents(snapshot), [snapshot]);
   const valid = isValidCustomSpec(spec);
   const price = priceOverride ?? customItemPrice(spec.toppingIds.length);
   const cost = customCostParts(spec, snapshot, cupSizeOz).total;
@@ -99,6 +99,12 @@ export function CustomBuilder({
         onAdd={(id) => onChange({ ...spec, toppingIds: [...spec.toppingIds, id] })}
         onRemove={(id) => onChange({ ...spec, toppingIds: spec.toppingIds.filter((t) => t !== id) })}
       />
+      {unassignedPrepared.length > 0 ? (
+        <p className="t-caption text-xs text-matcha-900/60" data-testid="unassigned-prepared">
+          Not offered: {unassignedPrepared.map((i) => i.name).join(", ")} (prepared, no custom drink role). Set a
+          role in Menu Manager to use {unassignedPrepared.length === 1 ? "it" : "them"} here.
+        </p>
+      ) : null}
       <div className="t-caption space-y-1 rounded-xl bg-matcha-50 px-3 py-2 text-xs text-matcha-900/80">
         <div className="flex items-center justify-between">
           <span>{priceLabel}</span>

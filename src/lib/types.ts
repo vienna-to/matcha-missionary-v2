@@ -185,6 +185,12 @@ export type Event = {
   /** Percentage of revenue (0–100) donated for charity events. When set,
    *  Event Summary surfaces the donation amount and nets it out of profit. */
   donationPct?: number;
+  /** Collab: the partner's share (0–100) of the event's profit. Setting this or
+   *  collabContribution makes the event a collab (see lib/collab-split.ts). */
+  collabProfitPct?: number;
+  /** Collab: dollar amount the partner contributes toward ingredients, typed per
+   *  event (not a percentage). Taken off the partner's share of profit. */
+  collabContribution?: number;
   menuSnapshotId: string;
   fixedCosts: FixedCost[];
   isActive: boolean;

@@ -13,6 +13,7 @@ import {
 } from "react";
 import { initialSeed } from "./seed";
 import { normalizeItemPatch } from "./pricing";
+import { normalizeIngredientPatch } from "./prepared";
 import { reducer, type Action } from "./reducer";
 import { newId, nowIso } from "./id";
 import type {
@@ -677,7 +678,13 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const dispatch = useCallback(
-    (a: Action) => {
+    (action: Action) => {
+      // Ingredient edits are brought within the prepared-ingredient rules first, so
+      // the database receives exactly what the reducer applies.
+      const a: Action =
+        action.type === "UPDATE_INGREDIENT"
+          ? { ...action, patch: normalizeIngredientPatch(stateRef.current.ingredients, action.id, action.patch) }
+          : action;
       // Snapshot BEFORE the mutation lands — the reducer will overwrite the
       // order in-place, so we have to capture the pre-change state now.
       // Only tax-relevant edits are recorded. Barista workflow (status /

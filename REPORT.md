@@ -309,10 +309,46 @@ Typecheck clean; `next lint` clean; vitest 137 passed; `next build` succeeds; fu
 - `40-realtime` is wrong on main (it polls `order_items.status`, but Start sets `orders.status`), so it fails on main. Fixed here with the same one-line change as on `feature/custom-items` (identical hunk, so the two branches merge cleanly).
 
 ### Known limits
-- The custom drink builder is a separate branch and was not touched. It will not see prepared ingredients until that work is merged and adapted; existing menu-item costing is unaffected.
+- The custom drink builder was not touched on this branch. On the integration branch it costs prepared ingredients from their recipe (see the Integration section at the end).
 - A prepared ingredient used in a drink, then converted back to raw, becomes a raw ingredient with price 0 until a price is entered (the app asks before converting).
 - If a raw ingredient is deleted on another device while it is in a prepared recipe, that line adds $0 until the recipe is edited (deleting it here is blocked).
 - The milk / cream pool can still only be set in seed data, as before; a prepared ingredient can carry a pool like a raw one.
 
 ### Gates (final code)
 Typecheck clean; `next lint` clean; vitest 121 passed; `next build` succeeds; full local Playwright suite 47 passed; Supabase-mode suite 20 passed against a local Supabase (now stopped).
+
+
+## Integration: custom drinks + prepared ingredients (branch `integration/custom-prepared`, off main)
+
+`feature/custom-items` and `feature/prepared-ingredients` were both cut from main (`5a823aa`) and merged here, custom first, then prepared. NOT pushed, NOT deployed; the two sections above describe each feature; this section is what the integration added or decided.
+
+### Conflicts and how they were resolved (8 files)
+- **Keep both** (`types.ts`, `schema.sql`, `serialize.ts`, `reducer.ts`, `REPORT.md`): both features' additions kept. `Ingredient` now carries `customRole`, `kind` and `subRecipe`; `ingredients` has `custom_role`, `kind` and `sub_recipe`.
+- **`MenuManager.tsx`**: the ingredient table has both a **Custom drink** (role) column and a **Type** (Raw / Prepared) column, and the New ingredient form has both the Type and the Custom drink role fields.
+- **`save-errors.ts`**: one shared "column missing" check with two predicates (`isMissingRoleColumn`, `isMissingPreparedColumn`) and both migration hints.
+- **`writer.ts`**: one ingredient write path that handles ANY combination of the two migrations (below).
+- `calc.ts` and `40-realtime.spec.ts` merged automatically (the realtime fix was identical on both branches).
+
+### The writer fallback (any combination of the two migrations)
+The two migrations are independent, so production can have neither, either one, or both. Whatever the combination:
+- A **prepared ingredient is never saved as a raw row** (it would cost $0). If the prepared columns are missing it is not saved at all, with a red banner naming `migration-add-prepared-ingredients.sql`.
+- A **price, yield or unit that belongs to a prepared ingredient is never written onto the database's raw row**. This covers a hazard the separate branches did not: after a failed raw-to-prepared conversion, the ingredient is prepared only on that device, and a later recipe or yield edit used to be sent to the database as plain `package_amount` / `unit`, overwriting the raw row. The writer now remembers (per client) that the prepared columns are missing, takes the ingredient's pre-edit state from the store, and strips those fields.
+- A missing `custom_role` column only drops the role (reported after the ingredient itself is known to be saved); everything else in the edit still saves. Both missing: both are reported; the edit still saves what is safe.
+- An ordinary edit of a raw ingredient never sends any new column.
+
+### The cross-feature cost bug, fixed
+- `custom-item.ts` called `lineCost` without the ingredient list, so a PREPARED ingredient used as a tea, topping, milk or packaging in a custom drink cost $0. It now passes the list: a prepared topping costs (standard amount x computed per-unit cost), a prepared base is costed and split evenly with other teas, and a raw price change flows raw -> prepared -> custom drink. The placed order still keeps its stamped cost.
+- **How a prepared ingredient gets a role**: exactly like a raw one, with the Custom drink role control (it is on every non-milk row, prepared included). A prepared ingredient with no role is **not offered**, and the custom drink builder now says so ("Not offered: X (prepared, no custom drink role). Set a role in Menu Manager"), instead of silently missing from the dropdowns.
+- **Packaging**: a prepared ingredient with no role is never counted as packaging, even if most drinks use it (it is something made, a syrup or cream, not a cup or lid; counting it would add it to every custom drink). If it is explicitly marked **Neither**, it is treated like agave: a standard ingredient in most drinks, and it is costed from its recipe, not $0.
+
+### New tests
+- **Unit** (`custom-with-prepared.test.ts`, 14): prepared topping and prepared base costed from their recipes with exact expected numbers (and not $0), even split with another tea with milk staying full, a raw cream price change flowing into the custom drink by exactly the expected amount, cup-size scaling, milk-only with a prepared topping; the role dropdown lists a prepared ingredient flagged base/topping, hides an unflagged one (and the builder reports it) or one marked Neither; packaging rules (unflagged prepared excluded, Neither included and costed, raw packaging unchanged); an order stamped from the recipe and kept after a later raw price change. Mutation-checked: removing the list argument makes 6 of them fail.
+- **Unit** (`ingredient-writer-matrix.test.ts`, 32): the writer for each of 4 database states (neither / role only / prepared only / both) x 8 operations: plain raw add and edit; raw with a role; role set with another edit; prepared add; raw to prepared; a device-only prepared ingredient edited afterwards; prepared back to raw; an ordinary edit never touching new columns. Mutation-checked: letting the writer send a prepared yield/price fails 4.
+- **Local e2e** (`95-custom-prepared.spec.ts`): through the real UI, a prepared ingredient used in a recipe is not offered until it has a role (and the builder says so), then is offered; both the Type and the Custom drink role controls exist on its row and in the New ingredient form; the custom drink cost preview and the stamped `costSnap` come from its recipe; doubling a raw price changes the next order only.
+- **Supabase-mode** (`90-integration.spec.ts`, 4, against the local database): the same scenario with neither migration, only the role migration, only the prepared migration, and both. Every state: a prepared ingredient is stored only when its columns exist (otherwise 0 rows and a banner), a role is stored only when its column exists, a raw ingredient converted to prepared is never zeroed or overwritten in the database when the columns are missing, and ordinary raw edits always save. Both migrations applied: roles and prepared ingredients persist across a reload, the custom drink with a prepared topping is stored (`custom:` id, price 6.90, `cost_snap` matching the recipe-based expectation), a raw price change flows through for the next order only, and everything reads back.
+
+### Migrations (both still NOT applied to production; independent, either order, either may stay unapplied)
+- `supabase/migration-add-ingredient-custom-role.sql` (role flag + backfill) and `supabase/migration-add-prepared-ingredients.sql` (kind + sub_recipe). Apply both to production before the base/topping dropdowns driven by saved roles and prepared ingredients fully work. Until each is applied the app keeps working and reports (see above). Still pending from earlier, unrelated: `migration-grant-anon-extras-revisions.sql` and `migration-replace-order-items.sql`.
+
+### Gates (integration branch)
+Typecheck clean; `next lint` clean; vitest **209 passed** (137 on custom-items + 26 from prepared-ingredients + 46 new); `next build` succeeds; full local Playwright suite **54 passed** on the second run. The first full run had 53 passed and 1 failure in `40-contract-helper-misc` "two devices submitting at the same moment" (a two-tab localStorage race test that passed 3 of 3 times when re-run alone and passed in the second full run); it looks timing-sensitive under load and was not touched by this work, but it is worth knowing about. Supabase-mode suite **26 passed** against a local Supabase (now stopped; both migrations applied to the LOCAL database only).

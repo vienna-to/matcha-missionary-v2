@@ -1,5 +1,6 @@
 import { validateEventTimes } from "./event-times";
 import { computeItemCost } from "./calc";
+import { customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
 import { newId, nowIso } from "./id";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
@@ -148,7 +149,12 @@ export function deriveOrderItem(
   snapshot: MenuSnapshot,
   cupSizeOz?: number,
 ): OrderItem {
-  const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
+  const mi = findMenuItem(snapshot, raw.menuItemId);
+  // A custom drink's milk and cream are its selected components, so there is
+  // no milk / cream choice to keep on the line.
+  if (isCustomItemId(raw.menuItemId)) {
+    raw = { ...raw, milkChoiceId: undefined, creamChoiceId: undefined };
+  }
   // Pastries take no milk / cream / sugar / ice: drop them (and skip the
   // default-milk snapshot) so nothing drink-related is ever saved on them.
   // Special requests are kept.
@@ -170,7 +176,10 @@ export function deriveOrderItem(
   const creamNameSnap = drinkOptions
     ? resolveCreamName(raw.creamChoiceId, mi, snapshot.ingredients)
     : undefined;
-  const drinkCost = mi
+  const customSpec = parseCustomItemId(raw.menuItemId);
+  const drinkCost = customSpec
+    ? customItemCost(customSpec, snapshot, cupSizeOz)
+    : mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
         creamChoiceId: raw.creamChoiceId,

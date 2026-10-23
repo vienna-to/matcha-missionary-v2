@@ -1,11 +1,10 @@
 import { validateEventTimes } from "./event-times";
 import { computeItemCost } from "./calc";
-import { customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
+import { comboUnitPrice, customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
 import { newId, nowIso } from "./id";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
 import {
-  COMBO_PRICE,
   type AppState,
   type Event,
   type EventExtra,
@@ -150,10 +149,10 @@ export function deriveOrderItem(
   cupSizeOz?: number,
 ): OrderItem {
   const mi = findMenuItem(snapshot, raw.menuItemId);
-  // A custom drink's milk and cream are its selected components, so there is
-  // no milk / cream choice to keep on the line.
+  // A custom drink has an automatic milk (the milk choice swaps it, like a
+  // menu drink) but no cream choice: its creams are the selected toppings.
   if (isCustomItemId(raw.menuItemId)) {
-    raw = { ...raw, milkChoiceId: undefined, creamChoiceId: undefined };
+    raw = { ...raw, creamChoiceId: undefined };
   }
   // Pastries take no milk / cream / sugar / ice: drop them (and skip the
   // default-milk snapshot) so nothing drink-related is ever saved on them.
@@ -178,7 +177,7 @@ export function deriveOrderItem(
     : undefined;
   const customSpec = parseCustomItemId(raw.menuItemId);
   const drinkCost = customSpec
-    ? customItemCost(customSpec, snapshot, cupSizeOz)
+    ? customItemCost(customSpec, snapshot, cupSizeOz, raw.milkChoiceId)
     : mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
@@ -201,8 +200,8 @@ export function deriveOrderItem(
       orderId,
       menuItemId: raw.menuItemId,
       menuItemNameSnap: mi?.name ?? "Unknown drink",
-      priceSnap: COMBO_PRICE,
-      ...priceFields(COMBO_PRICE, raw),
+      priceSnap: comboUnitPrice(raw.menuItemId),
+      ...priceFields(comboUnitPrice(raw.menuItemId), raw),
       costSnap: drinkCost + pastryCost,
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,

@@ -1,4 +1,17 @@
 import { lineCost } from "./calc";
+import {
+  CUSTOM_ID_PREFIX,
+  CUSTOM_BASE_PRICE,
+  CUSTOM_TOPPING_PRICE,
+  MILK_ONLY_ID,
+  comboUnitPrice,
+  customItemId,
+  customItemPrice,
+  customUnitPrice,
+  isCustomItemId,
+  parseCustomItemId,
+  type CustomSpec,
+} from "./custom-id";
 import { sameCategory } from "./units";
 import {
   REFERENCE_CUP_OZ,
@@ -9,87 +22,76 @@ import {
   type MenuSnapshot,
 } from "./types";
 
-/**
- * Custom / off-menu drinks: a drink built from existing ingredients (bases and
- * toppings) instead of picked from the menu.
- *
- * Nothing new is stored. A custom line is an ordinary order line whose
- * menuItemId encodes what was picked ("custom:<baseIds>|<toppingIds>"), so the
- * barista card, order total, revenue, cost, profit, margin and cups poured all
- * work through the same fields a menu item uses. Price and cost are stamped on
- * the line at order time (priceSnap / costSnap), so later ingredient price
- * changes never rewrite a past custom order.
- *
- * Price: flat CUSTOM_BASE_PRICE + CUSTOM_TOPPING_PRICE per topping. Bases do
- * not affect price.
- * Cost: the existing recipe cost of every selected component, each at the
- * standard amount a menu drink already uses for it (see standardLine).
- */
-export const CUSTOM_ID_PREFIX = "custom:";
-export const CUSTOM_BASE_PRICE = 6.7;
-export const CUSTOM_TOPPING_PRICE = 0.2;
+export {
+  CUSTOM_ID_PREFIX,
+  CUSTOM_BASE_PRICE,
+  CUSTOM_TOPPING_PRICE,
+  MILK_ONLY_ID,
+  comboUnitPrice,
+  customItemId,
+  customItemPrice,
+  customUnitPrice,
+  isCustomItemId,
+  parseCustomItemId,
+  type CustomSpec,
+};
 
-export type CustomSpec = { baseIds: string[]; toppingIds: string[] };
+/**
+ * Custom / off-menu drinks: a drink built from existing ingredients instead of
+ * picked from the menu. See custom-id.ts for how a selection is stored.
+ *
+ * Price: flat CUSTOM_BASE_PRICE + CUSTOM_TOPPING_PRICE per topping; bases do
+ * not affect price.
+ *
+ * Cost = tea + milk + toppings + packaging, every amount taken from recipes
+ * the menu already has (nothing is hardcoded), so it follows ingredient price
+ * changes and is comparable to a menu drink:
+ *  - Tea: the standard amount of each selected tea, split evenly when more
+ *    than one is picked (2 teas = half each, 3 = a third each).
+ *  - Milk: one standard milk amount, always full whatever the number of teas.
+ *    "Milk only" is the base for a drink with no tea.
+ *  - Toppings: the standard amount of each.
+ *  - Packaging: the non-component ingredients most drinks use (cup, lid, straw,
+ *    ice, agave).
+ */
+
 export type ComponentKind = "base" | "topping";
 
-export function isCustomItemId(id: string | undefined): boolean {
-  return Boolean(id?.startsWith(CUSTOM_ID_PREFIX));
-}
-
-const uniqSorted = (ids: string[]) => [...new Set(ids)].sort();
-
-/** Canonical id for a selection (order and duplicates do not matter). */
-export function customItemId(spec: CustomSpec): string {
-  return `${CUSTOM_ID_PREFIX}${uniqSorted(spec.baseIds).join(",")}|${uniqSorted(spec.toppingIds).join(",")}`;
-}
-
-export function parseCustomItemId(id: string): CustomSpec | null {
-  if (!isCustomItemId(id)) return null;
-  const [bases = "", toppings = ""] = id.slice(CUSTOM_ID_PREFIX.length).split("|");
-  const split = (s: string) => s.split(",").filter(Boolean);
-  return { baseIds: split(bases), toppingIds: split(toppings) };
-}
-
-const cents = (n: number) => Math.round(n * 100) / 100;
-
-/** 6.70 flat + 0.20 per topping. */
-export function customItemPrice(toppingCount: number): number {
-  return cents(CUSTOM_BASE_PRICE + CUSTOM_TOPPING_PRICE * Math.max(0, toppingCount));
-}
-
-// ---------------------------------------------------------------------------
-// Which existing ingredients are bases / toppings
-// ---------------------------------------------------------------------------
-
-// Ingredients carry no "base" or "topping" flag, so this reads what the data
-// already says: the milk pool is bases, the cream pool is toppings, and the
-// rest are told apart by name (teas and water are bases, purées are toppings).
-const BASE_NAME = /\b(matcha|hojicha|tea|earl grey|genmaicha|sencha|chai|water)\b/i;
+// Used only for an ingredient whose role was never set (Ingredient.customRole
+// undefined, for example before the role column exists): a guess from the name.
+// Once a role is set in Menu Manager, the role wins.
+const BASE_NAME = /\b(matcha|hojicha|tea|earl grey|genmaicha|sencha|chai)\b/i;
 const TOPPING_NAME = /pur[eé]e/i;
 
+/** Milk is never a picked component: it is added automatically (or is the
+ *  "milk only" base). */
 export function componentKind(ing: Ingredient): ComponentKind | null {
-  if (ing.pool === "milk") return "base";
-  if (ing.pool === "cream") return "topping";
-  if (TOPPING_NAME.test(ing.name)) return "topping";
+  if (ing.pool === "milk") return null;
+  if (ing.customRole) return ing.customRole === "none" ? null : ing.customRole;
+  if (ing.pool === "cream" || TOPPING_NAME.test(ing.name)) return "topping";
   if (BASE_NAME.test(ing.name)) return "base";
   return null;
 }
 
 const isPastryItem = (m: MenuItem) => m.category === "pastry" || m.size === "pastry_count";
 
+/** Non-pastry drinks, active first then menu order: the order in which a
+ *  recipe is allowed to decide a "standard" amount. */
+function orderedDrinks(snapshot: MenuSnapshot): MenuItem[] {
+  return snapshot.menuItems
+    .filter((m) => !isPastryItem(m))
+    .sort((a, b) => Number(b.active) - Number(a.active) || compareMenuItems(a, b));
+}
+
 /**
  * The standard amount of an ingredient: the amount a menu drink's recipe
- * already uses for it. The first drink (active first, then menu order) that
- * lists the ingredient decides. A pooled ingredient (any milk, any cream) uses
- * the amount of its pool's line, since a recipe's milk line is "the milk",
- * whichever milk is chosen. Null when no drink recipe uses it, so it cannot be
- * costed and is not offered.
+ * already uses for it. The first drink that lists the ingredient decides. A
+ * pooled ingredient (any cream) falls back to its pool's amount. Null when no
+ * drink recipe uses it, so it cannot be costed and is not offered.
  */
 export function standardLine(ing: Ingredient, snapshot: MenuSnapshot): IngredientLine | null {
   const byId = new Map(snapshot.ingredients.map((i) => [i.id, i]));
-  const drinks = snapshot.menuItems
-    .filter((m) => !isPastryItem(m))
-    .sort((a, b) => Number(b.active) - Number(a.active) || compareMenuItems(a, b));
+  const drinks = orderedDrinks(snapshot);
   for (const m of drinks) {
     const direct = m.ingredientLines.find((l) => l.ingredientId === ing.id);
     if (direct) return direct;
@@ -103,6 +105,51 @@ export function standardLine(ing: Ingredient, snapshot: MenuSnapshot): Ingredien
   return null;
 }
 
+/** The milk every tea drink gets: the milk line of the first drink that has
+ *  one (its default milk, at that recipe's amount). */
+export function standardMilk(
+  snapshot: MenuSnapshot,
+): { ingredient: Ingredient; line: IngredientLine } | null {
+  const byId = new Map(snapshot.ingredients.map((i) => [i.id, i]));
+  for (const m of orderedDrinks(snapshot)) {
+    const line = m.ingredientLines.find((l) => byId.get(l.ingredientId)?.pool === "milk");
+    if (!line) continue;
+    const ingredient = (m.defaultMilkId ? byId.get(m.defaultMilkId) : undefined) ?? byId.get(line.ingredientId);
+    if (ingredient && sameCategory(line.unit, ingredient.unit)) return { ingredient, line };
+  }
+  return null;
+}
+
+/**
+ * Packaging: ingredients that are not a tea, milk, cream or topping and that
+ * most (more than half) of the active drinks use. Each is taken at the amount
+ * of the first drink that lists it. Read from the recipes, so it follows menu
+ * and ingredient changes; with the seed menu it is cup, lid, straw, ice and
+ * agave (a one-off ingredient like the chocolate spread is used by too few).
+ */
+export function packagingLines(
+  snapshot: MenuSnapshot,
+): Array<{ ingredient: Ingredient; line: IngredientLine }> {
+  const byId = new Map(snapshot.ingredients.map((i) => [i.id, i]));
+  const all = orderedDrinks(snapshot);
+  const drinks = all.some((m) => m.active) ? all.filter((m) => m.active) : all;
+  if (drinks.length === 0) return [];
+  const out: Array<{ ingredient: Ingredient; line: IngredientLine }> = [];
+  const seen = new Set<string>();
+  for (const m of drinks) {
+    for (const line of m.ingredientLines) {
+      if (seen.has(line.ingredientId)) continue;
+      seen.add(line.ingredientId);
+      const ingredient = byId.get(line.ingredientId);
+      if (!ingredient || ingredient.pool || componentKind(ingredient)) continue;
+      if (!sameCategory(line.unit, ingredient.unit)) continue;
+      const users = drinks.filter((d) => d.ingredientLines.some((l) => l.ingredientId === ingredient.id)).length;
+      if (users * 2 > drinks.length) out.push({ ingredient, line });
+    }
+  }
+  return out;
+}
+
 export type CustomComponent = {
   ingredient: Ingredient;
   kind: ComponentKind;
@@ -110,10 +157,14 @@ export type CustomComponent = {
   line: IngredientLine;
 };
 
-/** Every base and topping the builder can offer, sorted by name. */
+/** Every tea (base) and topping the builder can offer, sorted by name. Only
+ *  ingredients whose role is base / topping (or guessed, when never set) and
+ *  that a drink recipe uses appear. */
 export function customComponents(snapshot: MenuSnapshot): {
   bases: CustomComponent[];
   toppings: CustomComponent[];
+  /** The milk added to every tea drink, or the "milk only" base; null when no recipe has milk. */
+  milk: { ingredient: Ingredient; line: IngredientLine } | null;
 } {
   const bases: CustomComponent[] = [];
   const toppings: CustomComponent[] = [];
@@ -126,37 +177,66 @@ export function customComponents(snapshot: MenuSnapshot): {
   }
   const byName = (a: CustomComponent, b: CustomComponent) =>
     a.ingredient.name.localeCompare(b.ingredient.name);
-  return { bases: bases.sort(byName), toppings: toppings.sort(byName) };
+  return { bases: bases.sort(byName), toppings: toppings.sort(byName), milk: standardMilk(snapshot) };
 }
 
-/** Cost of one component at its standard amount. `cupSizeOz` scales it the way
- *  a menu drink's recipe is scaled (recipes are authored at REFERENCE_CUP_OZ). */
-export function componentCost(c: CustomComponent, cupSizeOz?: number): number {
+/** Recipes are authored at REFERENCE_CUP_OZ; a per-event cup size scales every
+ *  line, exactly as computeItemCost does for a menu drink. */
+function scaledCost(line: IngredientLine, ing: Ingredient, cupSizeOz?: number, share = 1): number {
   const scale = cupSizeOz !== undefined ? cupSizeOz / REFERENCE_CUP_OZ : 1;
-  const v = lineCost({ ...c.line, amount: c.line.amount * scale }, c.ingredient);
+  const v = lineCost({ ...line, amount: line.amount * scale * share }, ing);
   return Number.isFinite(v) ? v : 0;
 }
 
-function selected(spec: CustomSpec, snapshot: MenuSnapshot): CustomComponent[] {
-  const { bases, toppings } = customComponents(snapshot);
-  const want = new Set([...spec.baseIds, ...spec.toppingIds]);
-  return [...bases, ...toppings].filter((c) => want.has(c.ingredient.id));
+export type CustomCost = { tea: number; milk: number; toppings: number; packaging: number; total: number };
+
+/** Cost of a custom drink, split by part. `milkChoiceId` swaps the milk the way
+ *  a menu drink's milk choice does. */
+export function customCostParts(
+  spec: CustomSpec,
+  snapshot: MenuSnapshot,
+  cupSizeOz?: number,
+  milkChoiceId?: string,
+): CustomCost {
+  const { bases, toppings, milk } = customComponents(snapshot);
+  const teas = bases.filter((c) => spec.baseIds.includes(c.ingredient.id));
+  const tops = toppings.filter((c) => spec.toppingIds.includes(c.ingredient.id));
+  // Several teas split the tea amount evenly; milk is one full amount.
+  const tea = teas.reduce((s, c) => s + scaledCost(c.line, c.ingredient, cupSizeOz, 1 / teas.length), 0);
+  const chosenMilk = milkChoiceId
+    ? snapshot.ingredients.find((i) => i.id === milkChoiceId && i.pool === "milk")
+    : undefined;
+  const milkCost = milk
+    ? scaledCost(milk.line, chosenMilk && sameCategory(milk.line.unit, chosenMilk.unit) ? chosenMilk : milk.ingredient, cupSizeOz)
+    : 0;
+  const toppingCost = tops.reduce((s, c) => s + scaledCost(c.line, c.ingredient, cupSizeOz), 0);
+  const packaging = packagingLines(snapshot).reduce(
+    (s, p) => s + scaledCost(p.line, p.ingredient, cupSizeOz),
+    0,
+  );
+  return { tea, milk: milkCost, toppings: toppingCost, packaging, total: tea + milkCost + toppingCost + packaging };
 }
 
-/** Sum of the selected components' recipe costs. */
-export function customItemCost(spec: CustomSpec, snapshot: MenuSnapshot, cupSizeOz?: number): number {
-  return selected(spec, snapshot).reduce((sum, c) => sum + componentCost(c, cupSizeOz), 0);
+export function customItemCost(
+  spec: CustomSpec,
+  snapshot: MenuSnapshot,
+  cupSizeOz?: number,
+  milkChoiceId?: string,
+): number {
+  return customCostParts(spec, snapshot, cupSizeOz, milkChoiceId).total;
 }
 
-/** "Custom: Hojicha powder + Banana cream" (bases first, then toppings). */
+/** "Custom: Hojicha powder + Banana cream"; "Custom: Milk + Banana cream" for milk only. */
 export function customItemName(spec: CustomSpec, snapshot: MenuSnapshot): string {
-  const names = selected(spec, snapshot)
-    .sort((a, b) => Number(a.kind === "topping") - Number(b.kind === "topping"))
-    .map((c) => c.ingredient.name);
+  const { bases, toppings } = customComponents(snapshot);
+  const teas = bases.filter((c) => spec.baseIds.includes(c.ingredient.id)).map((c) => c.ingredient.name);
+  const base = teas.length > 0 ? teas : spec.baseIds.includes(MILK_ONLY_ID) ? ["Milk"] : [];
+  const tops = toppings.filter((c) => spec.toppingIds.includes(c.ingredient.id)).map((c) => c.ingredient.name);
+  const names = [...base, ...tops];
   return names.length > 0 ? `Custom: ${names.join(" + ")}` : "Custom drink";
 }
 
-/** At least one base is required; toppings are optional. */
+/** At least one base is required (a tea, or "milk only"); toppings are optional. */
 export function isValidCustomSpec(spec: CustomSpec): boolean {
   return spec.baseIds.length >= 1;
 }
@@ -165,6 +245,8 @@ export function isValidCustomSpec(spec: CustomSpec): boolean {
  * The menu item a custom id stands for, so every place that looks an item up
  * by id (price, name, adjustments) works unchanged. Not in the menu; never
  * stored. Its ingredientLines are empty: the cost comes from customItemCost.
+ * It carries the standard milk as its default so the milk choice works like a
+ * menu drink's.
  */
 export function customMenuItem(id: string, snapshot: MenuSnapshot): MenuItem | undefined {
   const spec = parseCustomItemId(id);
@@ -177,7 +259,8 @@ export function customMenuItem(id: string, snapshot: MenuSnapshot): MenuItem | u
     size: "other",
     active: true,
     ingredientLines: [],
-    allowedMilkIds: [],
+    defaultMilkId: standardMilk(snapshot)?.ingredient.id,
+    allowedMilkIds: snapshot.ingredients.filter((i) => i.pool === "milk").map((i) => i.id),
     allowedCreamIds: [],
     createdAt: "",
     updatedAt: "",

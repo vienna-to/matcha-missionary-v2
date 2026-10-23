@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { Check, Plus, ShoppingBag, X } from "lucide-react";
 import { Button, EmptyState, Field, Modal, Select, Sheet } from "@/components/ui";
 import OrderFlow from "@/components/OrderFlow";
-import CustomItemModal from "@/components/CustomItemModal";
+import CustomItemModal, { CustomBuilder, EMPTY_SPEC } from "@/components/CustomItemModal";
+import { comboUnitPrice, customItemId, customItemPrice, isValidCustomSpec, type CustomSpec } from "@/lib/custom-item";
 import {
   amountOwed,
   buildOrder,
@@ -379,6 +380,9 @@ export default function LiveOrders() {
       {comboPickerOpen ? (
         <ComboPickerModal
           items={activeItems}
+          snapshot={snap}
+          cupSizeOz={activeEvent_.cupSizeOz}
+          helperMode={helperMode}
           onClose={() => setComboPickerOpen(false)}
           onPick={addCombo}
         />
@@ -387,12 +391,20 @@ export default function LiveOrders() {
   );
 }
 
+const CUSTOM_DRINK_OPTION = "__custom__";
+
 function ComboPickerModal({
   items,
+  snapshot,
+  cupSizeOz,
+  helperMode,
   onClose,
   onPick,
 }: {
   items: MenuItem[];
+  snapshot: MenuSnapshot;
+  cupSizeOz?: number;
+  helperMode: boolean;
   onClose: () => void;
   onPick: (drinkId: string, pastryId: string) => void;
 }) {
@@ -403,10 +415,16 @@ function ComboPickerModal({
   const [drinkId, setDrinkId] = useState<string>(drinks[0]?.id ?? "");
   const [pastryId, setPastryId] = useState<string>(pastries[0]?.id ?? "");
 
-  const drink = drinks.find((m) => m.id === drinkId);
+  const isCustom = drinkId === CUSTOM_DRINK_OPTION;
+  const [spec, setSpec] = useState<CustomSpec>(EMPTY_SPEC);
+  const customId = customItemId(spec);
+  const drink = isCustom ? undefined : drinks.find((m) => m.id === drinkId);
   const pastry = pastries.find((m) => m.id === pastryId);
-  const savings = (drink?.price ?? 0) + (pastry?.price ?? 0) - COMBO_PRICE;
-  const valid = Boolean(drink && pastry);
+  // $10 covers a custom drink with up to one topping; each extra topping adds $0.20.
+  const comboPrice = isCustom ? comboUnitPrice(customId) : COMBO_PRICE;
+  const drinkPrice = isCustom ? customItemPrice(spec.toppingIds.length) : drink?.price ?? 0;
+  const savings = drinkPrice + (pastry?.price ?? 0) - comboPrice;
+  const valid = Boolean(pastry) && (isCustom ? isValidCustomSpec(spec) : Boolean(drink));
 
   return (
     <Modal open onClose={onClose} title={`Combo deal: ${formatMoney(COMBO_PRICE)}`}>
@@ -422,8 +440,20 @@ function ComboPickerModal({
                 {`${m.name} · ${formatMoney(m.price)}`.toUpperCase()}
               </option>
             ))}
+            <option value={CUSTOM_DRINK_OPTION}>CUSTOM DRINK…</option>
           </Select>
         </Field>
+        {isCustom ? (
+          <CustomBuilder
+            snapshot={snapshot}
+            cupSizeOz={cupSizeOz}
+            helperMode={helperMode}
+            spec={spec}
+            onChange={setSpec}
+            priceLabel="combo price"
+            priceOverride={comboPrice}
+          />
+        ) : null}
         <Field label="pastry">
           <Select value={pastryId} onChange={(e) => setPastryId(e.target.value)}>
             {pastries.map((m) => (
@@ -433,7 +463,7 @@ function ComboPickerModal({
             ))}
           </Select>
         </Field>
-        {drinks.length === 0 || pastries.length === 0 ? (
+        {(drinks.length === 0 && !isCustom) || pastries.length === 0 ? (
           <p role="alert" className="t-caption text-xs font-semibold text-red-700">
             {drinks.length === 0 ? "No drinks on the menu. " : ""}
             {pastries.length === 0
@@ -450,7 +480,7 @@ function ComboPickerModal({
         <div className="t-caption flex items-center justify-between rounded-xl bg-matcha-50 px-3 py-2 text-xs text-matcha-900/80">
           <span>combo price</span>
           <span className="tabular-nums">
-            {formatMoney(COMBO_PRICE)}
+            {formatMoney(comboPrice)}
             {savings > 0 ? (
               <span className="ml-2 text-matcha-700">(save {formatMoney(savings)})</span>
             ) : null}
@@ -460,7 +490,7 @@ function ComboPickerModal({
           <Button variant="ghost" className="h-12" onClick={onClose}>
             Cancel
           </Button>
-          <Button className="h-12" onClick={() => onPick(drinkId, pastryId)} disabled={!valid}>
+          <Button className="h-12" onClick={() => onPick(isCustom ? customId : drinkId, pastryId)} disabled={!valid}>
             Add combo
           </Button>
         </div>

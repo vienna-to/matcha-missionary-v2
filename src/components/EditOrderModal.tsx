@@ -14,7 +14,6 @@ import {
 } from "@/components/ui";
 import { useDispatch, useStore } from "@/lib/store";
 import {
-  COMBO_PRICE,
   type FreeReason,
   type Ingredient,
   type MenuItem,
@@ -34,7 +33,7 @@ import { chargedUnitFromPct } from "@/lib/pricing";
 import { useHelperMode } from "@/lib/helper-mode";
 import { newId } from "@/lib/id";
 import CustomItemModal from "@/components/CustomItemModal";
-import { findMenuItem } from "@/lib/custom-item";
+import { comboUnitPrice, findMenuItem } from "@/lib/custom-item";
 import { hasDrinkAdjustments } from "@/lib/order-labels";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -123,11 +122,10 @@ export default function EditOrderModal({
   const { total, totalGross } = items.reduce(
     (acc, it) => {
       // An existing line keeps the price it was sold at; only new lines use the menu.
+      const stamped = order.items.find((o) => o.id === it.id)?.priceSnap;
       const unit = it.isCombo
-        ? COMBO_PRICE
-        : order.items.find((o) => o.id === it.id)?.priceSnap ??
-          findMenuItem(snapshot, it.menuItemId)?.price ??
-          0;
+        ? stamped ?? comboUnitPrice(it.menuItemId)
+        : stamped ?? findMenuItem(snapshot, it.menuItemId)?.price ?? 0;
       acc.total += chargedUnitFromPct(unit, it.discountPct) * it.quantity;
       acc.totalGross += unit * it.quantity;
       return acc;
@@ -443,7 +441,7 @@ function DraftItemRow({
   const displayName = item.isCombo
     ? `Combo: ${mi.name} + ${pastry?.name ?? "?"}`
     : mi.name;
-  const unitPrice = item.isCombo ? COMBO_PRICE : stampedUnit ?? mi.price;
+  const unitPrice = item.isCombo ? stampedUnit ?? comboUnitPrice(item.menuItemId) : stampedUnit ?? mi.price;
   const pct = item.discountPct ?? 0;
 
   return (

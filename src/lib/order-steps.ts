@@ -1,4 +1,3 @@
-import { COMBO_PRICE } from "./types";
 import { chargedUnitFromPct, roundUpExtra } from "./pricing";
 import type {
   Event,
@@ -9,7 +8,7 @@ import type {
   PaymentMethod,
   SugarAdjustment,
 } from "./types";
-import { findMenuItem } from "./custom-item";
+import { comboUnitPrice, findMenuItem } from "./custom-item";
 import { hasDrinkAdjustments } from "./order-labels";
 import { deriveOrderItem } from "./reducer";
 
@@ -162,7 +161,7 @@ export function validateSubmit(
 export function cartTotal(cart: CartLine[], snapshot: MenuSnapshot): number {
   return cart.reduce((sum, line) => {
     const unit = line.isCombo
-      ? COMBO_PRICE
+      ? comboUnitPrice(line.menuItemId)
       : findMenuItem(snapshot, line.menuItemId)?.price ?? 0;
     return sum + chargedUnitFromPct(unit, line.discountPct) * line.quantity;
   }, 0);

@@ -15,7 +15,7 @@ import {
   type PaymentMethod,
   type SugarAdjustment,
 } from "@/lib/types";
-import { findMenuItem, isCustomItemId } from "@/lib/custom-item";
+import { comboUnitPrice, findMenuItem } from "@/lib/custom-item";
 import {
   hasDrinkAdjustments,
   resolveCreamName,
@@ -378,7 +378,7 @@ function ItemLine({
   if (!item) return null;
 
   const mods = lineMods(line, item, snapshot);
-  const unit = line.isCombo ? COMBO_PRICE : item.price;
+  const unit = line.isCombo ? comboUnitPrice(line.menuItemId) : item.price;
   const fraction = Math.min(1, Math.max(0, (line.discountPct ?? 0) / 100));
 
   return (
@@ -498,7 +498,6 @@ function AdjustStep(p: Props) {
             </div>
             {isPastry ? null : (
               <>
-                {isCustomItemId(item.id) ? null : (
                 <div>
                   <div className="t-display mb-1.5 text-[11px] text-matcha-700">Milk</div>
                   <div className="flex flex-wrap gap-2">
@@ -513,7 +512,6 @@ function AdjustStep(p: Props) {
                     ))}
                   </div>
                 </div>
-                )}
                 <div>
                   <div className="t-display mb-1.5 text-[11px] text-matcha-700">Sugar</div>
                   <div className="flex flex-wrap gap-2">

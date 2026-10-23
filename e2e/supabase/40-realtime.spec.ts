@@ -27,8 +27,9 @@ test.describe("realtime sync between two devices", () => {
     // B starts the order; A's Barista Queue reflects it
     await baristaCard(b, 1).getByRole("button", { name: /Start/ }).click();
     await expect
-      .poll(() => sql(`select status from public.order_items where workspace_id='${ws}'`)[0].status)
-      .not.toBe("pending");
+      // "Start" claims the order: it sets orders.status (order_items.status is a legacy column)
+      .poll(() => sql(`select status from public.orders where workspace_id='${ws}'`)[0].status)
+      .toBe("in_progress");
     await goTab(page, "Barista Queue");
     await expect(baristaCard(page, 1).getByRole("button", { name: /Start/ })).toHaveCount(0, { timeout: 15_000 });
 

@@ -39,6 +39,7 @@ import {
   SIZES,
   SIZE_LABELS,
   compareMenuItems,
+  type CustomRole,
   type Ingredient,
   type IngredientLine,
   type MenuItem,
@@ -893,7 +894,7 @@ function IngredientsList() {
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <table className="min-w-full text-sm max-md:min-w-[38rem]">
+            <table className="min-w-full text-sm max-md:min-w-[46rem]">
               <thead>
                 <tr className="t-display text-left text-xs text-matcha-900/60">
                   <th className="w-6 py-2" />
@@ -902,6 +903,9 @@ function IngredientsList() {
                   <th className="py-2 pr-3">Package amount</th>
                   <th className="py-2 pr-3">Unit</th>
                   <th className="py-2 pr-3 text-right">$/unit</th>
+                  <th className="py-2 pr-3" title="How the custom drink builder uses this ingredient">
+                    Custom drink
+                  </th>
                   <th />
                 </tr>
               </thead>
@@ -1032,6 +1036,28 @@ function IngredientRow({
       <td className="py-1.5 pr-3 text-right font-mono text-xs text-matcha-900/70 tabular-nums">
         ${perUnit.toFixed(4)}
       </td>
+      <td className="py-1.5 pr-3">
+        {ing.pool === "milk" ? (
+          // Milk is added to a tea drink automatically, never picked.
+          <span className="t-caption text-xs text-matcha-900/60">milk (automatic)</span>
+        ) : (
+          <Select
+            className="h-8"
+            aria-label={`Custom drink role for ${ing.name}`}
+            value={ing.customRole ?? ""}
+            onChange={(e) => onChange({ customRole: e.target.value as CustomRole })}
+          >
+            {ing.customRole === undefined ? (
+              <option value="" disabled>
+                Not set
+              </option>
+            ) : null}
+            <option value="base">Base (tea)</option>
+            <option value="topping">Topping</option>
+            <option value="none">Neither</option>
+          </Select>
+        )}
+      </td>
       <td className="py-1.5">
         <Button size="sm" variant="ghost" onClick={onDelete}>
           <Trash2 className="h-3.5 w-3.5" />
@@ -1054,6 +1080,7 @@ function NewIngredientForm({
   const [packagePrice, setPackagePrice] = useState(0);
   const [packageAmount, setPackageAmount] = useState(0);
   const [unit, setUnit] = useState<Unit>("g");
+  const [role, setRole] = useState<CustomRole | "">("");
   return (
     <div className="space-y-3">
       <Field label="Name">
@@ -1088,6 +1115,14 @@ function NewIngredientForm({
           </Select>
         </Field>
       </div>
+      <Field label="Custom drink role" hint="Teas are bases; creams and purées are toppings. Packaging and flavors that are not a topping: Neither.">
+        <Select value={role} onChange={(e) => setRole(e.target.value as CustomRole | "")}>
+          <option value="">Not set</option>
+          <option value="base">Base (tea)</option>
+          <option value="topping">Topping</option>
+          <option value="none">Neither</option>
+        </Select>
+      </Field>
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel}>
           Cancel
@@ -1097,6 +1132,7 @@ function NewIngredientForm({
             onCreate({
               name: name.trim(),
               pool: null,
+              ...(role ? { customRole: role } : {}),
               packagePrice,
               packageAmount,
               unit,

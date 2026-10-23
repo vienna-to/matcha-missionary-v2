@@ -32,6 +32,8 @@ export type DbIngredient = {
   unit: Ingredient["unit"];
   pool: Ingredient["pool"] | null;
   sort_order: number | null;
+  /** Custom drink role. Absent when the database predates migration-add-ingredient-custom-role.sql. */
+  custom_role?: Ingredient["customRole"] | null;
   created_at: string;
   updated_at: string;
 };
@@ -176,6 +178,7 @@ export function fromIngredient(r: DbIngredient): Ingredient {
     packageAmount: Number(r.package_amount),
     unit: r.unit,
     pool: r.pool ?? null,
+    customRole: r.custom_role ?? undefined,
     sortOrder: r.sort_order ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -421,6 +424,9 @@ export function toIngredientInsert(workspaceId: string, ing: Ingredient): Omit<D
     unit: ing.unit,
     pool: ing.pool ?? null,
     sort_order: ing.sortOrder ?? null,
+    // Only sent when set, so adding an ingredient still works on a database
+    // that does not have the column yet.
+    ...(ing.customRole !== undefined ? { custom_role: ing.customRole } : {}),
   };
 }
 
@@ -432,6 +438,7 @@ export function toIngredientPatch(patch: Partial<Ingredient>): Partial<DbIngredi
   if (patch.unit !== undefined) r.unit = patch.unit;
   if (patch.pool !== undefined) r.pool = patch.pool ?? null;
   if (patch.sortOrder !== undefined) r.sort_order = patch.sortOrder;
+  if (patch.customRole !== undefined) r.custom_role = patch.customRole;
   return r;
 }
 

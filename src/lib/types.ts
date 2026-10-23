@@ -182,8 +182,9 @@ export type Event = {
   startTime: string; // HH:MM
   endTime: string; // HH:MM
   targetRevenue?: number;
-  /** Percentage of revenue (0–100) donated for charity events. When set,
-   *  Event Summary surfaces the donation amount and nets it out of profit. */
+  /** RETIRED: percentage of revenue (0–100) donated for charity events. No screen sets
+   *  it any more (use the collab split); it is kept and still read so events that already
+   *  have one, and the all-events totals, do not change. */
   donationPct?: number;
   /** Collab: the partner's share (0–100) of the event's profit. Setting this or
    *  collabContribution makes the event a collab (see lib/collab-split.ts). */

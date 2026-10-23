@@ -22,6 +22,7 @@ import type { Event, EventExtra, MenuSnapshot, Order } from "@/lib/types";
 import { cn, formatMoney, formatPct } from "@/lib/utils";
 import ContractResultsDialog from "@/components/ContractResultsDialog";
 import EventMoney from "./EventMoney";
+import RevenueShareEditor from "./RevenueShareEditor";
 import { barMargin, categoryAxis, useIsMobile } from "@/components/chart-axis";
 
 const ALL_EVENTS = "__all__";
@@ -254,6 +255,8 @@ export default function EventSummary() {
           {event.notes}
         </div>
       ) : null}
+
+      <RevenueShareEditor key={`${event.id}:${event.donationPct ?? 0}`} event={event} />
 
       {/* Metrics */}
       <div className={cn(

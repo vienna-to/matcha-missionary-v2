@@ -526,6 +526,15 @@ export function toEventInsert(
   };
 }
 
+/** An events insert row without the collab columns (for a database that has not had migration-add-collab-split.sql run). */
+export function withoutCollabColumns<T extends object>(row: T): T {
+  const { collab_profit_pct: _p, collab_contribution: _c, ...rest } = row as T & {
+    collab_profit_pct?: unknown;
+    collab_contribution?: unknown;
+  };
+  return rest as T;
+}
+
 export function toEventPatch(patch: Partial<Event>): Partial<DbEvent> {
   const r: Partial<DbEvent> = {};
   if (patch.name !== undefined) r.name = patch.name;

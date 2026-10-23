@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collabSplitFor, computeCollabSplit, isCollab, parseCollabInput } from "@/lib/collab-split";
+import { collabSplitFor, computeCollabSplit, isCollab, parseCollabFields, parseCollabInput } from "@/lib/collab-split";
 
 describe("computeCollabSplit", () => {
   it("worked example: $500 revenue, $100 costs, 40% split, $50 contribution", () => {
@@ -125,5 +125,42 @@ describe("parseCollabInput", () => {
     expect(parseCollabInput("-1", 0, 100).ok).toBe(false);
     expect(parseCollabInput("abc", 0, 100).ok).toBe(false);
     expect(parseCollabInput("-5", 0, Infinity).ok).toBe(false);
+  });
+});
+
+describe("parseCollabFields (shared by New Event, Quick add and the Event Summary panel)", () => {
+  it("both blank: not a collab", () => {
+    expect(parseCollabFields("", "  ")).toEqual({ ok: true, value: null });
+  });
+  it("both filled", () => {
+    expect(parseCollabFields("40", "50")).toEqual({ ok: true, value: { collabProfitPct: 40, collabContribution: 50 } });
+  });
+  it("one blank half counts as 0", () => {
+    expect(parseCollabFields("40", "")).toEqual({ ok: true, value: { collabProfitPct: 40, collabContribution: 0 } });
+    expect(parseCollabFields("", "50")).toEqual({ ok: true, value: { collabProfitPct: 0, collabContribution: 50 } });
+  });
+  it("same validation as the panel: share 0 to 100, contribution 0 or more, numbers only", () => {
+    expect(parseCollabFields("101", "")).toEqual({ ok: false, pctError: true, contributionError: false });
+    expect(parseCollabFields("-1", "")).toEqual({ ok: false, pctError: true, contributionError: false });
+    expect(parseCollabFields("40", "-5")).toEqual({ ok: false, pctError: false, contributionError: true });
+    expect(parseCollabFields("abc", "x")).toEqual({ ok: false, pctError: true, contributionError: true });
+    expect(parseCollabFields("0", "0")).toEqual({ ok: true, value: { collabProfitPct: 0, collabContribution: 0 } });
+    expect(parseCollabFields("100", "12.5").ok).toBe(true);
+  });
+});
+
+describe("an event created with the terms shows the same split the Event Summary panel computes", () => {
+  it("terms set at creation drive collabSplitFor / computeCollabSplit; at $0 profit there are no dollar take-homes", () => {
+    const parsed = parseCollabFields("40", "50");
+    if (!parsed.ok || !parsed.value) throw new Error("expected terms");
+    const created = { ...parsed.value };
+    expect(isCollab(created)).toBe(true);
+    expect(collabSplitFor(created, 400)).toEqual(computeCollabSplit(400, 40, 50));
+    const empty = collabSplitFor(created, 0);
+    expect(empty?.partnerShare).toBe(0);
+    expect(empty?.partnerTakeHome).toBe(-50); // contribution agreed, nothing earned yet
+  });
+  it("an event created with the fields blank is not a collab", () => {
+    expect(isCollab({})).toBe(false);
   });
 });

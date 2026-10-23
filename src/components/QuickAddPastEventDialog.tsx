@@ -10,6 +10,8 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
+import CollabInputs from "@/components/CollabInputs";
+import { parseCollabFields } from "@/lib/collab-split";
 import { useStore } from "@/lib/store";
 import { validateEventTimes } from "@/lib/event-times";
 import { getClient } from "@/lib/supabase/client";
@@ -18,7 +20,9 @@ import {
   toEventInsert,
   toOrderInsert,
   toOrderItemInsert,
+  withoutCollabColumns,
 } from "@/lib/supabase/serialize";
+import { COLLAB_MIGRATION_HINT, isMissingCollabColumn, reportSaveError } from "@/lib/supabase/save-errors";
 import type { Action } from "@/lib/reducer";
 import { formatMoney } from "@/lib/utils";
 
@@ -60,6 +64,8 @@ export default function QuickAddPastEventDialog({
   const [endTime, setEndTime] = useState("16:00");
   const [notes, setNotes] = useState("");
   const [city, setCity] = useState("");
+  const [collabPct, setCollabPct] = useState("");
+  const [collabContribution, setCollabContribution] = useState("");
   const [admissionCharged, setAdmissionCharged] = useState<"" | "yes" | "no">("");
   const [qty, setQty] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
@@ -72,8 +78,9 @@ export default function QuickAddPastEventDialog({
   );
 
   const timeError = validateEventTimes(startTime, endTime);
+  const collab = parseCollabFields(collabPct, collabContribution);
   const valid =
-    name.trim().length > 0 && date.length === 10 && totalCups > 0 && !timeError;
+    name.trim().length > 0 && date.length === 10 && totalCups > 0 && !timeError && collab.ok;
 
   function reset() {
     setName("");
@@ -82,6 +89,8 @@ export default function QuickAddPastEventDialog({
     setEndTime("16:00");
     setNotes("");
     setCity("");
+    setCollabPct("");
+    setCollabContribution("");
     setAdmissionCharged("");
     setQty({});
   }
@@ -98,6 +107,8 @@ export default function QuickAddPastEventDialog({
         startTime,
         endTime,
         notes,
+        collabProfitPct: collab.ok && collab.value ? collab.value.collabProfitPct : undefined,
+        collabContribution: collab.ok && collab.value ? collab.value.collabContribution : undefined,
         itemQuantities: qty,
         city: city.trim() || undefined,
         admissionCharged:
@@ -112,9 +123,15 @@ export default function QuickAddPastEventDialog({
         const supabase = getClient();
         if (!supabase) throw new Error("supabase client missing");
         // Bulk insert in FK-safe order. Realtime will populate local state.
-        const e1 = await supabase
-          .from("events")
-          .insert(toEventInsert(workspaceId, event, snapshot));
+        const eventRow = toEventInsert(workspaceId, event, snapshot);
+        let e1 = await supabase.from("events").insert(eventRow);
+        if (e1.error && isMissingCollabColumn(e1.error)) {
+          // Save the event and its orders anyway; say the collab terms were not kept.
+          e1 = await supabase.from("events").insert(withoutCollabColumns(eventRow));
+          if (!e1.error) {
+            reportSaveError(`The event was saved, but its collab split could not be. ${COLLAB_MIGRATION_HINT}`);
+          }
+        }
         if (e1.error) throw new Error(`events: ${e1.error.message}`);
         if (orders.length > 0) {
           const e2 = await supabase
@@ -184,6 +201,13 @@ export default function QuickAddPastEventDialog({
               {timeError}
             </p>
           ) : null}
+          <CollabInputs
+            pctText={collabPct}
+            contributionText={collabContribution}
+            onPctChange={setCollabPct}
+            onContributionChange={setCollabContribution}
+            lowercase
+          />
           <Field label="city" hint="used only for tax reports">
             <Input
               value={city}

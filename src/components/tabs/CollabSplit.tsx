@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Handshake, Pencil } from "lucide-react";
 import { Button, Card, Input } from "@/components/ui";
-import { collabSplitFor, parseCollabInput } from "@/lib/collab-split";
+import { collabSplitFor, parseCollabFields } from "@/lib/collab-split";
 import { useStore } from "@/lib/store";
 import type { Event } from "@/lib/types";
 import { cn, formatMoney } from "@/lib/utils";
@@ -23,9 +23,8 @@ export default function CollabSplit({ event, profit }: { event: Event; profit: n
   const [pctText, setPctText] = useState("");
   const [contribText, setContribText] = useState("");
 
-  const pct = parseCollabInput(pctText, 0, 100);
-  const contrib = parseCollabInput(contribText, 0, Infinity);
-  const valid = pct.ok && contrib.ok && (pct.value !== undefined || contrib.value !== undefined);
+  const parsed = parseCollabFields(pctText, contribText);
+  const valid = parsed.ok && parsed.value !== null;
 
   const start = () => {
     setPctText(fieldText(event.collabProfitPct));
@@ -34,12 +33,8 @@ export default function CollabSplit({ event, profit }: { event: Event; profit: n
   };
 
   const save = () => {
-    if (!pct.ok || !contrib.ok || !valid) return;
-    dispatch({
-      type: "UPDATE_EVENT",
-      id: event.id,
-      patch: { collabProfitPct: pct.value ?? 0, collabContribution: contrib.value ?? 0 },
-    });
+    if (!parsed.ok || parsed.value === null) return;
+    dispatch({ type: "UPDATE_EVENT", id: event.id, patch: parsed.value });
     setEditing(false);
   };
 
@@ -112,8 +107,8 @@ export default function CollabSplit({ event, profit }: { event: Event; profit: n
               </Button>
             ) : null}
           </div>
-          {!pct.ok ? <p className="text-xs text-red-700">Profit share must be 0 to 100.</p> : null}
-          {!contrib.ok ? <p className="text-xs text-red-700">Contribution must be a dollar amount of 0 or more.</p> : null}
+          {!parsed.ok && parsed.pctError ? <p className="text-xs text-red-700">Profit share must be 0 to 100.</p> : null}
+          {!parsed.ok && parsed.contributionError ? <p className="text-xs text-red-700">Contribution must be a dollar amount of 0 or more.</p> : null}
           <p className="text-xs text-matcha-900/60">
             Partner take-home = profit × share % − their contribution. Your take-home = profit − partner take-home.
           </p>

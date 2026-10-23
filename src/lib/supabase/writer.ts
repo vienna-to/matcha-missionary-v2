@@ -28,6 +28,7 @@ import {
   toEventExtraPatch,
   toEventInsert,
   toEventPatch,
+  withoutCollabColumns,
   toIngredientInsert,
   toIngredientPatch,
   toInventoryPurchaseInsert,
@@ -445,12 +446,16 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
     // upserted the same event row defensively (e.g. ContractResultsDialog,
     // which needs the FK target to exist before writing orders) doesn't get
     // followed by a noisy unique-violation from this fire-and-forget writer.
-    const { error } = await supabase
-      .from("events")
-      .upsert(toEventInsert(workspaceId, evt, snapshot), {
-        onConflict: "id",
-        ignoreDuplicates: true,
-      });
+    const row = toEventInsert(workspaceId, evt, snapshot);
+    const opts = { onConflict: "id", ignoreDuplicates: true };
+    const { error } = await supabase.from("events").upsert(row, opts);
+    if (error && isMissingCollabColumn(error)) {
+      // The event itself must still be saved (orders point at it): retry without the collab terms and say so.
+      const retry = await supabase.from("events").upsert(withoutCollabColumns(row), opts);
+      tag("createEvent")(retry.error);
+      reportSaveError(`The event was saved, but its collab split could not be. ${COLLAB_MIGRATION_HINT}`);
+      return;
+    }
     tag("createEvent")(error);
   },
   async updateEvent(id: string, patch: Partial<Event>) {

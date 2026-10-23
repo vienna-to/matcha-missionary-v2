@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Button, Field, Input, Modal, NumberField, Select } from "@/components/ui";
+import CollabInputs from "@/components/CollabInputs";
+import { parseCollabFields } from "@/lib/collab-split";
 import { useStore } from "@/lib/store";
 import { validateEventTimes } from "@/lib/event-times";
 import { DEFAULT_CUP_OZ, type EventType } from "@/lib/types";
@@ -32,12 +34,16 @@ export default function NewEventDialog({
   const [clientName, setClientName] = useState("");
   const [contractPayout, setContractPayout] = useState<number>(0);
   const [city, setCity] = useState("");
+  const [collabPct, setCollabPct] = useState("");
+  const [collabContribution, setCollabContribution] = useState("");
   // Tri-state: "" = unspecified, "yes" | "no" — kept as string so the select
   // can distinguish "not answered yet" from a real answer without needing null.
   const [admissionCharged, setAdmissionCharged] = useState<"" | "yes" | "no">("");
 
   const isContract = eventType === "contract";
   const timeError = validateEventTimes(startTime, endTime);
+  // Collab terms agreed upfront; blank = not a collab. Contract events have no per-drink profit, so none.
+  const collab = parseCollabFields(collabPct, collabContribution);
   const placeholder = `Pop-Up ${date}`;
   const submittable =
     date.length === 10 &&
@@ -45,6 +51,7 @@ export default function NewEventDialog({
     endTime &&
     cupSizeOz > 0 &&
     !timeError &&
+    (isContract || collab.ok) &&
     (!isContract || (clientName.trim().length > 0 && contractPayout > 0));
 
   function reset() {
@@ -58,6 +65,8 @@ export default function NewEventDialog({
     setClientName("");
     setContractPayout(0);
     setCity("");
+    setCollabPct("");
+    setCollabContribution("");
     setAdmissionCharged("");
   }
 
@@ -73,6 +82,8 @@ export default function NewEventDialog({
         endTime,
         targetRevenue:
           !isContract && Number.isFinite(goal) && goal > 0 ? goal : undefined,
+        collabProfitPct: !isContract && collab.ok && collab.value ? collab.value.collabProfitPct : undefined,
+        collabContribution: !isContract && collab.ok && collab.value ? collab.value.collabContribution : undefined,
         eventType,
         cupSizeOz,
         clientName: isContract ? clientName.trim() : undefined,
@@ -189,6 +200,12 @@ export default function NewEventDialog({
                   placeholder="e.g. 500"
                 />
               </Field>
+              <CollabInputs
+                pctText={collabPct}
+                contributionText={collabContribution}
+                onPctChange={setCollabPct}
+                onContributionChange={setCollabContribution}
+              />
             </>
           )}
         </div>

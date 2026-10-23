@@ -9,6 +9,7 @@ import type {
   PaymentMethod,
   SugarAdjustment,
 } from "./types";
+import { findMenuItem } from "./custom-item";
 import { hasDrinkAdjustments } from "./order-labels";
 import { deriveOrderItem } from "./reducer";
 
@@ -100,7 +101,7 @@ export function extraAmount(d: ExtraDraft, owed: number): number {
 export function stepChecks(d: OrderDraft): Record<Step, boolean> {
   const adjusted = d.cart.some((l) => {
     if (l.specialRequests?.trim()) return true;
-    const item = d.snapshot.menuItems.find((m) => m.id === l.menuItemId);
+    const item = findMenuItem(d.snapshot, l.menuItemId);
     if (!hasDrinkAdjustments(item)) return false;
     // "Changed from default": choosing the default again is not a change.
     const milkChanged = l.milkChoiceId !== undefined && l.milkChoiceId !== item?.defaultMilkId;
@@ -162,7 +163,7 @@ export function cartTotal(cart: CartLine[], snapshot: MenuSnapshot): number {
   return cart.reduce((sum, line) => {
     const unit = line.isCombo
       ? COMBO_PRICE
-      : snapshot.menuItems.find((m) => m.id === line.menuItemId)?.price ?? 0;
+      : findMenuItem(snapshot, line.menuItemId)?.price ?? 0;
     return sum + chargedUnitFromPct(unit, line.discountPct) * line.quantity;
   }, 0);
 }

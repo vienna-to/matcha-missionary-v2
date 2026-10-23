@@ -15,6 +15,7 @@ import {
   type PaymentMethod,
   type SugarAdjustment,
 } from "@/lib/types";
+import { findMenuItem, isCustomItemId } from "@/lib/custom-item";
 import {
   hasDrinkAdjustments,
   resolveCreamName,
@@ -64,6 +65,7 @@ type Props = {
   onRemoveLine: (cid: string) => void;
   onIncrement: (cid: string, delta: number) => void;
   onOpenCombo: () => void;
+  onOpenCustom: () => void;
   onSubmit: () => void;
   helperMode: boolean;
   className?: string;
@@ -349,6 +351,9 @@ function ItemsStep(p: Props) {
       <Button variant="outline" className="h-12 w-full" onClick={p.onOpenCombo}>
         + Combo deal · {formatMoney(COMBO_PRICE)}
       </Button>
+      <Button variant="outline" className="h-12 w-full" onClick={p.onOpenCustom}>
+        + Custom drink
+      </Button>
     </div>
   );
 }
@@ -369,7 +374,7 @@ function ItemLine({
   onIncrement: (delta: number) => void;
 }) {
   const [discountOpen, setDiscountOpen] = useState(false);
-  const item = snapshot.menuItems.find((m) => m.id === line.menuItemId);
+  const item = findMenuItem(snapshot, line.menuItemId);
   if (!item) return null;
 
   const mods = lineMods(line, item, snapshot);
@@ -482,7 +487,7 @@ function AdjustStep(p: Props) {
         </div>
       ) : null}
       {p.cart.map((line) => {
-        const item = p.snapshot.menuItems.find((m) => m.id === line.menuItemId);
+        const item = findMenuItem(p.snapshot, line.menuItemId);
         if (!item) return null;
         const isPastry = !hasDrinkAdjustments(item);
         const selectedMilk = line.milkChoiceId ?? item.defaultMilkId;
@@ -493,6 +498,7 @@ function AdjustStep(p: Props) {
             </div>
             {isPastry ? null : (
               <>
+                {isCustomItemId(item.id) ? null : (
                 <div>
                   <div className="t-display mb-1.5 text-[11px] text-matcha-700">Milk</div>
                   <div className="flex flex-wrap gap-2">
@@ -507,6 +513,7 @@ function AdjustStep(p: Props) {
                     ))}
                   </div>
                 </div>
+                )}
                 <div>
                   <div className="t-display mb-1.5 text-[11px] text-matcha-700">Sugar</div>
                   <div className="flex flex-wrap gap-2">

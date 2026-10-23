@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { Check, Plus, ShoppingBag, X } from "lucide-react";
 import { Button, EmptyState, Field, Modal, Select, Sheet } from "@/components/ui";
 import OrderFlow from "@/components/OrderFlow";
+import CustomItemModal from "@/components/CustomItemModal";
 import {
   amountOwed,
   buildOrder,
@@ -82,6 +83,7 @@ export default function LiveOrders() {
   const [notice, setNotice] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [comboPickerOpen, setComboPickerOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
   // Combo suggestion: the pair being offered, and pairs the customer said
   // "No thanks" to (for this order only; cleared by reset()).
   const [suggestion, setSuggestion] = useState<ComboSuggestion | null>(null);
@@ -142,6 +144,12 @@ export default function LiveOrders() {
   function addLine(item: MenuItem) {
     setNotice(null);
     setCart((c) => [...c, { cid: newId("cart"), menuItemId: item.id, quantity: 1 }]);
+  }
+
+  function addCustom(menuItemId: string) {
+    setNotice(null);
+    setCart((c) => [...c, { cid: newId("cart"), menuItemId, quantity: 1 }]);
+    setCustomOpen(false);
   }
 
   function addCombo(drinkId: string, pastryId: string) {
@@ -264,6 +272,7 @@ export default function LiveOrders() {
       onRemoveLine={removeLine}
       onIncrement={incrementLine}
       onOpenCombo={() => setComboPickerOpen(true)}
+      onOpenCustom={() => setCustomOpen(true)}
       onSubmit={submit}
       helperMode={helperMode}
     />
@@ -288,9 +297,14 @@ export default function LiveOrders() {
               tap a card to add, then follow the steps.
             </p>
           </div>
-          <Button variant="outline" className="h-11 max-md:h-auto max-md:min-h-11 max-md:w-full max-md:whitespace-normal max-md:py-2" onClick={() => setComboPickerOpen(true)}>
-            + Combo deal · {formatMoney(COMBO_PRICE)}
-          </Button>
+          <div className="flex flex-wrap gap-2 max-md:w-full">
+            <Button variant="outline" className="h-11 max-md:h-auto max-md:min-h-11 max-md:flex-1 max-md:whitespace-normal max-md:py-2" onClick={() => setCustomOpen(true)}>
+              + Custom drink
+            </Button>
+            <Button variant="outline" className="h-11 max-md:h-auto max-md:min-h-11 max-md:flex-1 max-md:whitespace-normal max-md:py-2" onClick={() => setComboPickerOpen(true)}>
+              + Combo deal · {formatMoney(COMBO_PRICE)}
+            </Button>
+          </div>
         </header>
         <ItemGrid items={activeItems} onAdd={addLine} />
       </div>
@@ -349,6 +363,16 @@ export default function LiveOrders() {
             setDeclinedPairs((d) => [...d, pairKey(suggestion.drinkId, suggestion.pastryId)]);
             setSuggestion(null);
           }}
+        />
+      ) : null}
+
+      {customOpen ? (
+        <CustomItemModal
+          snapshot={snap}
+          cupSizeOz={activeEvent_.cupSizeOz}
+          helperMode={helperMode}
+          onAdd={addCustom}
+          onClose={() => setCustomOpen(false)}
         />
       ) : null}
 

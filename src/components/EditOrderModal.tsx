@@ -33,6 +33,8 @@ import { amountOwed, extraAmount, isFreeTotal, NO_EXTRA, type ExtraDraft } from 
 import { chargedUnitFromPct } from "@/lib/pricing";
 import { useHelperMode } from "@/lib/helper-mode";
 import { newId } from "@/lib/id";
+import CustomItemModal from "@/components/CustomItemModal";
+import { findMenuItem } from "@/lib/custom-item";
 import { hasDrinkAdjustments } from "@/lib/order-labels";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -83,6 +85,7 @@ export default function EditOrderModal({
     [eventSnapshot, state.menuItems, state.ingredients],
   );
   const [helperMode] = useHelperMode();
+  const evt = state.events.find((e) => e.id === order.eventId);
   const [name, setName] = useState(order.customerName);
   const [notes, setNotes] = useState(order.notes ?? "");
   const [items, setItems] = useState<DraftItem[]>(() =>
@@ -113,6 +116,7 @@ export default function EditOrderModal({
   const [error, setError] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
+  const [showCustom, setShowCustom] = useState(false);
 
   // Live total — accounts for combos (fixed bundle price) and per-item
   // discount. Recomputes on every keystroke in the DiscountRow / qty stepper.
@@ -122,7 +126,7 @@ export default function EditOrderModal({
       const unit = it.isCombo
         ? COMBO_PRICE
         : order.items.find((o) => o.id === it.id)?.priceSnap ??
-          snapshot.menuItems.find((m) => m.id === it.menuItemId)?.price ??
+          findMenuItem(snapshot, it.menuItemId)?.price ??
           0;
       acc.total += chargedUnitFromPct(unit, it.discountPct) * it.quantity;
       acc.totalGross += unit * it.quantity;
@@ -150,6 +154,11 @@ export default function EditOrderModal({
       },
     ]);
     setShowAddPicker(false);
+  }
+
+  function addCustom(menuItemId: string) {
+    setItems((arr) => [...arr, { id: newId("tmp"), menuItemId, quantity: 1, status: "pending" }]);
+    setShowCustom(false);
   }
 
   const nameOk = name.trim().length > 0;
@@ -226,7 +235,7 @@ export default function EditOrderModal({
 
   const editingItem = editingItemId ? items.find((i) => i.id === editingItemId) : undefined;
   const editingMenuItem = editingItem
-    ? snapshot.menuItems.find((m) => m.id === editingItem.menuItemId)
+    ? findMenuItem(snapshot, editingItem.menuItemId)
     : undefined;
 
   return (
@@ -360,7 +369,21 @@ export default function EditOrderModal({
         <AddItemPickerModal
           items={snapshot.menuItems.filter((m) => m.active)}
           onPick={addItem}
+          onCustom={() => {
+            setShowAddPicker(false);
+            setShowCustom(true);
+          }}
           onClose={() => setShowAddPicker(false)}
+        />
+      ) : null}
+
+      {showCustom ? (
+        <CustomItemModal
+          snapshot={snapshot}
+          cupSizeOz={evt?.cupSizeOz}
+          helperMode={helperMode}
+          onAdd={addCustom}
+          onClose={() => setShowCustom(false)}
         />
       ) : null}
     </Modal>
@@ -391,7 +414,7 @@ function DraftItemRow({
 }) {
   // Hook must run before any conditional return.
   const [discountOpen, setDiscountOpen] = useState(false);
-  const mi = snapshot.menuItems.find((m) => m.id === item.menuItemId);
+  const mi = findMenuItem(snapshot, item.menuItemId);
   if (!mi) return null;
   const summary: string[] = [];
   const drinkOptions = hasDrinkAdjustments(mi);
@@ -616,15 +639,24 @@ function CustomizeItemModal({
 function AddItemPickerModal({
   items,
   onPick,
+  onCustom,
   onClose,
 }: {
   items: MenuItem[];
   onPick: (it: MenuItem) => void;
+  onCustom: () => void;
   onClose: () => void;
 }) {
   return (
     <Modal open onClose={onClose} title="Add item">
       <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={onCustom}
+          className="flex flex-col items-start rounded-xl border border-dashed border-matcha-400 bg-white p-3 text-left hover:bg-cream-100"
+        >
+          <div className="text-sm font-medium">Custom drink</div>
+          <div className="mt-1 text-xs text-matcha-900/60">pick bases + toppings</div>
+        </button>
         {items.map((it) => (
           <button
             key={it.id}

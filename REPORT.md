@@ -229,3 +229,32 @@ A Realtime UPDATE payload leaves out unchanged large out-of-line jsonb columns; 
 
 ## Separate, unexplained issue: wrong event deleted (needs its own investigation)
 In one run of `30-make-active`, creating two events quickly ("Early" then "Late") and then using Delete event on Event Summary deleted "Early" in the database while the UI showed "Late" selected. It passed in two other runs. Unproven guess: a late Realtime echo of the first event's INSERT (is_active true) flipped the active event locally just before Event Summary opened, so it defaulted to the wrong event. Not fixed in this batch. The test now waits for the sidebar card and 2 s of settle time, which may hide it.
+
+## Feature: custom / off-menu drink (branch `feature/custom-items`)
+
+**What it is.** A "+ Custom drink" option next to picking a menu item, in order entry (Live Orders header and the order panel's Items step) and in Edit Order (Add item picker). These are two separate code paths (the cart in `LiveOrders`/`OrderFlow`, and the draft list in `EditOrderModal`); both are done and both go through the same `deriveOrderItem` in the reducer, which stamps price and cost.
+
+**How the data is modelled today (what was reused).**
+- Ingredients carry a package price and a pool (`milk`, `cream` or none). A menu item is a list of `ingredientLines` (ingredient, amount, unit). Cost = sum of line costs through `lineCost`, scaled by the event's cup size / 16 oz (recipes are authored at 16 oz). Order lines stamp `priceSnap` and `costSnap` at sale time.
+- There is no "base" or "topping" flag and no per-ingredient "standard amount" in the data. Both are derived, with no new stored data:
+  - **Bases**: the milk pool, plus ingredients named matcha / hojicha / tea / earl grey / genmaicha / sencha / chai / water.
+  - **Toppings**: the cream pool, plus ingredients named purée.
+  - **Standard amount**: the amount the first drink recipe (active first, then menu order) uses for that ingredient. A pooled ingredient (any milk, any cream) uses its pool's amount in that recipe. An ingredient no drink recipe uses is not offered, because it cannot be costed.
+
+**Rules implemented.** Price = 6.70 + 0.20 per topping, bases never change it (2 bases + 2 toppings = 7.10). Cost = sum of the selected components' standard-amount recipe cost, scaled by cup size like a menu drink. At least one base is required; toppings are optional. Name: "Custom: Hojicha powder + Banana cream".
+
+**No migration.** A custom line is an ordinary order line whose `menu_item_id` (a text column with no foreign key, see `schema.sql`) encodes the selection (`custom:<baseIds>|<toppingIds>`), so nothing in the database changes and nothing needs applying to production. It flows into order total, revenue, cost, profit, margin and cups poured; each distinct custom recipe gets its own row in the Event Summary item tables.
+
+**Snapshot behaviour.** Cost, price and name are stamped when the line is created. Editing an order keeps a custom line's stamped values (quantity, discount and notes changes do not re-price); a unit test changes the ingredient price after the sale and checks the line keeps its cost.
+
+**Known limits (decide if they matter).**
+- Cost counts only the selected bases and toppings, as specified. Cup, lid, straw, ice and agave are not included, so a custom drink's cost is understated by roughly what those cost on a menu drink (about $0.45 with the seed prices). Say if they should be added.
+- Two milks as two bases cost two milk amounts (the spec's "sum").
+- Classification of an ingredient as base or topping is by pool and name. A new ingredient named something unexpected (for example "Taro paste") is not offered until it matches, or Menu Manager gets a flag for it.
+- Custom drinks are not eligible for combo suggestions and are not taxable in the CSV export (unknown items default to non-taxable).
+- The components of an existing custom line cannot be changed in Edit Order; remove the line and add a new custom drink.
+- Helper mode shows the price but never cost or margin in the builder.
+
+**Verified.** 20 new unit tests (`custom-item.test.ts`): price math, cost math with exact expected numbers, cup-size scaling, standard amounts from recipes, classification, canonical id, stamping, discount, event totals (revenue, cost, profit, margin, cups poured), keeping cost after an ingredient price change and through an edit, adding a custom line in an edit. 3 new local e2e tests (`e2e/80-custom-item.spec.ts`): entry flow with live price ($6.70 → $6.90 → $7.10), order, Barista Queue and Event Summary; edit flow; base required. **Not run against a local Supabase** in this batch: the write path is the same `order_items` insert/RPC with a text `menu_item_id`, but it has only been checked by reading `schema.sql` and the serializers.
+
+**Gates on this branch.** Typecheck clean; `next lint` clean; vitest 115 passed (95 before + 20); `next build` succeeds; full local Playwright suite 47 passed (43 + revenue-share editor 1 + custom drink 3).

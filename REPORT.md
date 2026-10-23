@@ -380,3 +380,24 @@ Two inputs per event, both editable at any time (and removable with "Remove coll
 - Unit: `collab-split.test.ts` (11: worked example, take-homes always sum to profit, negative take-home, 0%, loss, input parsing), `collab-persistence.test.ts` (7: row round trip, ordinary create never sends new columns, clearing writes nulls, writer fallback with/without the migration). vitest **227 passed**; typecheck and `next lint` clean.
 - Local e2e `96-collab-split.spec.ts` (2): validation, add / edit / reload / remove, numbers match the formula from the stamped order costs. Full local suite **55 of 56** on the first run; the one failure was the known-flaky "two devices submitting at the same moment" (passes 3 of 3 alone). 
 - Supabase mode against a LOCAL Supabase: `e2e/supabase/100-collab-split.spec.ts` (2). With the migration: stored in `events`, shown correctly, survives reload, edit and removal reach the database, running the migration twice is harmless, and the database rejects share 101, share -1 and contribution -5. Without it: an ordinary event still creates and saves, the split raises the banner, and other event edits (revenue share) still save. Local Supabase stopped afterwards. Production Supabase was never touched.
+
+
+## Collab split: rounding fix, and the revenue share field retired (branch `fix/collab-split-rounding-remove-revshare`, off main; not pushed)
+
+### 1. Rounding fix
+Cause: each number on the panel was rounded for display on its own from unrounded values, so the pieces could miss the profit by a cent (profit $39.95 showing $9.97 + $29.97 = $39.94). Now everything is worked out in whole cents, once:
+- profit is rounded to cents (this is the profit shown); partner share = round(profit x share% / 100); partner take-home = share - contribution (contribution rounded to cents);
+- **your take-home = profit - partner take-home**, a subtraction, never its own percentage. The two always sum to the profit shown, exactly, and the lines shown (share - contribution = partner) agree too.
+- Half cents round away from zero; float noise (1997.4999999) is treated as the half it is.
+Tests (`collab-split.test.ts`, now 26): 13 named cases incl. profit 39.95 at 50% (the half cent), sub-cent profit 39.9537, a loss, contribution above the share, 100%; the screen's exact case; and 5,000 pseudo-random profits / percentages / contributions, all asserting partner + yours === profit in whole cents. Checked against the old method: 8 of them fail with it. The e2e also reads the numbers off the screen and checks they add up.
+
+### 2. Revenue share (`donationPct`, column `donation_pct`) retired
+Everything that touched it:
+- **Wrote it (removed):** New event dialog field; Quick add past event field and the `donationPct` argument of `buildQuickAddEvent`; the Event Summary editor (`RevenueShareEditor.tsx`, deleted).
+- **Read it (kept, so history does not change):** single-event Event Summary (Revenue share tile, Net profit and margin, and the "- Revenue share / Net" rows of the item table); the **all-events aggregate** (`totalDonations` -> Revenue share tile, net profit, the "- Revenue share" row; contract events excluded as before); the tax export "Donation %" column; and the Supabase read / insert / patch code and the `DbEvent` type.
+- **Also removed:** the "a revenue share is also set on this event" note from the collab panel.
+Approach: the field is retired, not deleted. **No migration, the column stays**, and every stored value is kept. An event that already has a revenue share still shows it, read-only (nothing offers it to add, edit or clear), with the same tiles and the same numbers as before; the all-events totals still subtract it; the tax export still lists it. New events never get one. A later edit to such an event (for example adding a collab split) does not touch the stored value (tested in local mode and against the local database). A collab split on an event that also has an old revenue share still works from the profit before the revenue share, as before.
+Tests: `97-revenue-share-retired.spec.ts` (not offered in New event or on the summary; a stored 10% event keeps its tiles, Net profit and all-events total, shows no editor, and keeps the value after a collab edit); the old add/edit/remove revenue share e2e was removed; the Supabase spec now seeds `donation_pct = 10` in the local database and checks it is shown read-only and untouched.
+
+### Gates
+Typecheck clean, `next lint` clean, `next build` succeeds, vitest **242 passed**, full local Playwright: **55 passed** in the full run, and the 2 failures in that run were selector mistakes in the new 97 spec itself, fixed and then passing on a rerun of that spec alone (20 s); I did not repeat the whole 5-minute suite afterwards. The known-flaky two-tab test passed in the full run, Supabase-mode suite **28 passed** against a local Supabase (now stopped). Production Supabase was never touched; no migration in this change.

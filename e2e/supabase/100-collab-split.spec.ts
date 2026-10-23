@@ -105,8 +105,14 @@ test.describe("collab split (local Supabase)", () => {
     await placeOrder(page, { items: [{ name: "Classic Matcha" }], name: "One", pay: "Cash", declineCombo: true });
     expect(sql(`select count(*)::int n from public.events where workspace_id='${ws}' and name='No migration'`)[0].n).toBe(1);
 
+    // a historical event with the retired revenue share stored on it
+    exec(`update public.events set donation_pct = 10 where workspace_id='${ws}' and name='No migration'`);
+    await page.reload();
+
     await goTab(page, "Event Summary");
     const main = page.locator("main");
+    await expect(main.getByText("10% of revenue").first()).toBeVisible();
+    await expect(main.getByRole("button", { name: /revenue share/i })).toHaveCount(0); // read-only
     const panel = main.getByTestId("collab-split");
     await main.getByRole("button", { name: "Add collab split" }).click();
     await main.getByLabel("Partner profit share %").fill("40");
@@ -115,10 +121,8 @@ test.describe("collab split (local Supabase)", () => {
     await expect(page.getByRole("alert").filter({ hasText: "migration-add-collab-split.sql" }).first()).toBeVisible();
     await expect(panel.getByTestId("collab-partner")).toBeVisible(); // still works on this device
 
-    // other event edits keep saving
-    await main.getByRole("button", { name: "Add revenue share" }).click();
-    await main.getByLabel("Revenue share %").fill("10");
-    await main.getByRole("button", { name: "Save" }).first().click();
-    await expect.poll(() => sql(`select donation_pct::float d from public.events where workspace_id='${ws}' and name='No migration'`)[0].d).toBe(10);
+    // the stored revenue share is untouched, in the database and on screen
+    expect(sql(`select donation_pct::float d from public.events where workspace_id='${ws}' and name='No migration'`)[0].d).toBe(10);
+    await expect(main.getByText("10% of revenue").first()).toBeVisible();
   });
 });

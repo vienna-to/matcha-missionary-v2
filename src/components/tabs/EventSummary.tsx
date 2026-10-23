@@ -23,7 +23,6 @@ import { cn, formatMoney, formatPct } from "@/lib/utils";
 import ContractResultsDialog from "@/components/ContractResultsDialog";
 import EventMoney from "./EventMoney";
 import CollabSplit from "./CollabSplit";
-import RevenueShareEditor from "./RevenueShareEditor";
 import { barMargin, categoryAxis, useIsMobile } from "@/components/chart-axis";
 
 const ALL_EVENTS = "__all__";
@@ -171,6 +170,8 @@ export default function EventSummary() {
   const cupsForLoad = totals.totalCups;
   const fixedShare = cupsForLoad > 0 ? totals.fixedCosts / cupsForLoad : 0;
 
+  // Retired field: no screen sets a revenue share any more (charity splits use the collab split),
+  // but events that already have one keep it so their numbers do not change.
   const donationPct = event.donationPct ?? 0;
   const donationAmount = totals.revenuePaid * (donationPct / 100);
   const netProfit = totals.profit - donationAmount;
@@ -257,7 +258,6 @@ export default function EventSummary() {
         </div>
       ) : null}
 
-      <RevenueShareEditor key={`${event.id}:${event.donationPct ?? 0}`} event={event} />
       <CollabSplit
         key={`${event.id}:${event.collabProfitPct ?? ""}:${event.collabContribution ?? ""}`}
         event={event}

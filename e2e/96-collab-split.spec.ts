@@ -1,3 +1,4 @@
+import { computeCollabSplit } from "../src/lib/collab-split";
 import { autoAcceptDialogs, createEvent, expect, goTab, openApp, placeOrder, readState, test } from "./support";
 
 /** Collab split on Event Summary: partner share of profit minus their ingredient contribution. */
@@ -22,11 +23,16 @@ test.describe("collab split on an event", () => {
     const revenue = items.reduce((s: number, i: any) => s + i.priceCharged * i.quantity, 0);
     const cost = items.reduce((s: number, i: any) => s + i.costSnap * i.quantity, 0);
     const fixed = ev.fixedCosts.reduce((s: number, f: any) => s + f.amount, 0);
-    const profit = revenue - cost - fixed;
+    const profit = Math.round((revenue - cost - fixed) * 100) / 100; // shown to the cent
     expect(revenue).toBeGreaterThan(0);
 
     await expect(panel).toContainText("Collab split: none");
     expect((await event()).collabProfitPct).toBeUndefined();
+
+    // what is on screen adds up: partner + yours === profit, to the cent
+    const cents = async (id: string) => Math.round(parseFloat((await panel.getByTestId(id).innerText()).replace(/[^0-9.\-]/g, "")) * 100);
+    const expectSumsToProfit = async () =>
+      expect((await cents("collab-partner")) + (await cents("collab-you"))).toBe(await cents("collab-profit"));
 
     // validation: share over 100, negative contribution, and nothing filled in
     await main.getByRole("button", { name: "Add collab split" }).click();
@@ -43,15 +49,17 @@ test.describe("collab split on an event", () => {
     // 40% split, $1.50 contribution typed as dollars
     await contrib.fill("1.5");
     await save.click();
-    const partner = profit * 0.4 - 1.5;
+    const split = computeCollabSplit(profit, 40, 1.5);
+    const partner = split.partnerTakeHome;
     await expect(panel.getByTestId("collab-profit")).toHaveText(money(profit));
-    await expect(panel.getByTestId("collab-share")).toHaveText(money(profit * 0.4));
+    await expect(panel.getByTestId("collab-share")).toHaveText(money(split.partnerShare));
     await expect(panel.getByTestId("collab-contribution")).toHaveText(money(1.5));
     await expect(panel.getByTestId("collab-partner")).toHaveText(money(partner));
-    await expect(panel.getByTestId("collab-you")).toHaveText(money(profit - partner));
+    await expect(panel.getByTestId("collab-you")).toHaveText(money(split.yourTakeHome));
+    await expectSumsToProfit();
     expect(await event()).toMatchObject({ collabProfitPct: 40, collabContribution: 1.5 });
 
-    // the legacy revenue share is a separate thing and untouched
+    // the retired revenue share is not set by the collab split
     expect((await event()).donationPct).toBeUndefined();
 
     // survives a reload, then edit
@@ -64,8 +72,10 @@ test.describe("collab split on an event", () => {
     await pct.fill("25");
     await contrib.fill("0");
     await save.click();
-    await expect(panel.getByTestId("collab-partner")).toHaveText(money(profit * 0.25));
-    await expect(panel.getByTestId("collab-you")).toHaveText(money(profit * 0.75));
+    const quarter = computeCollabSplit(profit, 25, 0);
+    await expect(panel.getByTestId("collab-partner")).toHaveText(money(quarter.partnerTakeHome));
+    await expect(panel.getByTestId("collab-you")).toHaveText(money(quarter.yourTakeHome));
+    await expectSumsToProfit();
 
     // remove it completely
     await panel.getByRole("button", { name: "Edit collab split" }).click();

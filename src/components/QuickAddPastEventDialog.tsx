@@ -58,7 +58,6 @@ export default function QuickAddPastEventDialog({
   const [date, setDate] = useState(todayLocal());
   const [startTime, setStartTime] = useState("11:00");
   const [endTime, setEndTime] = useState("16:00");
-  const [donationPct, setDonationPct] = useState(0);
   const [notes, setNotes] = useState("");
   const [city, setCity] = useState("");
   const [admissionCharged, setAdmissionCharged] = useState<"" | "yes" | "no">("");
@@ -81,7 +80,6 @@ export default function QuickAddPastEventDialog({
     setDate(todayLocal());
     setStartTime("11:00");
     setEndTime("16:00");
-    setDonationPct(0);
     setNotes("");
     setCity("");
     setAdmissionCharged("");
@@ -100,7 +98,6 @@ export default function QuickAddPastEventDialog({
         startTime,
         endTime,
         notes,
-        donationPct: donationPct > 0 ? donationPct : undefined,
         itemQuantities: qty,
         city: city.trim() || undefined,
         admissionCharged:
@@ -187,16 +184,6 @@ export default function QuickAddPastEventDialog({
               {timeError}
             </p>
           ) : null}
-          <Field label="revenue share % (optional)" className="col-span-2" hint="share of event revenue that goes to a charity or a collab partner">
-            <NumberField
-              min={0}
-              max={100}
-              step={1}
-              value={donationPct}
-              commit="change"
-              onChange={setDonationPct}
-            />
-          </Field>
           <Field label="city" hint="used only for tax reports">
             <Input
               value={city}

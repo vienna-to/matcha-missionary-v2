@@ -28,7 +28,6 @@ export default function NewEventDialog({
   const [startTime, setStartTime] = useState("11:00");
   const [endTime, setEndTime] = useState("16:00");
   const [targetRevenue, setTargetRevenue] = useState<string>("");
-  const [donationPct, setDonationPct] = useState<string>("");
   const [cupSizeOz, setCupSizeOz] = useState<number>(DEFAULT_CUP_OZ);
   const [clientName, setClientName] = useState("");
   const [contractPayout, setContractPayout] = useState<number>(0);
@@ -55,7 +54,6 @@ export default function NewEventDialog({
     setStartTime("11:00");
     setEndTime("16:00");
     setTargetRevenue("");
-    setDonationPct("");
     setCupSizeOz(DEFAULT_CUP_OZ);
     setClientName("");
     setContractPayout(0);
@@ -66,7 +64,6 @@ export default function NewEventDialog({
   function save() {
     if (!submittable || timeError) return;
     const goal = Number(targetRevenue);
-    const donate = Number(donationPct);
     dispatch({
       type: "CREATE_EVENT",
       event: {
@@ -76,10 +73,6 @@ export default function NewEventDialog({
         endTime,
         targetRevenue:
           !isContract && Number.isFinite(goal) && goal > 0 ? goal : undefined,
-        donationPct:
-          !isContract && Number.isFinite(donate) && donate > 0 && donate <= 100
-            ? donate
-            : undefined,
         eventType,
         cupSizeOz,
         clientName: isContract ? clientName.trim() : undefined,
@@ -194,23 +187,6 @@ export default function NewEventDialog({
                   onChange={(e) => setTargetRevenue(e.target.value)}
                   onWheel={(e) => (e.target as HTMLInputElement).blur()}
                   placeholder="e.g. 500"
-                />
-              </Field>
-              <Field
-                label="Revenue share % (optional)"
-                className="col-span-2"
-                hint="Share of event revenue that goes to a charity or a collab partner."
-              >
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={donationPct}
-                  onChange={(e) => setDonationPct(e.target.value)}
-                  onWheel={(e) => (e.target as HTMLInputElement).blur()}
-                  placeholder="e.g. 10"
                 />
               </Field>
             </>

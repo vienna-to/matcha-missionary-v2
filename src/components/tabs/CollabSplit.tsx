@@ -166,11 +166,6 @@ export default function CollabSplit({ event, profit }: { event: Event; profit: n
           The contribution is more than the partner&apos;s share of the profit, so their take-home is negative.
         </p>
       ) : null}
-      {event.donationPct && event.donationPct > 0 ? (
-        <p className="mt-2 text-xs text-matcha-900/60">
-          A revenue share is also set on this event. It is not part of this split, which works from the profit above.
-        </p>
-      ) : null}
     </Card>
   );
 }

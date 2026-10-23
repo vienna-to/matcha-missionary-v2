@@ -75,12 +75,23 @@ export type IngredientLine = {
  *  Undefined = never set; the builder then guesses from the name. */
 export type CustomRole = "base" | "topping" | "none";
 
+/** "raw": cost typed in (package price / package amount). "prepared": made from
+ *  raw ingredients, cost computed from its sub-recipe. Undefined = raw. */
+export type IngredientKind = "raw" | "prepared";
+
 export type Ingredient = {
   id: string;
   name: string;
+  /** Raw: what a package costs. Prepared: unused (0); its cost comes from subRecipe. */
   packagePrice: number;
+  /** Raw: how much a package holds. Prepared: the YIELD of one batch of subRecipe. */
   packageAmount: number;
+  /** Raw: the package's unit. Prepared: the unit of the yield. */
   unit: Unit;
+  kind?: IngredientKind;
+  /** Prepared only: the RAW ingredients (and amounts) that make one batch. One
+   *  level only: a prepared ingredient is never listed here. */
+  subRecipe?: IngredientLine[];
   pool?: Pool;
   /** Role in the custom drink builder. Undefined on rows from before the flag existed. */
   customRole?: CustomRole;

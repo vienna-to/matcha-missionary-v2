@@ -1,6 +1,7 @@
 import { validateEventTimes } from "./event-times";
 import { computeItemCost } from "./calc";
 import { comboUnitPrice, customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
+import { normalizeIngredientPatch, normalizeNewIngredient } from "./prepared";
 import { newId, nowIso } from "./id";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
@@ -304,7 +305,7 @@ export function reducer(state: AppState, action: Action): AppState {
         -1,
       );
       const ing: Ingredient = {
-        ...action.ing,
+        ...normalizeNewIngredient(state.ingredients, action.ing),
         id: newId("ing"),
         sortOrder: action.ing.sortOrder ?? maxIngOrder + 1,
         createdAt: nowIso(),
@@ -313,13 +314,16 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, ingredients: [...state.ingredients, ing] };
     }
 
-    case "UPDATE_INGREDIENT":
+    case "UPDATE_INGREDIENT": {
+      // One level of nesting only: the patch is brought within the prepared-ingredient rules.
+      const patch = normalizeIngredientPatch(state.ingredients, action.id, action.patch);
       return {
         ...state,
         ingredients: state.ingredients.map((i) =>
-          i.id === action.id ? { ...i, ...action.patch, updatedAt: nowIso() } : i,
+          i.id === action.id ? { ...i, ...patch, updatedAt: nowIso() } : i,
         ),
       };
+    }
 
     case "DELETE_INGREDIENT":
       return {

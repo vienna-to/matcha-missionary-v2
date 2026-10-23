@@ -17,13 +17,42 @@ import { customUnitPrice, isCustomItemId } from "./custom-id";
 import { sameCategory, toCanonical } from "./units";
 import { lineList, lineRevenue, orderTip, priceKind, tipMethod } from "./pricing";
 
-export function ingredientCostPerCanonical(ing: Ingredient): number {
+export const isPrepared = (ing: Ingredient): boolean => ing.kind === "prepared";
+
+/**
+ * Cost of one batch of a prepared ingredient: the sum of its sub-recipe lines,
+ * each priced from the RAW ingredient it names. Only one level: a line that
+ * names a prepared ingredient (or one that no longer exists) adds nothing.
+ */
+export function preparedBatchCost(ing: Ingredient, ingredients: Ingredient[]): number {
+  const byId = new Map(ingredients.map((i) => [i.id, i]));
+  let total = 0;
+  for (const line of ing.subRecipe ?? []) {
+    const raw = byId.get(line.ingredientId);
+    if (!raw || isPrepared(raw) || raw.id === ing.id) continue;
+    const c = lineCost(line, raw);
+    if (Number.isFinite(c)) total += c;
+  }
+  return total;
+}
+
+/**
+ * Cost per canonical unit (g / ml / piece). Raw: package price / package size.
+ * Prepared: (cost of one batch of its sub-recipe) / (its yield). `ingredients`
+ * is the list to price a prepared ingredient's sub-recipe from; without it a
+ * prepared ingredient cannot be priced and costs 0.
+ */
+export function ingredientCostPerCanonical(ing: Ingredient, ingredients: Ingredient[] = []): number {
+  if (isPrepared(ing)) {
+    const yieldCanonical = toCanonical(ing.packageAmount, ing.unit);
+    return yieldCanonical > 0 ? preparedBatchCost(ing, ingredients) / yieldCanonical : 0;
+  }
   return ing.packagePrice / toCanonical(ing.packageAmount, ing.unit);
 }
 
-export function lineCost(line: IngredientLine, ing: Ingredient): number {
+export function lineCost(line: IngredientLine, ing: Ingredient, ingredients: Ingredient[] = []): number {
   if (!sameCategory(line.unit, ing.unit)) return NaN;
-  return ingredientCostPerCanonical(ing) * toCanonical(line.amount, line.unit);
+  return ingredientCostPerCanonical(ing, ingredients) * toCanonical(line.amount, line.unit);
 }
 
 /**
@@ -68,7 +97,7 @@ export function computeItemCost(
     }
     const scaledLine =
       scale === 1 ? line : { ...line, amount: line.amount * scale };
-    const c = lineCost(scaledLine, use);
+    const c = lineCost(scaledLine, use, ingredients);
     if (Number.isFinite(c)) total += c;
   }
   return total;

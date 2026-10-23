@@ -338,18 +338,23 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
     // sub_recipe). Either may be missing, so retry without whichever the database
     // reports missing; a prepared ingredient is never saved without its columns.
     let row = ing;
+    let roleDropped = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (ing.kind === "prepared" && preparedColumnsMissing.has(supabase)) {
         reportPreparedNotSaved(ing.name);
         return;
       }
       const { error } = await supabase.from("ingredients").insert(toIngredientInsert(workspaceId, row));
-      if (!error) return;
+      if (!error) {
+        // said only once it is certain the ingredient itself was saved
+        if (roleDropped) reportSaveError(`"${ing.name}" was saved without its custom drink role. ${ROLE_MIGRATION_HINT}`);
+        return;
+      }
       if (isMissingRoleColumn(error) && row.customRole !== undefined) {
         const { customRole: _dropped, ...rest } = row;
         void _dropped;
         row = rest;
-        reportSaveError(`"${ing.name}" was saved without its custom drink role. ${ROLE_MIGRATION_HINT}`);
+        roleDropped = true;
         continue;
       }
       if (isMissingPreparedColumn(error) && ing.kind === "prepared") {

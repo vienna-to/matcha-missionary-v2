@@ -32,6 +32,9 @@ export type DbIngredient = {
   unit: Ingredient["unit"];
   pool: Ingredient["pool"] | null;
   sort_order: number | null;
+  /** Prepared ingredients. Absent when the database predates migration-add-prepared-ingredients.sql. */
+  kind?: Ingredient["kind"] | null;
+  sub_recipe?: Ingredient["subRecipe"] | null;
   created_at: string;
   updated_at: string;
 };
@@ -176,6 +179,8 @@ export function fromIngredient(r: DbIngredient): Ingredient {
     packageAmount: Number(r.package_amount),
     unit: r.unit,
     pool: r.pool ?? null,
+    // Raw is the default and stays implicit, so raw ingredients look as they always did.
+    ...(r.kind === "prepared" ? { kind: "prepared" as const, subRecipe: r.sub_recipe ?? [] } : {}),
     sortOrder: r.sort_order ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -421,6 +426,9 @@ export function toIngredientInsert(workspaceId: string, ing: Ingredient): Omit<D
     unit: ing.unit,
     pool: ing.pool ?? null,
     sort_order: ing.sortOrder ?? null,
+    // Only sent for a prepared ingredient, so adding a raw one still works on a
+    // database that does not have the columns yet.
+    ...(ing.kind === "prepared" ? { kind: "prepared" as const, sub_recipe: ing.subRecipe ?? [] } : {}),
   };
 }
 
@@ -432,6 +440,8 @@ export function toIngredientPatch(patch: Partial<Ingredient>): Partial<DbIngredi
   if (patch.unit !== undefined) r.unit = patch.unit;
   if (patch.pool !== undefined) r.pool = patch.pool ?? null;
   if (patch.sortOrder !== undefined) r.sort_order = patch.sortOrder;
+  if (patch.kind !== undefined) r.kind = patch.kind;
+  if (patch.subRecipe !== undefined) r.sub_recipe = patch.subRecipe;
   return r;
 }
 

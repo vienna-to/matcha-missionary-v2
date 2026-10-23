@@ -13,8 +13,10 @@ import type {
 } from "@/lib/types";
 import {
   isMissingTable,
+  isMissingPreparedColumn,
   missingColumns,
   MIGRATION_HINT,
+  PREPARED_MIGRATION_HINT,
   reportSaveError,
 } from "./save-errors";
 import {
@@ -314,6 +316,11 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
   // ---------- ingredients ----------
   async addIngredient(ing: Ingredient) {
     const { error } = await supabase.from("ingredients").insert(toIngredientInsert(workspaceId, ing));
+    if (error && ing.kind === "prepared" && isMissingPreparedColumn(error)) {
+      // Never save it as a raw ingredient (it would cost $0): say so, loudly.
+      reportSaveError(`The prepared ingredient "${ing.name}" could not be saved: the database is out of date. ${PREPARED_MIGRATION_HINT}`);
+      return;
+    }
     tag("addIngredient")(error);
   },
   async updateIngredient(id: string, patch: Partial<Ingredient>) {
@@ -322,6 +329,22 @@ export const writer = (supabase: SupabaseClient, workspaceId: string) => ({
       .update(toIngredientPatch(patch))
       .eq("id", id)
       .eq("workspace_id", workspaceId);
+    if (error && (patch.kind !== undefined || patch.subRecipe !== undefined) && isMissingPreparedColumn(error)) {
+      reportSaveError(`A prepared ingredient change could not be saved: the database is out of date. ${PREPARED_MIGRATION_HINT}`);
+      // Keep the rest of the edit, but never the price reset that goes with becoming prepared.
+      const { kind: _k, subRecipe: _s, ...rest } = patch;
+      void _k;
+      void _s;
+      if (patch.kind === "prepared") delete rest.packagePrice;
+      if (Object.keys(rest).length === 0) return;
+      const r2 = await supabase
+        .from("ingredients")
+        .update(toIngredientPatch(rest))
+        .eq("id", id)
+        .eq("workspace_id", workspaceId);
+      tag("updateIngredient")(r2.error);
+      return;
+    }
     tag("updateIngredient")(error);
   },
   async deleteIngredient(id: string) {

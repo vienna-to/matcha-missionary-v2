@@ -71,3 +71,21 @@ export function parseCollabInput(
   if (!Number.isFinite(n) || n < min || n > max) return { ok: false };
   return { ok: true, value: n };
 }
+
+export type CollabFields =
+  | { ok: false; pctError: boolean; contributionError: boolean }
+  | { ok: true; value: { collabProfitPct: number; collabContribution: number } | null };
+
+/**
+ * The two typed collab inputs, validated once for every place that has them (the
+ * New Event and Quick add dialogs and the Event Summary panel): the share is 0 to
+ * 100, the contribution is a dollar amount of 0 or more. Both blank = not a collab
+ * (value null); one blank = that half is 0.
+ */
+export function parseCollabFields(pctText: string, contributionText: string): CollabFields {
+  const pct = parseCollabInput(pctText, 0, 100);
+  const contribution = parseCollabInput(contributionText, 0, Infinity);
+  if (!pct.ok || !contribution.ok) return { ok: false, pctError: !pct.ok, contributionError: !contribution.ok };
+  if (pct.value === undefined && contribution.value === undefined) return { ok: true, value: null };
+  return { ok: true, value: { collabProfitPct: pct.value ?? 0, collabContribution: contribution.value ?? 0 } };
+}

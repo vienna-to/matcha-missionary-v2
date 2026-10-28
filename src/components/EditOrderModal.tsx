@@ -32,8 +32,10 @@ import { amountOwed, extraAmount, isFreeTotal, NO_EXTRA, type ExtraDraft } from 
 import { chargedUnitFromPct } from "@/lib/pricing";
 import { useHelperMode } from "@/lib/helper-mode";
 import { newId } from "@/lib/id";
-import CustomItemModal from "@/components/CustomItemModal";
-import { comboUnitPrice, findMenuItem } from "@/lib/custom-item";
+import CustomItemModal, { CustomBuilder } from "@/components/CustomItemModal";
+import { menuForOrderEdit } from "@/lib/edit-menu";
+import { comboUnitPrice, customItemName, findMenuItem, isValidCustomSpec } from "@/lib/custom-item";
+import { customItemId, isCustomItemId, parseCustomItemId, type CustomSpec } from "@/lib/custom-id";
 import { hasDrinkAdjustments } from "@/lib/order-labels";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -66,22 +68,12 @@ export default function EditOrderModal({
 }) {
   const dispatch = useDispatch();
   const { state } = useStore();
-  // Live Orders sells from the master menu, so a line can reference an item added
-  // after the event snapshot was taken. Fall back to the master menu for those
-  // (same rule as the reducer) so the line is shown and priced, not dropped.
+  // Same menu the reducer uses when this is saved (menuForOrderEdit): the current menu while the
+  // event is active, the frozen snapshot for an old event, so what is shown is what is stamped.
+  const evtActive = state.events.find((e) => e.id === order.eventId)?.isActive ?? false;
   const snapshot = useMemo<MenuSnapshot>(
-    () => ({
-      ...eventSnapshot,
-      menuItems: [
-        ...eventSnapshot.menuItems,
-        ...state.menuItems.filter((m) => !eventSnapshot.menuItems.some((s) => s.id === m.id)),
-      ],
-      ingredients: [
-        ...eventSnapshot.ingredients,
-        ...state.ingredients.filter((i) => !eventSnapshot.ingredients.some((s) => s.id === i.id)),
-      ],
-    }),
-    [eventSnapshot, state.menuItems, state.ingredients],
+    () => menuForOrderEdit(eventSnapshot, { menuItems: state.menuItems, ingredients: state.ingredients }, evtActive),
+    [eventSnapshot, state.menuItems, state.ingredients, evtActive],
   );
   const [helperMode] = useHelperMode();
   const evt = state.events.find((e) => e.id === order.eventId);
@@ -119,10 +111,23 @@ export default function EditOrderModal({
 
   // Live total — accounts for combos (fixed bundle price) and per-item
   // discount. Recomputes on every keystroke in the DiscountRow / qty stepper.
+  // An existing line keeps the price it was sold at while it is still the same product with the same
+  // milk / cream (the rule REPLACE_ORDER_ITEMS applies when saving). Change the product, for example a
+  // custom drink's bases or toppings, and it is priced at the menu like a new line.
+  const stampedPrice = (it: DraftItem): number | undefined => {
+    const prev = order.items.find((o) => o.id === it.id);
+    if (!prev) return undefined;
+    const same =
+      prev.menuItemId === it.menuItemId &&
+      Boolean(prev.isCombo) === Boolean(it.isCombo) &&
+      prev.comboPastryId === it.comboPastryId &&
+      prev.milkChoiceId === it.milkChoiceId &&
+      prev.creamChoiceId === it.creamChoiceId;
+    return same ? prev.priceSnap : undefined;
+  };
   const { total, totalGross } = items.reduce(
     (acc, it) => {
-      // An existing line keeps the price it was sold at; only new lines use the menu.
-      const stamped = order.items.find((o) => o.id === it.id)?.priceSnap;
+      const stamped = stampedPrice(it);
       const unit = it.isCombo
         ? stamped ?? comboUnitPrice(it.menuItemId)
         : stamped ?? findMenuItem(snapshot, it.menuItemId)?.price ?? 0;
@@ -269,7 +274,7 @@ export default function EditOrderModal({
                   key={it.id}
                   item={it}
                   snapshot={snapshot}
-                  stampedUnit={order.items.find((o) => o.id === it.id)?.priceSnap}
+                  stampedUnit={stampedPrice(it)}
                   onEdit={() => setEditingItemId(it.id)}
                   onRemove={() => removeItem(it.id)}
                   onIncrement={(d) =>
@@ -354,6 +359,9 @@ export default function EditOrderModal({
         <CustomizeItemModal
           item={editingMenuItem}
           ingredients={snapshot.ingredients}
+          snapshot={snapshot}
+          cupSizeOz={evt?.cupSizeOz}
+          helperMode={helperMode}
           draft={editingItem}
           onSave={(patch) => {
             updateItem(editingItem.id, patch);
@@ -507,17 +515,27 @@ function DraftItemRow({
 function CustomizeItemModal({
   item,
   ingredients,
+  snapshot,
+  cupSizeOz,
+  helperMode,
   draft,
   onSave,
   onClose,
 }: {
   item: MenuItem;
   ingredients: Ingredient[];
+  snapshot: MenuSnapshot;
+  cupSizeOz?: number;
+  helperMode: boolean;
   draft: DraftItem;
   onSave: (patch: Partial<DraftItem>) => void;
   onClose: () => void;
 }) {
   const [local, setLocal] = useState<DraftItem>(draft);
+  // A custom drink's bases and toppings are part of its id, so editing them changes the line's product.
+  const isCustom = isCustomItemId(draft.menuItemId);
+  const [spec, setSpec] = useState<CustomSpec>(() => parseCustomItemId(draft.menuItemId) ?? { baseIds: [], toppingIds: [] });
+  const specValid = !isCustom || isValidCustomSpec(spec);
   // Edit Order only: open by default so sugar, ice and special requests are one glance away.
   const [showCustomize, setShowCustomize] = useState(true);
   const drinkOptions = hasDrinkAdjustments(item);
@@ -538,8 +556,21 @@ function CustomizeItemModal({
     local.creamChoiceId === undefined ? item.defaultCreamId : local.creamChoiceId;
 
   return (
-    <Modal open onClose={onClose} title={item.name}>
+    <Modal open onClose={onClose} title={isCustom && specValid ? customItemName(spec, snapshot) : item.name}>
       <div className="space-y-4">
+        {isCustom ? (
+          <div className="rounded-xl border border-cream-200 p-3" data-testid="custom-components">
+            <CustomBuilder
+              snapshot={snapshot}
+              cupSizeOz={cupSizeOz}
+              helperMode={helperMode}
+              spec={spec}
+              onChange={setSpec}
+              priceLabel={local.isCombo ? "combo price" : "price"}
+              priceOverride={local.isCombo ? comboUnitPrice(customItemId(spec)) : undefined}
+            />
+          </div>
+        ) : null}
         {drinkOptions && milks.length > 0 ? (
           <div>
             <Label>Milk</Label>
@@ -627,7 +658,12 @@ function CustomizeItemModal({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => onSave(local)}>Save</Button>
+          <Button
+            disabled={!specValid}
+            onClick={() => onSave(isCustom ? { ...local, menuItemId: customItemId(spec) } : local)}
+          >
+            Save
+          </Button>
         </div>
       </div>
     </Modal>

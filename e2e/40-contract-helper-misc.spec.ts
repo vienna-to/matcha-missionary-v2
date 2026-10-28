@@ -120,13 +120,16 @@ test.describe("5.5 concurrency and persistence (local adapter: tabs share localS
       placeOrder(page, { items: [{ name: "Classic Matcha" }], name: "Tab A", pay: "Cash" }),
       placeOrder(b, { items: [{ name: "Hojicha Latte" }], name: "Tab B", pay: "Venmo" }),
     ]);
-    await page.waitForTimeout(1200); // let both broadcasts settle
-    const a = await eventOrders(page, "Race");
-    const bb = await eventOrders(b, "Race");
-    const names = (o: { orders: Array<{ customerName: string }> }) => o.orders.map((x) => x.customerName).sort();
-    expect(names(a)).toEqual(["Tab A", "Tab B"]);
-    expect(names(bb)).toEqual(["Tab A", "Tab B"]);
-    expect(a.orders.map((o: { orderNumber: number }) => o.orderNumber).sort()).toEqual([1, 2]);
+    // Tabs sync by broadcasting their whole state; wait until both hold both orders with the same numbers
+    // (polling, not a fixed sleep: the broadcasts cross, then the later order is renumbered and re-sent).
+    type Snap = { orders: Array<{ customerName: string; orderNumber: number }> };
+    const byName = (o: Snap) => Object.fromEntries(o.orders.map((x) => [x.customerName, x.orderNumber]));
+    await expect
+      .poll(async () => {
+        const [x, y] = [byName(await eventOrders(page, "Race")), byName(await eventOrders(b, "Race"))];
+        return JSON.stringify(x) === JSON.stringify(y) ? Object.keys(x).sort().join() + ":" + Object.values(x).sort().join() : "not settled";
+      })
+      .toBe("Tab A,Tab B:1,2");
   });
 
   test("barista on a second device sees the order live and a claim shows on both", async ({ context, page }) => {

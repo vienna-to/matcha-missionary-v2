@@ -173,6 +173,10 @@ function LocalStoreProvider({ children }: { children: React.ReactNode }) {
   const [state, baseDispatch] = useReducer(reducer, undefined, loadLocalState);
   const isRemoteRef = useRef(false);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  // Orders this tab submitted that no other tab's broadcast has contained yet. Tabs sync by broadcasting
+  // their whole state, so without this a tab that receives another tab's state at the moment it submits
+  // would overwrite its own new order (and both could take the same number).
+  const pendingOrdersRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -180,8 +184,14 @@ function LocalStoreProvider({ children }: { children: React.ReactNode }) {
     channelRef.current = ch;
     ch.onmessage = (e) => {
       if (e.data?.type === "state") {
-        isRemoteRef.current = true;
-        baseDispatch({ type: "REPLACE", state: e.data.state as AppState });
+        const incoming = e.data.state as AppState;
+        const held = new Set(incoming.orders.map((o) => o.id));
+        const keepIds = [...pendingOrdersRef.current].filter((id) => !held.has(id));
+        for (const id of [...pendingOrdersRef.current]) if (held.has(id)) pendingOrdersRef.current.delete(id);
+        // Nothing of ours missing: plain replace, no echo. Otherwise our merged state is news to the
+        // other tab, so let the persist effect broadcast it.
+        isRemoteRef.current = keepIds.length === 0;
+        baseDispatch({ type: "LOCAL_SYNC", state: incoming, keepIds });
       }
     };
     return () => {
@@ -204,7 +214,11 @@ function LocalStoreProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [state]);
 
-  const dispatch = useCallback((a: Action) => baseDispatch(a), []);
+  const dispatch = useCallback((a: Action) => {
+    if (a.type === "SUBMIT_ORDER") pendingOrdersRef.current.add(a.order.id);
+    else if (a.type === "DELETE_ORDER") pendingOrdersRef.current.delete(a.id);
+    baseDispatch(a);
+  }, []);
   const activeEvent = useMemo(() => state.events.find((e) => e.isActive), [state.events]);
 
   const value = useMemo<StoreCtx>(
@@ -456,6 +470,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
         const evt = fromRealtimeEvent(
           row as DbEvent,
           stateRef.current.events.find((e) => e.id === row.id),
+          kind,
         );
         const snap = (row as DbEvent).menu_snapshot as MenuSnapshot | undefined;
         baseDispatch({ type: "RT_UPSERT_EVENT", event: evt, snapshot: snap });

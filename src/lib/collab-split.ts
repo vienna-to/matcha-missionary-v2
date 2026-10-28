@@ -45,6 +45,16 @@ export function computeCollabSplit(profit: number, splitPct: number, contributio
   };
 }
 
+/**
+ * True while an event has no sales yet. The split is then only the agreed terms: showing the
+ * formula's result (a negative partner take-home equal to their contribution, and a bigger one for
+ * you) would be alarming and means nothing yet. Display only; the formula is unchanged and applies
+ * as soon as there is revenue.
+ */
+export function collabPending(revenuePaid: number): boolean {
+  return !(revenuePaid > 0);
+}
+
 /** An event is a collab once a profit-split % or a partner contribution is set. */
 export function isCollab(event: Pick<Event, "collabProfitPct" | "collabContribution">): boolean {
   return event.collabProfitPct !== undefined || event.collabContribution !== undefined;

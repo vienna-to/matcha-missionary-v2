@@ -3,6 +3,7 @@ import { computeItemCost } from "./calc";
 import { comboUnitPrice, customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
 import { normalizeIngredientPatch, normalizeNewIngredient } from "./prepared";
 import { newId, nowIso } from "./id";
+import { menuForOrderEdit } from "./edit-menu";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
 import {
@@ -116,6 +117,9 @@ export type Action =
   /** `extrasUnavailable`: the event_extras table could not be read (migration
    *  not run), so keep the local list instead of replacing it with nothing. */
   | { type: "RT_SYNC_FULL"; state: AppState; keepIds: string[]; extrasUnavailable?: boolean }
+  /** Local (no Supabase) adapter: another tab broadcast its whole state. Orders this tab submitted that
+   *  the broadcast does not hold yet (keepIds) are kept instead of being overwritten. */
+  | { type: "LOCAL_SYNC"; state: AppState; keepIds: string[] }
   | { type: "RT_UPSERT_ORDER_ITEM"; item: OrderItem }
   | { type: "RT_DELETE_ORDER_ITEM"; id: string; orderId?: string }
   | { type: "RT_UPDATE_SETTINGS"; patch: Partial<Settings> };
@@ -291,10 +295,38 @@ export function mergeServerOrders(
   return [...keptLocal, ...merged];
 }
 
+/**
+ * Local adapter, other tab's whole state arrived: take it, but keep the orders this tab submitted that it
+ * does not contain yet (two tabs submitting at the same moment would otherwise each overwrite the other's
+ * order). If a kept order has the same number as another order of its event, the one submitted LATER takes
+ * the next free number; both tabs compare the same two orders, so they agree on who changes.
+ */
+export function mergeLocalOrders(local: Order[], incoming: Order[], keepIds: ReadonlySet<string>): Order[] {
+  const incomingIds = new Set(incoming.map((o) => o.id));
+  const kept = local.filter((o) => keepIds.has(o.id) && !incomingIds.has(o.id));
+  if (kept.length === 0) return incoming;
+  const result = [...incoming];
+  const earlier = (a: Order, b: Order) =>
+    a.submittedAt !== b.submittedAt ? a.submittedAt < b.submittedAt : a.id < b.id;
+  for (const o of kept) {
+    const clash = result.find((x) => x.eventId === o.eventId && x.orderNumber === o.orderNumber && x.id !== o.id);
+    if (clash && !earlier(o, clash)) {
+      const max = Math.max(...result.filter((x) => x.eventId === o.eventId).map((x) => x.orderNumber));
+      result.push({ ...o, orderNumber: max + 1 });
+    } else {
+      result.push(o);
+    }
+  }
+  return result;
+}
+
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "REPLACE":
       return action.state;
+
+    case "LOCAL_SYNC":
+      return { ...action.state, orders: mergeLocalOrders(state.orders, action.state.orders, new Set(action.keepIds)) };
 
     case "UPDATE_SETTINGS":
       return { ...state, settings: { ...state.settings, ...action.patch } };
@@ -478,20 +510,10 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!evt) return state;
       const eventSnap = findSnapshot(state, evt.menuSnapshotId);
       if (!eventSnap) return state;
-      // Live Orders sells from the master menu, so an item added after the event
-      // was created is missing from the event snapshot. Fall back to the master
-      // menu for those, or a plain edit would turn them into "$0 Unknown item".
-      const snap: MenuSnapshot = {
-        ...eventSnap,
-        menuItems: [
-          ...eventSnap.menuItems,
-          ...state.menuItems.filter((m) => !eventSnap.menuItems.some((s) => s.id === m.id)),
-        ],
-        ingredients: [
-          ...eventSnap.ingredients,
-          ...state.ingredients.filter((i) => !eventSnap.ingredients.some((s) => s.id === i.id)),
-        ],
-      };
+      // Live Orders sells from the master menu while the event is active, so a new or changed line is
+      // priced from it too (see menuForOrderEdit); an item added after the event was created is also
+      // missing from the event snapshot, and would otherwise become "$0 Unknown item".
+      const snap: MenuSnapshot = menuForOrderEdit(eventSnap, state, evt.isActive);
       const items: OrderItem[] = action.items.map((raw) => {
         const { sourceItemId, ...rawItem } = raw;
         const derived = deriveOrderItem(rawItem, order.id, snap, evt.cupSizeOz);

@@ -250,11 +250,20 @@ export function fromEvent(r: DbEvent): Event {
  * and the sidebar card then lose their data until a reload). Keep what we hold
  * for any such column that is missing.
  */
-export function fromRealtimeEvent(r: DbEvent, existing?: Event): Event {
+export function fromRealtimeEvent(
+  r: DbEvent,
+  existing?: Event,
+  kind?: "INSERT" | "UPDATE" | "DELETE",
+): Event {
   const evt = fromEvent(r);
   if (!existing) return evt;
   return {
     ...evt,
+    // An INSERT echo for an event this device already holds is the (possibly late) echo of its own
+    // creation. Its is_active is the value at creation, not news: if it were applied, an older event
+    // would become active again on this device whenever a newer one had been created meanwhile.
+    // Activations by other devices arrive as UPDATE echoes and are still applied.
+    isActive: kind === "INSERT" ? existing.isActive : evt.isActive,
     menuSnapshotId: r.menu_snapshot ? evt.menuSnapshotId : existing.menuSnapshotId,
     fixedCosts: r.fixed_costs === undefined ? existing.fixedCosts : evt.fixedCosts,
   };

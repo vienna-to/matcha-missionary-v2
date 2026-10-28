@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Handshake, Pencil } from "lucide-react";
 import { Button, Card, Input } from "@/components/ui";
-import { collabSplitFor, parseCollabFields } from "@/lib/collab-split";
+import { collabPending, collabSplitFor, parseCollabFields } from "@/lib/collab-split";
 import { useStore } from "@/lib/store";
 import type { Event } from "@/lib/types";
 import { cn, formatMoney } from "@/lib/utils";
@@ -16,9 +16,10 @@ const fieldText = (n: number | undefined) => (n === undefined ? "" : String(n));
  * added, changed or removed at any time. `profit` is the event's profit as shown
  * on the Event Summary (revenue minus its costs).
  */
-export default function CollabSplit({ event, profit }: { event: Event; profit: number }) {
+export default function CollabSplit({ event, profit, revenue }: { event: Event; profit: number; revenue: number }) {
   const { dispatch } = useStore();
   const split = collabSplitFor(event, profit);
+  const pending = collabPending(revenue);
   const [editing, setEditing] = useState(false);
   const [pctText, setPctText] = useState("");
   const [contribText, setContribText] = useState("");
@@ -152,11 +153,15 @@ export default function CollabSplit({ event, profit }: { event: Event; profit: n
         {row(`Partner profit share (${split.splitPct}%)`, formatMoney(split.partnerShare), { muted: true, testid: "collab-share" })}
         {row("− Partner ingredient contribution", formatMoney(split.contribution), { muted: true, testid: "collab-contribution" })}
         <div className="border-t border-cream-200 pt-1.5">
-          {row("Partner take-home", formatMoney(split.partnerTakeHome), { strong: true, testid: "collab-partner" })}
-          {row("Your take-home", formatMoney(split.yourTakeHome), { strong: true, testid: "collab-you" })}
+          {row("Partner take-home", pending ? "—" : formatMoney(split.partnerTakeHome), { strong: true, testid: "collab-partner" })}
+          {row("Your take-home", pending ? "—" : formatMoney(split.yourTakeHome), { strong: true, testid: "collab-you" })}
         </div>
       </dl>
-      {split.partnerTakeHome < 0 ? (
+      {pending ? (
+        <p className="mt-2 text-xs text-matcha-900/60" data-testid="collab-pending">
+          Take-home amounts appear once there are sales. The terms above are saved.
+        </p>
+      ) : split.partnerTakeHome < 0 ? (
         <p className="mt-2 text-xs text-amber-800">
           The contribution is more than the partner&apos;s share of the profit, so their take-home is negative.
         </p>

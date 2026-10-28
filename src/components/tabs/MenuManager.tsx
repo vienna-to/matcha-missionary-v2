@@ -530,7 +530,10 @@ function ItemEditor({
         <div className="rounded-xl border border-cream-200 p-3">
           <h4 className="text-sm font-semibold">Milk & cream</h4>
           <div className="mt-2 grid grid-cols-2 gap-3">
-            <Field label="Uses milk?">
+            <Field
+              label="Uses milk?"
+              hint={milks.length === 0 ? "No milk ingredients are set up yet, so there is nothing to choose." : undefined}
+            >
               <label className="flex h-10 items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -593,7 +596,10 @@ function ItemEditor({
           ) : null}
 
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <Field label="Uses cream?">
+            <Field
+              label="Uses cream?"
+              hint={creams.length === 0 ? "No cream ingredients are set up yet, so there is nothing to choose." : undefined}
+            >
               <label className="flex h-10 items-center gap-2 text-sm">
                 <input
                   type="checkbox"

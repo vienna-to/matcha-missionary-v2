@@ -495,8 +495,10 @@ export function toMenuItemPatch(patch: Partial<MenuItem>): Partial<DbMenuItem> {
   if (patch.active !== undefined) r.active = patch.active;
   if (patch.description !== undefined) r.description = nul(patch.description);
   if (patch.ingredientLines !== undefined) r.ingredient_lines = patch.ingredientLines;
-  if (patch.defaultMilkId !== undefined) r.default_milk_id = nul(patch.defaultMilkId);
-  if (patch.defaultCreamId !== undefined) r.default_cream_id = nul(patch.defaultCreamId);
+  // A default is CLEARED by an explicit undefined (unticking "Uses milk?" / "Uses cream?"), so test for the
+  // key, not the value: skipping undefined left the old default in the database, and it came back on sync.
+  if ("defaultMilkId" in patch) r.default_milk_id = nul(patch.defaultMilkId);
+  if ("defaultCreamId" in patch) r.default_cream_id = nul(patch.defaultCreamId);
   if (patch.allowedMilkIds !== undefined) r.allowed_milk_ids = patch.allowedMilkIds;
   if (patch.allowedCreamIds !== undefined) r.allowed_cream_ids = patch.allowedCreamIds;
   if (patch.sortOrder !== undefined) r.sort_order = patch.sortOrder;

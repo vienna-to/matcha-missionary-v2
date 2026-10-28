@@ -500,3 +500,42 @@ Tests: `menu-duplicate.test.ts` (8: whole-item copy, identical cost, independenc
 
 ### Gates
 Typecheck clean; `next lint` clean; `next build` succeeds; vitest **292 passed** (23 files); full local Playwright **71 passed** on a clean build (single worker); Supabase-mode suite **34 passed** against a local Supabase (now stopped). Production Supabase and the production deployment were never touched; no migration.
+
+
+## Milk / cream designation and Duplicate as a draft (branch `fix/milk-cream-pool-oct29`, off main; not pushed)
+
+Two items, each its own commit. **No migration for either** (the `pool` column and its check already exist). Production Supabase was never touched; database tests ran against a LOCAL Supabase that is stopped afterwards.
+
+### Item 1: "Uses milk?" / "Uses cream?" cannot be ticked ON (FIXED)
+**How the app decides an ingredient is milk or cream.** Only the ingredient's `pool` field (`'milk'` or `'cream'`; the `ingredients.pool` column has a check for exactly those values). Nothing else (not its name, role or type) counts. The pool is what: fills the menu-item editor's Default milk / Default cream dropdowns and Allowed lists; the "Uses milk?" / "Uses cream?" boxes use (`milks[0]`: with no pooled milk, ticking has nothing to choose and does nothing); an order's milk or cream choice swaps into a recipe line; and the custom drink builder takes as its automatic milk.
+
+**Why the user's milks and creams were not recognised.** They were typed in by hand ("Lactose-free milk", "whole milk", "heavy cream"), and **no screen could set the pool**: the New ingredient form hard-coded `pool: null`, and the ingredients table only had the Base / Topping / Neither role and Raw / Prepared type. Only the seeded sample ingredients carry a pool. (A pooled milk shows "milk (automatic)" in the role column; the user's rows showed a role dropdown, which is how this is visible: their rows have no pool.) So this was a missing capability, not a regression, and unrelated to the earlier "cannot turn it off" fix.
+
+**Reproduced first, in Supabase mode** (`e2e/supabase/140-milk-cream-pool.spec.ts`): the test makes the workspace look like theirs (no ingredient in a pool, no milk/cream choices on any drink, plus a hand-made "Heavy cream"), shows ticking does nothing, then needs the new controls. On the old build it fails at the first new control; on the new build it passes.
+
+**Fix.**
+- Ingredients table: a **Milk or cream** selector (Neither / Milk / Cream) on every raw ingredient; the New ingredient form has the same field. (Prepared ingredients cannot be milk or cream.)
+- **Backfill without a database migration:** the Ingredients tab shows a banner when raw, pool-less ingredients look like milk or cream by name (e.g. "whole milk", "Lactose-free milk", "heavy cream"; not "milk tea powder", "ice cream", "cream cheese"...) with a one-click **Mark as milk / Mark as cream**. It is reviewable and reversible (the selector), and nothing changes until the user clicks. A SQL backfill would have guessed names across the whole database with no review, so none was written.
+- **Costs do not change.** A recipe line that points at a pool ingredient is swapped for the order's choice or the item's default, and a pool line with no default adds nothing. So marking an ingredient a recipe already uses would silently drop its cost. Marking one therefore makes it the default and only allowed choice of every item whose recipe uses it and has no default (the swap lands on the same ingredient; a unit test checks the cost is identical before and after). Items that already have a default are left alone. Unmarking removes it from every default / allowed list (the next allowed choice becomes the default).
+- Recipe lines can now show and pick milk and cream ingredients (labelled "(milk, swapped for the order choice)"). Before, their dropdown only listed non-pool ingredients, so a recipe's milk line displayed as the wrong ingredient and its unit list was the wrong kind, and a new drink had no way to get a milk line at all.
+- The editor's hint now says where to mark milks and creams.
+
+**Verified in Supabase mode:** designation writes `pool` to the database; Classic Matcha's recipe milk line makes Whole milk its default milk (cost-neutral); after that "Uses milk?" / "Uses cream?" tick, the dropdowns hold the marked milks and creams, and the defaults and allowed lists are stored and survive a reload. Also local-mode e2e (`100-menu-milk-cream.spec.ts`: clear every pool through the UI, the symptom, the banner, ticking, persistence; new ingredient created as milk; cost-neutral designation) and unit tests (`pools.test.ts`, 9).
+
+**Note for the live workspace:** nothing happens until the user opens Menu Manager > Ingredients and clicks Mark as milk / Mark as cream (or sets the selector per row). Designating the milk that appears in a drink's recipe makes it that drink's default milk; check each drink's allowed milks afterwards (Uses milk? is now tickable on all of them).
+
+### Item 2: Duplicate creates the item on Cancel (FIXED)
+Duplicate no longer writes anything. It opens the editor ("Duplicate menu item") on an **unsaved draft** copy; the item is created through the normal New item path only when **Save** is pressed. Cancel or clicking outside the dialog discards it (a local e2e for Cancel and for clicking outside, and a Supabase check that no `menu_items` row exists while the draft is open or after Cancel). Save still produces the complete, independent copy (names, numbering, archived original gives an active copy, sells and costs like the original: all re-tested).
+While doing this the create path was found to turn an unset tax flag into `false`, which made a copy differ from its original (and showed the box ticked while saving not-taxable); it now passes the value through (a blank new item still starts non-taxable).
+
+### Verification split
+- **Verified in Supabase mode (local database):** both items.
+- **Local mode:** both items' UI and unit tests.
+
+### Gates: what ran and what did NOT (read this)
+- **Done and clean on the final code:** typecheck; `next lint`; `next build`; vitest **301 passed** (24 files).
+- **Targeted Playwright, local mode, all passing on the final code:** `100-menu-milk-cream` (6), `101-duplicate-menu-item` (7).
+- **Targeted Supabase mode, passing on the final code (local database):** `140-milk-cream-pool` (the reported case; it fails on the old build at the first new control) and `130-duplicate-menu-item` (Cancel writes nothing, Save writes the copy, independent).
+- **NOT completed: the full local Playwright suite and the full Supabase-mode suite on the final code.** The machine ran critically low on memory (about 80 MB free, Windows memory compression at 2.8 GB) after several long runs. The first full local run finished with 3 failures: two multi-tab specs that hit the 30 s test timeout (`two devices submitting at the same moment`, `barista on a second device`; each ran in 20 to 40 s instead of the usual 10 s) and `90-prepared` "one level only" which failed in 0 ms (a worker casualty). Re-run on their own, `40-contract-helper-misc` and `90-prepared` passed except one timeout of the two-device test, which then passed 4 of 4 and 4 of 4 in repeats; so these look like resource-starvation timeouts and not regressions, but that is an inference. A second full run was stopped by the system for low memory before it finished, and local Supabase was stopped to free memory, so the full Supabase-mode suite was not re-run after the final changes (its last full pass, 34 of 34, was on the previous branch before this work).
+- To close this out: with memory free, run `npx playwright test --workers=1` (E2E_REBUILD=1) and the Supabase-mode suite with local Supabase started. Nothing in this branch touches the order-submission or tab-sync code those flaky specs exercise.
+- Production Supabase and the production deployment were never touched; no migration.

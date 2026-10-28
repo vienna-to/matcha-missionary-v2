@@ -456,6 +456,7 @@ function SupabaseStoreProvider({ children }: { children: React.ReactNode }) {
         const evt = fromRealtimeEvent(
           row as DbEvent,
           stateRef.current.events.find((e) => e.id === row.id),
+          kind,
         );
         const snap = (row as DbEvent).menu_snapshot as MenuSnapshot | undefined;
         baseDispatch({ type: "RT_UPSERT_EVENT", event: evt, snapshot: snap });

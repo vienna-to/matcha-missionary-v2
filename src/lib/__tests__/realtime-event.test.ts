@@ -86,3 +86,67 @@ describe("Realtime event UPDATE without the large jsonb columns", () => {
     void ev;
   });
 });
+
+describe("a late INSERT echo of an older event must not make it active again (wrong event deleted)", () => {
+  /** E created first, then Other (active). E's INSERT echo, sent with is_active = true, arrives only now. */
+  function twoEvents() {
+    const { s } = setup();
+    const both = reducer(s, {
+      type: "CREATE_EVENT",
+      event: { name: "Other", date: "2026-10-17", startTime: "11:00", endTime: "16:00", eventType: "standard", cupSizeOz: 16 },
+    });
+    const early = both.events.find((e) => e.name === "E")!;
+    const late = both.events.find((e) => e.name === "Other")!;
+    expect(late.isActive).toBe(true);
+    expect(early.isActive).toBe(false);
+    return { both, early, late };
+  }
+
+  it("INSERT echo of an event we already hold keeps our active flag: the newer event stays active", () => {
+    const { both, early, late } = twoEvents();
+    const next = reducer(both, {
+      type: "RT_UPSERT_EVENT",
+      event: fromRealtimeEvent(updatePayload(early, true), early, "INSERT"),
+    });
+    expect(next.events.find((e) => e.isActive)?.id).toBe(late.id);
+    expect(next.events.filter((e) => e.isActive)).toHaveLength(1);
+  });
+
+  it("without the kind (the old behaviour) the stale echo re-activated the older event", () => {
+    const { both, early } = twoEvents();
+    const next = reducer(both, {
+      type: "RT_UPSERT_EVENT",
+      event: fromRealtimeEvent(updatePayload(early, true), early),
+    });
+    expect(next.events.find((e) => e.isActive)?.id).toBe(early.id);
+  });
+
+  it("an UPDATE echo (another device pressed Make active) is still applied", () => {
+    const { both, early } = twoEvents();
+    const next = reducer(both, {
+      type: "RT_UPSERT_EVENT",
+      event: fromRealtimeEvent(updatePayload(early, true), early, "UPDATE"),
+    });
+    expect(next.events.find((e) => e.isActive)?.id).toBe(early.id);
+    expect(next.events.filter((e) => e.isActive)).toHaveLength(1);
+  });
+
+  it("an INSERT for an event we do not hold (created on another device) is applied as sent", () => {
+    const { both, late } = twoEvents();
+    const remote = { ...updatePayload(late, true), id: "remote-evt", name: "Remote" } as unknown as DbEvent;
+    const next = reducer(both, { type: "RT_UPSERT_EVENT", event: fromRealtimeEvent(remote, undefined, "INSERT") });
+    expect(next.events.find((e) => e.isActive)?.name).toBe("Remote");
+  });
+
+  it("deleting an event removes only that event, its snapshot, orders and extras (ruled out as a cause)", () => {
+    const { both, early, late } = twoEvents();
+    const next = reducer(both, { type: "DELETE_EVENT", id: late.id });
+    expect(next.events.map((e) => e.id)).toEqual(both.events.map((e) => e.id).filter((id) => id !== late.id));
+    expect(next.events.some((e) => e.id === early.id)).toBe(true);
+    expect(next.menuSnapshots.some((m) => m.id === early.menuSnapshotId)).toBe(true);
+    expect(next.menuSnapshots.some((m) => m.id === late.menuSnapshotId)).toBe(false);
+    const rt = reducer(both, { type: "RT_DELETE_EVENT", id: late.id });
+    expect(rt.events.map((e) => e.id)).toEqual(next.events.map((e) => e.id));
+  });
+});
+

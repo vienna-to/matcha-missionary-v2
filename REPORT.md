@@ -470,3 +470,33 @@ Event Summary / Finance / tax numbers are built from the stamps (`lineRevenue`, 
 
 ### Gates (final code of the batch)
 Typecheck clean; `next lint` clean; `next build` succeeds (one earlier Supabase-mode build attempt failed in `next/font` while fetching Google Fonts, a transient network error; the same build succeeds on retry, so builds do need that fetch to work); vitest **280 passed** (21 files); full local Playwright **64 passed** on a clean build (single worker; the previously flaky two-tab test passed, and 12 + 6 repeats of it passed); Supabase-mode suite **32 passed** against a local Supabase (now stopped). Production Supabase and the production deployment were never touched; no migration in this batch.
+
+
+## Menu Manager batch (branch `fix/menu-manager-oct28`, off main; not pushed)
+
+Two items, each its own commit. **No migration for either.** Production Supabase was never touched; database tests ran against a LOCAL Supabase that is stopped afterwards.
+
+### Item 1: "Uses milk?" / "Uses cream?" checkboxes dead (FIXED)
+**Investigation.** The checkboxes are not disabled, have handlers, and are not conditioned on ingredient type (raw / prepared), an unset field, or anything else; they work for every item in local mode (new item, existing drink, pastry: `e2e/100-menu-milk-cream.spec.ts`). The editor code has not changed since the initial commit, so this is not a regression of the handlers.
+
+**Root cause (database-backed workspaces only, which is what production runs).** Unticking a box saves `defaultMilkId: undefined` (and `[]` for the allowed list). `toMenuItemPatch` only wrote a field when `value !== undefined`, so `default_milk_id` / `default_cream_id` were silently NOT cleared in the database while the allowed list was. On the next sync (the update's own realtime echo, or a reload) the old default came back with an empty allowed list: the box ticked itself again, "Default milk" stayed disabled, and every further click did the same, so it looked dead. Ticking ON worked, which made it feel inconsistent. Local mode never showed it because the reducer's object spread does overwrite with `undefined`. The line dates from the first storage-layer commit (`a10afdf`), so it is an old latent bug, not a recent regression; it only matters once someone turns milk or cream OFF on an item.
+
+**Reproduced first** in Supabase mode (`e2e/supabase/120-menu-milk-cream.spec.ts`): after unticking both and saving, `default_milk_id` / `default_cream_id` were still set in the database. **Fix:** `toMenuItemPatch` now treats the presence of the key as the instruction (`"defaultMilkId" in patch`), so an explicit `undefined` writes null. Patches that do not mention the defaults (archive, price, rename, reorder) still leave them alone. The spec fails on the old code and passes now; it also checks the OFF state survives a reload and ON again saves a default plus the allowed lists. Unit tests: `menu-item-patch.test.ts` (4).
+
+**Also:** if there is no ingredient in the milk (or cream) pool at all, ticking the box has nothing to choose and cannot do anything; the editor now says "No milk ingredients are set up yet, so there is nothing to choose." (There is still no screen to put a new ingredient into the milk or cream pool; seeded workspaces already have them. Not added here.)
+
+**Same pattern elsewhere (noted, not changed):** other patch serializers skip `undefined` too (for example clearing an ingredient role); the collab fields were already handled this way earlier. Worth a sweep if a "cannot clear this field" report appears.
+
+### Item 2: Duplicate a menu item (BUILT)
+Each menu item card (active and archived) has a **Duplicate** button. It adds a new item with every recipe line and amount, price, size, category, description, tax flag, default milk / cream and allowed milk / cream lists copied, named `"<name> (copy)"` (then `(copy 2)`, `(copy 3)`... if that exists; duplicating a copy does not stack suffixes; clashes are checked ignoring case and spacing). The copy is placed at the end of the menu, is always active (even when copying an archived item), and its editor opens straight away so it can be renamed and adjusted. It shares no objects with the original (lines and id lists are new), so editing either never changes the other; it costs and sells exactly like the original until edited (same cost function and snapshot rules: an order placed from the copy gets the same `costSnap` / `priceSnap` as one from the original). Logic: `lib/menu-duplicate.ts`, using the existing `ADD_MENU_ITEM` action.
+
+**Migration: none.** The copy is an ordinary `menu_items` insert using the existing columns (a unit test checks the inserted row has exactly the same columns as any other item's).
+
+Tests: `menu-duplicate.test.ts` (8: whole-item copy, identical cost, independence both ways, no aliasing, pastry, same columns, naming); local e2e `101-duplicate-menu-item.spec.ts` (4: complete copy then rename and re-price while the original stays identical and vice versa; numbering; sells with the same cost and price as the original; archived original gives an active copy); Supabase mode `130-duplicate-menu-item.spec.ts` (the database row is identical apart from id and name, editing the copy changes only its row, and both survive a reload).
+
+### Verification split
+- **Verified in Supabase mode (local database):** Item 1 (reproduction, fix, OFF/ON persistence across reload) and Item 2 (the duplicated row and its independence).
+- **Local mode:** both items' UI behaviour and unit tests.
+
+### Gates
+Typecheck clean; `next lint` clean; `next build` succeeds; vitest **292 passed** (23 files); full local Playwright **71 passed** on a clean build (single worker); Supabase-mode suite **34 passed** against a local Supabase (now stopped). Production Supabase and the production deployment were never touched; no migration.

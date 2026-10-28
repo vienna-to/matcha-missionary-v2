@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Pencil, Copy, Archive, Trash2, AlertTriangle, GripVertical, ArrowUpDown, Layers } from "lucide-react";
 import {
   DndContext,
@@ -92,23 +92,13 @@ export default function MenuManager() {
 function ItemsList() {
   const { state, dispatch } = useStore();
   const [editing, setEditing] = useState<MenuItem | null>(null);
-  const [creating, setCreating] = useState(false);
-  // Name of a just-duplicated item: once the store has it, open its editor so it can be renamed and adjusted.
-  const [openCopy, setOpenCopy] = useState<string | null>(null);
+  // A new item being filled in (blank, or a copy of another): NOTHING exists until Save. Cancel discards it.
+  const [draft, setDraft] = useState<{ item: MenuItem; title?: string } | null>(null);
 
   function duplicate(item: MenuItem) {
     const copy = duplicateMenuItem(item, state.menuItems.map((m) => m.name));
-    dispatch({ type: "ADD_MENU_ITEM", item: copy });
-    setOpenCopy(copy.name);
+    setDraft({ item: { ...copy, id: "new", createdAt: "", updatedAt: "" }, title: "Duplicate menu item" });
   }
-  useEffect(() => {
-    if (!openCopy) return;
-    const made = state.menuItems.find((m) => m.name === openCopy);
-    if (made) {
-      setEditing(made);
-      setOpenCopy(null);
-    }
-  }, [openCopy, state.menuItems]);
 
   const sorted = [...state.menuItems].sort(compareMenuItems);
   const active = sorted.filter((m) => m.active);
@@ -151,7 +141,7 @@ function ItemsList() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={() => setCreating(true)} className="max-md:w-full">
+        <Button onClick={() => setDraft({ item: blankItem() })} className="max-md:w-full">
           <Plus className="h-4 w-4" /> New item
         </Button>
       </div>
@@ -251,11 +241,12 @@ function ItemsList() {
         />
       ) : null}
 
-      {creating ? (
+      {draft ? (
         <ItemEditor
-          item={blankItem()}
+          item={draft.item}
+          title={draft.title}
           ingredients={state.ingredients}
-          onClose={() => setCreating(false)}
+          onClose={() => setDraft(null)}
           onSave={(patch) => {
             // Patch is a Partial<MenuItem>; cast to full create shape
             dispatch({
@@ -272,10 +263,11 @@ function ItemsList() {
                 defaultCreamId: patch.defaultCreamId,
                 allowedMilkIds: patch.allowedMilkIds ?? [],
                 allowedCreamIds: patch.allowedCreamIds ?? [],
-                taxable: patch.taxable ?? false,
+                // As given: a new blank item starts non-taxable, a copy keeps whatever its original has (even unset).
+                taxable: patch.taxable,
               },
             });
-            setCreating(false);
+            setDraft(null);
           }}
         />
       ) : null}
@@ -443,11 +435,14 @@ function blankItem(): MenuItem {
 
 function ItemEditor({
   item,
+  title,
   ingredients,
   onClose,
   onSave,
 }: {
   item: MenuItem;
+  /** Overrides the default heading (used for a duplicate). */
+  title?: string;
   ingredients: Ingredient[];
   onClose: () => void;
   onSave: (patch: Partial<MenuItem>) => void;
@@ -490,7 +485,7 @@ function ItemEditor({
   const margin = defaultItemMargin(draft, ingredients);
 
   return (
-    <Modal open onClose={onClose} title={item.id === "new" ? "New menu item" : "Edit menu item"}>
+    <Modal open onClose={onClose} title={title ?? (item.id === "new" ? "New menu item" : "Edit menu item")}>
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Name" className="col-span-2">

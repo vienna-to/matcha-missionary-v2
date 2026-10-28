@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collabSplitFor, computeCollabSplit, isCollab, parseCollabFields, parseCollabInput } from "@/lib/collab-split";
+import { collabPending, collabSplitFor, computeCollabSplit, isCollab, parseCollabFields, parseCollabInput } from "@/lib/collab-split";
 
 describe("computeCollabSplit", () => {
   it("worked example: $500 revenue, $100 costs, 40% split, $50 contribution", () => {
@@ -162,5 +162,24 @@ describe("an event created with the terms shows the same split the Event Summary
   });
   it("an event created with the fields blank is not a collab", () => {
     expect(isCollab({})).toBe(false);
+  });
+});
+
+describe("collab split display before any sales (pending)", () => {
+  it("is pending until there is revenue, and only then", () => {
+    expect(collabPending(0)).toBe(true);
+    expect(collabPending(-1)).toBe(true);
+    expect(collabPending(Number.NaN)).toBe(true);
+    expect(collabPending(0.01)).toBe(false);
+    expect(collabPending(500)).toBe(false);
+  });
+
+  it("the formula is unchanged: with revenue the same numbers as always, pending only hides them", () => {
+    // no revenue: the formula would give -$10 for the partner; that is what the display now holds back
+    expect(computeCollabSplit(0, 40, 10).partnerTakeHome).toBe(-10);
+    // $500 revenue, $100 costs, 40%, $50 contribution: $110 / $290 as before
+    const s = computeCollabSplit(400, 40, 50);
+    expect(s.partnerTakeHome).toBe(110);
+    expect(s.yourTakeHome).toBe(290);
   });
 });

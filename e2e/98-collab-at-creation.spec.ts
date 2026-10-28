@@ -36,6 +36,12 @@ test.describe("collab terms at event creation", () => {
     await expect(panel.getByTestId("collab-profit")).toHaveText(money(0));
     await expect(panel.getByTestId("collab-contribution")).toHaveText(money(1.5));
     await expect(panel).toContainText("Partner profit share (40%)");
+    // no sales yet: no alarming negative take-home, just a pending state
+    await expect(panel.getByTestId("collab-partner")).toHaveText("—");
+    await expect(panel.getByTestId("collab-you")).toHaveText("—");
+    await expect(panel.getByTestId("collab-pending")).toBeVisible();
+    await expect(panel).not.toContainText("-$");
+    await expect(panel).not.toContainText("negative");
 
     // orders come in: the split is the same calculation as the panel, and adds up
     await goTab(page, "Live Orders");
@@ -44,6 +50,7 @@ test.describe("collab terms at event creation", () => {
     const { profit } = await profitOf(page, "Upfront collab");
     expect(profit).toBeGreaterThan(0);
     const expected = computeCollabSplit(profit, 40, 1.5);
+    await expect(panel.getByTestId("collab-pending")).toHaveCount(0); // sales exist: the real numbers
     await expect(panel.getByTestId("collab-profit")).toHaveText(money(expected.profit));
     await expect(panel.getByTestId("collab-share")).toHaveText(money(expected.partnerShare));
     await expect(panel.getByTestId("collab-partner")).toHaveText(money(expected.partnerTakeHome));

@@ -262,6 +262,7 @@ export default function EventSummary() {
         key={`${event.id}:${event.collabProfitPct ?? ""}:${event.collabContribution ?? ""}`}
         event={event}
         profit={totals.profit}
+        revenue={totals.revenuePaid}
       />
 
       {/* Metrics */}

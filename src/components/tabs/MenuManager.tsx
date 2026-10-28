@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Plus, Pencil, Archive, Trash2, AlertTriangle, GripVertical, ArrowUpDown, Layers } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Pencil, Copy, Archive, Trash2, AlertTriangle, GripVertical, ArrowUpDown, Layers } from "lucide-react";
 import {
   DndContext,
   KeyboardSensor,
@@ -35,6 +35,7 @@ import {
   EmptyState,
 } from "@/components/ui";
 import { useStore } from "@/lib/store";
+import { duplicateMenuItem } from "@/lib/menu-duplicate";
 import {
   SIZES,
   SIZE_LABELS,
@@ -91,6 +92,22 @@ function ItemsList() {
   const { state, dispatch } = useStore();
   const [editing, setEditing] = useState<MenuItem | null>(null);
   const [creating, setCreating] = useState(false);
+  // Name of a just-duplicated item: once the store has it, open its editor so it can be renamed and adjusted.
+  const [openCopy, setOpenCopy] = useState<string | null>(null);
+
+  function duplicate(item: MenuItem) {
+    const copy = duplicateMenuItem(item, state.menuItems.map((m) => m.name));
+    dispatch({ type: "ADD_MENU_ITEM", item: copy });
+    setOpenCopy(copy.name);
+  }
+  useEffect(() => {
+    if (!openCopy) return;
+    const made = state.menuItems.find((m) => m.name === openCopy);
+    if (made) {
+      setEditing(made);
+      setOpenCopy(null);
+    }
+  }, [openCopy, state.menuItems]);
 
   const sorted = [...state.menuItems].sort(compareMenuItems);
   const active = sorted.filter((m) => m.active);
@@ -155,6 +172,7 @@ function ItemsList() {
                     ingredients={state.ingredients}
                     lowMarginPct={state.settings.lowMarginThresholdPct}
                     onEdit={() => setEditing(item)}
+                    onDuplicate={() => duplicate(item)}
                     onArchive={() =>
                       dispatch({
                         type: "UPDATE_MENU_ITEM",
@@ -192,6 +210,7 @@ function ItemsList() {
                     ingredients={state.ingredients}
                     lowMarginPct={state.settings.lowMarginThresholdPct}
                     onEdit={() => setEditing(item)}
+                    onDuplicate={() => duplicate(item)}
                     onArchive={() =>
                       dispatch({
                         type: "UPDATE_MENU_ITEM",
@@ -283,6 +302,7 @@ type ItemRowProps = {
   ingredients: Ingredient[];
   lowMarginPct: number;
   onEdit: () => void;
+  onDuplicate: () => void;
   onArchive: () => void;
   onDelete: () => void;
   usedInOrders: boolean;
@@ -325,6 +345,7 @@ function ItemRow({
   ingredients,
   lowMarginPct,
   onEdit,
+  onDuplicate,
   onArchive,
   onDelete,
   usedInOrders,
@@ -362,6 +383,15 @@ function ItemRow({
         <div className="flex gap-1.5 max-md:w-full max-md:[&>button]:h-10 max-md:[&>button]:flex-1">
           <Button size="sm" variant="outline" onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onDuplicate}
+            title="Duplicate"
+            aria-label={`Duplicate ${item.name}`}
+          >
+            <Copy className="h-3.5 w-3.5" />
           </Button>
           <Button size="sm" variant="outline" onClick={onArchive} title={isArchived ? "Unarchive" : "Archive"}>
             <Archive className="h-3.5 w-3.5" />

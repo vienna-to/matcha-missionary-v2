@@ -3,6 +3,7 @@ import { computeItemCost } from "./calc";
 import { comboUnitPrice, customItemCost, findMenuItem, isCustomItemId, parseCustomItemId } from "./custom-item";
 import { normalizeIngredientPatch, normalizeNewIngredient } from "./prepared";
 import { newId, nowIso } from "./id";
+import { menuForOrderEdit } from "./edit-menu";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
 import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
 import {
@@ -478,20 +479,10 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!evt) return state;
       const eventSnap = findSnapshot(state, evt.menuSnapshotId);
       if (!eventSnap) return state;
-      // Live Orders sells from the master menu, so an item added after the event
-      // was created is missing from the event snapshot. Fall back to the master
-      // menu for those, or a plain edit would turn them into "$0 Unknown item".
-      const snap: MenuSnapshot = {
-        ...eventSnap,
-        menuItems: [
-          ...eventSnap.menuItems,
-          ...state.menuItems.filter((m) => !eventSnap.menuItems.some((s) => s.id === m.id)),
-        ],
-        ingredients: [
-          ...eventSnap.ingredients,
-          ...state.ingredients.filter((i) => !eventSnap.ingredients.some((s) => s.id === i.id)),
-        ],
-      };
+      // Live Orders sells from the master menu while the event is active, so a new or changed line is
+      // priced from it too (see menuForOrderEdit); an item added after the event was created is also
+      // missing from the event snapshot, and would otherwise become "$0 Unknown item".
+      const snap: MenuSnapshot = menuForOrderEdit(eventSnap, state, evt.isActive);
       const items: OrderItem[] = action.items.map((raw) => {
         const { sourceItemId, ...rawItem } = raw;
         const derived = deriveOrderItem(rawItem, order.id, snap, evt.cupSizeOz);

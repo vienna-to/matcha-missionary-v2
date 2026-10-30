@@ -71,6 +71,8 @@ test("hand-made milks: designate them, then Uses milk? works and persists; cream
     expect.arrayContaining(["Whole milk", "Lactose-free milk"]),
   );
   await select(dlg, "Default milk").selectOption({ label: "Lactose-free milk" });
+  // the pastry has no milk line, so the editor warns that milk would cost $0 (the milk-line warning)
+  await expect(dlg.getByTestId("milk-line-warning")).toBeVisible();
   for (const t of ["Uses cream?", "Default cream"]) await expect(dlg.getByText(t)).toHaveCount(0);
   await dlg.getByRole("button", { name: "Save" }).click();
   await expect(dlg).toBeHidden();

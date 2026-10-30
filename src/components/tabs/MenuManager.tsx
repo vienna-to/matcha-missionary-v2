@@ -36,7 +36,7 @@ import {
 } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { duplicateMenuItem } from "@/lib/menu-duplicate";
-import { poolChangePatches, suggestPools } from "@/lib/pools";
+import { milkLineMissing, poolChangePatches, suggestPools } from "@/lib/pools";
 import {
   SIZES,
   SIZE_LABELS,
@@ -591,6 +591,16 @@ function ItemEditor({
               </Select>
             </Field>
           </div>
+          {milkLineMissing(draft, ingredients) ? (
+            <p
+              role="alert"
+              data-testid="milk-line-warning"
+              className="t-caption mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900"
+            >
+              This drink offers milk, but no recipe line is a milk ingredient, so it costs $0 for milk. Add a milk line to the recipe
+              (an ingredient marked as milk, with the amount a cup uses) and its cost will follow the milk chosen.
+            </p>
+          ) : null}
           {draft.allowedMilkIds.length > 0 ? (
             <div className="mt-3">
               <div className="mb-1 text-xs font-medium text-matcha-900/70">Allowed milks</div>

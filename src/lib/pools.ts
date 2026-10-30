@@ -69,3 +69,22 @@ export function poolChangePatches(items: MenuItem[], ingredient: Ingredient, to:
   }
   return out;
 }
+
+/** A drink is set up to offer milk: it has a default milk or a list of allowed milks. */
+export function offersMilk(item: Pick<MenuItem, "defaultMilkId" | "allowedMilkIds">): boolean {
+  return Boolean(item.defaultMilkId) || item.allowedMilkIds.length > 0;
+}
+
+/**
+ * The drink offers milk but no recipe line is a milk ingredient. Milk is costed only through a recipe
+ * line (a milk line is swapped for the milk chosen, or the default), so such a drink costs $0 for milk
+ * whatever is picked.
+ */
+export function milkLineMissing(
+  item: Pick<MenuItem, "defaultMilkId" | "allowedMilkIds" | "ingredientLines">,
+  ingredients: Ingredient[],
+): boolean {
+  if (!offersMilk(item)) return false;
+  const milkIds = new Set(ingredients.filter((i) => i.pool === "milk").map((i) => i.id));
+  return !item.ingredientLines.some((l) => milkIds.has(l.ingredientId));
+}

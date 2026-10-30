@@ -242,3 +242,47 @@ test.describe("cream is a plain recipe ingredient, not a choice", () => {
     await expect(custom.getByRole("button", { name: /no cream/i })).toHaveCount(0);
   });
 });
+
+test.describe("warning: the drink offers milk but no recipe line is milk", () => {
+  const warning = (dlg: Locator) => dlg.getByTestId("milk-line-warning");
+
+  test("shows for a drink set up for milk with no milk line, and clears when a milk line is added", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    const dlg = await openMenuEditor(page, "Classic Matcha");
+    // a normal drink: uses milk and has a milk line, so no warning
+    await expect(box(dlg, "Uses milk?")).toBeChecked();
+    await expect(warning(dlg)).toHaveCount(0);
+
+    // remove the recipe's milk line: milk is still offered (default + allowed) but nothing costs it
+    const st = await readState(page);
+    const milkIds = st.ingredients.filter((i: any) => i.pool === "milk").map((i: any) => i.id);
+    const item = st.menuItems.find((m: any) => m.name === "Classic Matcha");
+    const milkLine = item.ingredientLines.find((l: any) => milkIds.includes(l.ingredientId));
+    const row = dlg.locator("select").filter({ has: page.locator(`option[value="${milkLine.ingredientId}"]:checked`) }).locator("xpath=..");
+    await row.getByRole("button").click();
+    await expect(warning(dlg)).toBeVisible();
+    await expect(warning(dlg)).toContainText("costs $0 for milk");
+
+    // add a recipe line, and point it at a milk: the warning goes away
+    await dlg.getByRole("button", { name: /Add line/i }).click();
+    const lineSelect = dlg.locator("select").filter({ has: page.locator("option", { hasText: "swapped for the order choice" }) }).last();
+    await lineSelect.selectOption(milkIds[0]);
+    await expect(warning(dlg)).toHaveCount(0);
+    await dlg.getByRole("button", { name: "Cancel" }).click();
+  });
+
+  test("no warning once milk is switched off, and none for a drink that never offered milk", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    const dlg = await openMenuEditor(page, "Matcha Cheesecake");
+    await expect(box(dlg, "Uses milk?")).not.toBeChecked();
+    await expect(warning(dlg)).toHaveCount(0);
+    // ticking milk on a pastry whose recipe has no milk line shows the warning straight away
+    await box(dlg, "Uses milk?").click();
+    await expect(warning(dlg)).toBeVisible();
+    await box(dlg, "Uses milk?").click();
+    await expect(warning(dlg)).toHaveCount(0);
+    await dlg.getByRole("button", { name: "Cancel" }).click();
+  });
+});

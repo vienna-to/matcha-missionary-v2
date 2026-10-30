@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultItemCost } from "@/lib/calc";
-import { looksLikeMilk, poolChangePatches, suggestPools } from "@/lib/pools";
+import { looksLikeMilk, milkLineMissing, offersMilk, poolChangePatches, suggestPools } from "@/lib/pools";
 import { reducer } from "@/lib/reducer";
 import { initialSeed } from "@/lib/seed";
 import type { AppState, Ingredient, MenuItem } from "@/lib/types";
@@ -134,5 +134,49 @@ describe("taking an ingredient out of a pool", () => {
     const s = initialSeed();
     const oat = s.ingredients.find((i) => i.id === "ing_milk_oat")!;
     expect(poolChangePatches(s.menuItems, oat, "milk")).toEqual([]);
+  });
+});
+
+describe("milk line warning: milk is offered but nothing in the recipe is milk", () => {
+  const seed = initialSeed();
+  const latte = seed.menuItems.find((m) => m.ingredientLines.some((l) => seed.ingredients.find((i) => i.id === l.ingredientId)?.pool === "milk"))!;
+
+  it("a drink with a milk line is fine", () => {
+    expect(offersMilk(latte)).toBe(true);
+    expect(milkLineMissing(latte, seed.ingredients)).toBe(false);
+  });
+
+  it("the user's case: default milk + allowed milks, recipe without a milk line", () => {
+    const bare: MenuItem = {
+      ...latte,
+      ingredientLines: latte.ingredientLines.filter((l) => seed.ingredients.find((i) => i.id === l.ingredientId)?.pool !== "milk"),
+    };
+    expect(bare.ingredientLines.length).toBeGreaterThan(0);
+    expect(milkLineMissing(bare, seed.ingredients)).toBe(true);
+    // and that really is $0 of milk: the cost does not move with the default
+    const withoutMilk = defaultItemCost(bare, seed.ingredients);
+    expect(withoutMilk).toBeLessThan(defaultItemCost(latte, seed.ingredients));
+    expect(defaultItemCost({ ...bare, defaultMilkId: "ing_milk_oat" }, seed.ingredients)).toBeCloseTo(withoutMilk, 10);
+  });
+
+  it("allowed milks alone (no default) also count as offering milk", () => {
+    const bare: MenuItem = { ...latte, defaultMilkId: undefined, allowedMilkIds: ["ing_milk_whole"], ingredientLines: [] };
+    expect(milkLineMissing(bare, seed.ingredients)).toBe(true);
+  });
+
+  it("no warning when milk is not offered, or for a pastry-like item with no milk set up", () => {
+    expect(milkLineMissing({ ...latte, defaultMilkId: undefined, allowedMilkIds: [], ingredientLines: [] }, seed.ingredients)).toBe(false);
+  });
+
+  it("a line pointing at an ingredient that is not marked as milk does not count", () => {
+    const ingredients = seed.ingredients.map((i) => (i.id === "ing_milk_whole" ? { ...i, pool: null } : i));
+    const onlyWhole: MenuItem = {
+      ...latte,
+      defaultMilkId: "ing_milk_oat",
+      allowedMilkIds: ["ing_milk_oat"],
+      ingredientLines: latte.ingredientLines.filter((l) => l.ingredientId === "ing_milk_whole"),
+    };
+    expect(onlyWhole.ingredientLines.length).toBe(1);
+    expect(milkLineMissing(onlyWhole, ingredients)).toBe(true);
   });
 });

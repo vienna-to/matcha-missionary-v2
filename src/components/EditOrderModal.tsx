@@ -36,7 +36,7 @@ import CustomItemModal, { CustomBuilder } from "@/components/CustomItemModal";
 import { menuForOrderEdit } from "@/lib/edit-menu";
 import { comboUnitPrice, customItemName, findMenuItem, isValidCustomSpec } from "@/lib/custom-item";
 import { customItemId, isCustomItemId, parseCustomItemId, type CustomSpec } from "@/lib/custom-id";
-import { hasDrinkAdjustments } from "@/lib/order-labels";
+import { hasDrinkAdjustments, resolveCreamName } from "@/lib/order-labels";
 import { cn, formatMoney } from "@/lib/utils";
 
 type DraftItem = {
@@ -112,7 +112,7 @@ export default function EditOrderModal({
   // Live total — accounts for combos (fixed bundle price) and per-item
   // discount. Recomputes on every keystroke in the DiscountRow / qty stepper.
   // An existing line keeps the price it was sold at while it is still the same product with the same
-  // milk / cream (the rule REPLACE_ORDER_ITEMS applies when saving). Change the product, for example a
+  // milk (the rule REPLACE_ORDER_ITEMS applies when saving). Change the product, for example a
   // custom drink's bases or toppings, and it is priced at the menu like a new line.
   const stampedPrice = (it: DraftItem): number | undefined => {
     const prev = order.items.find((o) => o.id === it.id);
@@ -121,8 +121,7 @@ export default function EditOrderModal({
       prev.menuItemId === it.menuItemId &&
       Boolean(prev.isCombo) === Boolean(it.isCombo) &&
       prev.comboPastryId === it.comboPastryId &&
-      prev.milkChoiceId === it.milkChoiceId &&
-      prev.creamChoiceId === it.creamChoiceId;
+      prev.milkChoiceId === it.milkChoiceId;
     return same ? prev.priceSnap : undefined;
   };
   const { total, totalGross } = items.reduce(
@@ -430,14 +429,11 @@ function DraftItemRow({
     if (ing) summary.push(ing.name);
   }
   if (!drinkOptions) {
-    // pastry: no cream / sugar / ice in the summary
-  } else if (item.creamChoiceId === "none") summary.push("no cream");
-  else {
-    const cream = item.creamChoiceId ?? mi.defaultCreamId;
-    if (cream) {
-      const ing = snapshot.ingredients.find((i) => i.id === cream);
-      if (ing) summary.push(ing.name);
-    }
+    // pastry: no sugar / ice in the summary
+  } else {
+    // Legacy: an order placed when cream was a choice still shows what it recorded.
+    const cream = resolveCreamName(item.creamChoiceId, snapshot.ingredients);
+    if (cream) summary.push(cream);
   }
   if (drinkOptions && item.sugarAdjustment && item.sugarAdjustment !== "normal") summary.push(item.sugarAdjustment);
   if (drinkOptions && item.iceAdjustment && item.iceAdjustment !== "normal") summary.push(`${item.iceAdjustment} ice`);

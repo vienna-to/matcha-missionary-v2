@@ -26,7 +26,7 @@ import {
   hasDrinkAdjustments,
   itemDrinkName,
   orderCardIssue,
-  resolveCreamName,
+  legacyCreamName,
   resolveMilkName,
 } from "@/lib/order-labels";
 import type {
@@ -691,7 +691,7 @@ function ItemModifiers({
   const ingredients: Ingredient[] = snapshot.ingredients;
 
   const mods: string[] = [];
-  // Pastries show only their special request: no milk / cream / sugar / ice.
+  // Pastries show only their special request: no milk / sugar / ice.
   const drinkOptions = hasDrinkAdjustments(drink);
 
   // Always show the milk — fall back to the menu item's default if the
@@ -702,8 +702,8 @@ function ItemModifiers({
     item.milkNameSnap ?? resolveMilkName(item.milkChoiceId, drink, ingredients);
   if (drinkOptions && milkName) mods.push(milkName);
 
-  const creamName =
-    item.creamNameSnap ?? resolveCreamName(item.creamChoiceId, drink, ingredients);
+  // Legacy: orders placed when cream was a choice keep showing what was recorded.
+  const creamName = legacyCreamName(item, ingredients);
   if (drinkOptions && creamName) mods.push(creamName);
 
   if (drinkOptions && item.sugarAdjustment && item.sugarAdjustment !== "normal") {

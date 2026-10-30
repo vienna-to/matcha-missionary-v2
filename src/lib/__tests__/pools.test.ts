@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultItemCost } from "@/lib/calc";
-import { looksLikeCream, looksLikeMilk, poolChangePatches, suggestPools } from "@/lib/pools";
+import { looksLikeMilk, poolChangePatches, suggestPools } from "@/lib/pools";
 import { reducer } from "@/lib/reducer";
 import { initialSeed } from "@/lib/seed";
 import type { AppState, Ingredient, MenuItem } from "@/lib/types";
@@ -21,11 +21,11 @@ function handMade(): AppState {
       pool: i.id in names ? null : i.pool,
     })),
     // their drinks have no milk / cream choices set up (the boxes could not be ticked)
-    menuItems: s.menuItems.map((m) => ({ ...m, defaultMilkId: undefined, defaultCreamId: undefined, allowedMilkIds: [], allowedCreamIds: [] })),
+    menuItems: s.menuItems.map((m) => ({ ...m, defaultMilkId: undefined, allowedMilkIds: [] })),
   };
 }
 
-const apply = (s: AppState, ing: Ingredient, to: "milk" | "cream" | null): AppState => {
+const apply = (s: AppState, ing: Ingredient, to: "milk" | null): AppState => {
   const patches = poolChangePatches(s.menuItems, ing, to);
   let t = reducer(s, { type: "UPDATE_INGREDIENT", id: ing.id, patch: { pool: to } });
   for (const p of patches) t = reducer(t, { type: "UPDATE_MENU_ITEM", id: p.id, patch: p.patch });
@@ -33,26 +33,25 @@ const apply = (s: AppState, ing: Ingredient, to: "milk" | "cream" | null): AppSt
 };
 
 describe("name suggestions", () => {
-  it("milk and cream by name, but not things that merely contain the word", () => {
+  it("milk by name, but not things that merely contain the word", () => {
     for (const n of ["whole milk", "Lactose-free milk", "Oat Milk", "Coconut milk"]) expect(looksLikeMilk(n), n).toBe(true);
     for (const n of ["Milk tea powder", "Condensed milk", "Milk chocolate", "Matcha powder", "Ice"]) expect(looksLikeMilk(n), n).toBe(false);
-    for (const n of ["heavy cream", "Ube cream", "Half and half", "Coffee creamer"]) expect(looksLikeCream(n), n).toBe(true);
-    for (const n of ["Ice cream", "Cream cheese", "Sour cream", "Cheesecake base", "Whole milk"]) expect(looksLikeCream(n) && !looksLikeMilk(n) ? n : "", n).toBe("");
   });
 
   it("suggests only raw ingredients that have no pool yet", () => {
     const s = handMade();
-    const { milk, cream } = suggestPools(s.ingredients);
+    const { milk } = suggestPools(s.ingredients);
     expect(milk.map((i) => i.name).sort()).toEqual(["Lactose-free milk", "whole milk"]);
-    expect(cream.map((i) => i.name)).toContain("heavy cream");
-    // already pooled seed ingredients (Oat milk, Ube cream...) are not suggested again
+    // cream is never suggested: it is a recipe ingredient, not a choice
+    expect(suggestPools(s.ingredients)).not.toHaveProperty("cream");
+    // already pooled seed ingredients (Oat milk...) are not suggested again
     expect(milk.some((i) => i.name === "Oat milk")).toBe(false);
     const prepared: Ingredient = { ...s.ingredients[0], id: "p", name: "House milk", pool: null, kind: "prepared", subRecipe: [] };
     expect(suggestPools([prepared]).milk).toEqual([]);
   });
 });
 
-describe("the user's case: hand-made milk and cream have no pool", () => {
+describe("the user's case: hand-made milks have no pool", () => {
   it("nothing is offered for 'Uses milk?' until they are designated, then they are", () => {
     const s = handMade();
     expect(s.ingredients.filter((i) => i.pool === "milk").map((i) => i.name)).toEqual(["Oat milk", "Almond milk"]);
@@ -108,17 +107,15 @@ describe("designating an ingredient never changes what an item costs", () => {
     for (const p of patches) expect(users.some((u) => u.id === p.id)).toBe(true);
   });
 
-  it("the same for cream", () => {
-    const s = handMade();
-    const cream = s.ingredients.find((i) => i.name === "heavy cream")!;
-    const users = s.menuItems.filter((m) => m.ingredientLines.some((l) => l.ingredientId === cream.id));
-    const before = new Map(users.map((m) => [m.id, defaultItemCost(m, s.ingredients)]));
-    const t = apply(s, cream, "cream");
-    for (const u of users) {
-      const after = t.menuItems.find((m) => m.id === u.id)!;
-      expect(after.defaultCreamId).toBe(cream.id);
-      expect(defaultItemCost(after, t.ingredients)).toBeCloseTo(before.get(u.id)!, 10);
-    }
+  it("cream lines cost the cream they name, whatever the item's retired cream fields say", () => {
+    const s = initialSeed();
+    const ube = s.menuItems.find((m) => m.id === "mi_ube")!;
+    const plain = defaultItemCost(ube, s.ingredients);
+    // retired fields left behind on old items, pointing somewhere else, or nowhere
+    const odd = { ...ube, defaultCreamId: "ing_cream_banana", allowedCreamIds: ["ing_cream_banana"] };
+    expect(defaultItemCost(odd, s.ingredients)).toBeCloseTo(plain, 10);
+    expect(defaultItemCost({ ...ube, defaultCreamId: undefined, allowedCreamIds: [] }, s.ingredients)).toBeCloseTo(plain, 10);
+    expect(plain).toBeGreaterThan(0);
   });
 });
 

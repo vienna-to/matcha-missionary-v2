@@ -18,7 +18,6 @@ import {
 import { comboUnitPrice, findMenuItem } from "@/lib/custom-item";
 import {
   hasDrinkAdjustments,
-  resolveCreamName,
   resolveMilkChoices,
   resolveMilkName,
 } from "@/lib/order-labels";
@@ -300,8 +299,6 @@ function lineMods(line: CartLine, item: MenuItem, snapshot: MenuSnapshot): strin
   if (hasDrinkAdjustments(item)) {
     const milk = resolveMilkName(line.milkChoiceId, item, snapshot.ingredients);
     if (milk) mods.push(milk);
-    const cream = resolveCreamName(line.creamChoiceId, item, snapshot.ingredients);
-    if (cream) mods.push(cream);
   }
   if (hasDrinkAdjustments(item) && line.sugarAdjustment && line.sugarAdjustment !== "normal") {
     mods.push(

@@ -134,7 +134,6 @@ describe("combo suggestion", () => {
     const custom = drink({
       quantity: 2,
       milkChoiceId: "oat",
-      creamChoiceId: "none",
       sugarAdjustment: "less",
       iceAdjustment: "extra",
       specialRequests: "extra hot",
@@ -148,7 +147,6 @@ describe("combo suggestion", () => {
       menuItemId: LATTE.id,
       quantity: 2,
       milkChoiceId: "oat",
-      creamChoiceId: "none",
       sugarAdjustment: "less",
       iceAdjustment: "extra",
       specialRequests: "extra hot",

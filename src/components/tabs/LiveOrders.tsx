@@ -431,7 +431,7 @@ function ComboPickerModal({
       <div className="space-y-3">
         <p className="t-caption text-xs text-matcha-900/60">
           pick a drink and a pastry. the bundle is fixed at {formatMoney(COMBO_PRICE)}.
-          customize the drink&apos;s milk / cream in the adjustments step.
+          customize the drink&apos;s milk in the adjustments step.
         </p>
         <Field label="drink">
           <Select value={drinkId} onChange={(e) => setDrinkId(e.target.value)}>

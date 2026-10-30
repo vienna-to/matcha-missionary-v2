@@ -16,7 +16,7 @@ export function copyName(name: string, existingNames: string[]): string {
 
 /**
  * An independent copy of a menu item for a similar drink: every recipe line and amount, price, size,
- * category, description, tax flag and the milk / cream choices, under a distinct name. Nothing is shared
+ * category, description, tax flag and the milk choices, under a distinct name. Nothing is shared
  * with the original (lines and id lists are new objects), so editing one never changes the other, and
  * it costs exactly like the original until it is edited. The store gives it its own id and puts it at the
  * end of the menu. The copy is always active, even when the original is archived: it is a new drink.
@@ -31,9 +31,8 @@ export function duplicateMenuItem(item: MenuItem, existingNames: string[]): NewM
     description: item.description,
     ingredientLines: item.ingredientLines.map((l) => ({ ...l })),
     defaultMilkId: item.defaultMilkId,
-    defaultCreamId: item.defaultCreamId,
     allowedMilkIds: [...item.allowedMilkIds],
-    allowedCreamIds: [...item.allowedCreamIds],
+    allowedCreamIds: [],
     taxable: item.taxable,
   };
 }

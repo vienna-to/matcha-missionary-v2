@@ -18,11 +18,27 @@ test("Duplicate writes an identical, independent menu_items row", async ({ page 
   const original = row(ws, name);
   expect(original.ingredient_lines.length).toBeGreaterThan(0);
 
+  const rowCount = () => sql(`select count(*)::int n from public.menu_items where workspace_id='${ws}'`)[0].n as number;
+  const before = rowCount();
+
+  // Duplicate + Cancel: nothing is written, not even briefly
   await goTab(page, "Menu Manager");
   await page.getByRole("button", { name: `Duplicate ${name}`, exact: true }).click();
-  const dlg = modal(page, /Edit menu item/);
-  await dlg.getByRole("button", { name: "Cancel" }).click(); // keep the copy unchanged
+  let dlg = modal(page, /Duplicate menu item/);
+  await expect(dlg).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(rowCount()).toBe(before); // an open draft is not in the database
+  await dlg.getByRole("button", { name: "Cancel" }).click();
+  await page.waitForTimeout(1500);
+  expect(rowCount()).toBe(before);
+  expect(row(ws, `${name} (copy)`)).toBeUndefined();
+
+  // Duplicate + Save: the copy is written
+  await page.getByRole("button", { name: `Duplicate ${name}`, exact: true }).click();
+  dlg = modal(page, /Duplicate menu item/);
+  await dlg.getByRole("button", { name: "Save" }).click(); // keep the copy unchanged
   await expect.poll(() => row(ws, `${name} (copy)`)?.id).toBeTruthy();
+  expect(rowCount()).toBe(before + 1);
 
   const copy = row(ws, `${name} (copy)`);
   expect(copy.id).not.toBe(original.id);

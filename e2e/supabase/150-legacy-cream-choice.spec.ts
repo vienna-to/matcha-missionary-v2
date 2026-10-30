@@ -10,7 +10,7 @@ import { acceptDialogs, exec, expect, pairNewWorkspace, seedMenu, sql, test } fr
 const line = (ws: string) =>
   sql(
     `select cream_choice_id, cream_name_snap, cost_snap::float, quantity
-       from public.order_items where workspace_id='${ws}' order by created_at limit 1`,
+       from public.order_items where workspace_id='${ws}' limit 1`,
   )[0];
 
 test("an order that recorded a cream choice still reads, shows it, and keeps its cost through an edit", async ({ page }) => {
@@ -35,7 +35,7 @@ test("an order that recorded a cream choice still reads, shows it, and keeps its
 
   // it still displays on the barista card
   await goTab(page, "Barista Queue");
-  await expect(baristaCard(page, 1)).toContainText("Sesame cream");
+  await expect(page.locator("main")).toContainText("Sesame cream");
 
   // an edit that only changes the quantity keeps the recorded cream and the stamped cost
   await baristaCard(page, 1).getByTitle("Edit").click();

@@ -569,3 +569,9 @@ When "Uses milk?" is on (a default milk or allowed milks) and no recipe line poi
 
 ### Gates
 (see the next section, filled in when the full runs finish)
+
+**Gates (final code, run sequentially, Supabase stopped for the first group):**
+- Typecheck, `next lint`, `next build`: clean. Unit suite: 312 passed (25 files).
+- **Full local Playwright, clean rebuild, single worker:** 81 of 82 passed. The one failure, `two devices submitting at the same moment`, is the multi-tab spec that times out under memory pressure (30 s limit; it ran 18 to 24 s against its usual ~10 s with the owner's Chrome still open). Rerun alone it passed 3 of 3, nothing changed, so a starvation timeout, not a code failure. An earlier full run on a previous state had found one REAL failure: removing the demo orders' recorded cream choices shifted the demo event totals (`All events view includes the contract payout as revenue`); fixed by keeping those recorded choices and their original stamped costs in the seed (that spec then passed).
+- **Supabase-mode, local database, in three batches (15 + 7 + 14):** 36 of 36 passed (`150-legacy-cream-choice` needed two fixes to its own test code first: a nonexistent `created_at` in its SQL and a locator that matched only the card header; the app behaved correctly). Local Supabase and Docker Desktop stopped afterwards.
+- Not run: nothing outstanding. Production Supabase and the production deployment were never touched; no migration.

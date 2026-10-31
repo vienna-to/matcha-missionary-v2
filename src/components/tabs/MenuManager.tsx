@@ -36,7 +36,7 @@ import {
 } from "@/components/ui";
 import { useStore } from "@/lib/store";
 import { duplicateMenuItem } from "@/lib/menu-duplicate";
-import { poolChangePatches, suggestPools } from "@/lib/pools";
+import { milkLineMissing, poolChangePatches, suggestPools } from "@/lib/pools";
 import {
   SIZES,
   SIZE_LABELS,
@@ -260,9 +260,8 @@ function ItemsList() {
                 description: patch.description,
                 ingredientLines: patch.ingredientLines ?? [],
                 defaultMilkId: patch.defaultMilkId,
-                defaultCreamId: patch.defaultCreamId,
                 allowedMilkIds: patch.allowedMilkIds ?? [],
-                allowedCreamIds: patch.allowedCreamIds ?? [],
+                allowedCreamIds: [],
                 // As given: a new blank item starts non-taxable, a copy keeps whatever its original has (even unset).
                 taxable: patch.taxable,
               },
@@ -424,7 +423,6 @@ function blankItem(): MenuItem {
     description: "",
     ingredientLines: [],
     defaultMilkId: undefined,
-    defaultCreamId: undefined,
     allowedMilkIds: [],
     allowedCreamIds: [],
     taxable: false,
@@ -449,7 +447,6 @@ function ItemEditor({
 }) {
   const [draft, setDraft] = useState<MenuItem>(item);
   const milks = ingredients.filter((i) => i.pool === "milk");
-  const creams = ingredients.filter((i) => i.pool === "cream");
   const nonPool = ingredients.filter((i) => !i.pool);
 
   function patch<K extends keyof MenuItem>(key: K, value: MenuItem[K]) {
@@ -554,11 +551,11 @@ function ItemEditor({
         </div>
 
         <div className="rounded-xl border border-cream-200 p-3">
-          <h4 className="text-sm font-semibold">Milk & cream</h4>
+          <h4 className="text-sm font-semibold">Milk</h4>
           <div className="mt-2 grid grid-cols-2 gap-3">
             <Field
               label="Uses milk?"
-              hint={milks.length === 0 ? "No ingredient is marked as milk yet. In Ingredients, set Milk or cream to Milk on your milks." : undefined}
+              hint={milks.length === 0 ? "No ingredient is marked as milk yet. In Ingredients, set Milk to Yes on your milks." : undefined}
             >
               <label className="flex h-10 items-center gap-2 text-sm">
                 <input
@@ -594,6 +591,16 @@ function ItemEditor({
               </Select>
             </Field>
           </div>
+          {milkLineMissing(draft, ingredients) ? (
+            <p
+              role="alert"
+              data-testid="milk-line-warning"
+              className="t-caption mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900"
+            >
+              This drink offers milk, but no recipe line is a milk ingredient, so it costs $0 for milk. Add a milk line to the recipe
+              (an ingredient marked as milk, with the amount a cup uses) and its cost will follow the milk chosen.
+            </p>
+          ) : null}
           {draft.allowedMilkIds.length > 0 ? (
             <div className="mt-3">
               <div className="mb-1 text-xs font-medium text-matcha-900/70">Allowed milks</div>
@@ -621,71 +628,6 @@ function ItemEditor({
             </div>
           ) : null}
 
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <Field
-              label="Uses cream?"
-              hint={creams.length === 0 ? "No ingredient is marked as cream yet. In Ingredients, set Milk or cream to Cream on your creams." : undefined}
-            >
-              <label className="flex h-10 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={Boolean(draft.defaultCreamId) || draft.allowedCreamIds.length > 0}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      const first = creams[0];
-                      if (first) {
-                        patch("defaultCreamId", first.id);
-                        patch("allowedCreamIds", creams.map((m) => m.id));
-                      }
-                    } else {
-                      patch("defaultCreamId", undefined);
-                      patch("allowedCreamIds", []);
-                    }
-                  }}
-                  className="h-4 w-4 accent-matcha-500"
-                />
-                Yes
-              </label>
-            </Field>
-            <Field label="Default cream">
-              <Select
-                value={draft.defaultCreamId ?? ""}
-                disabled={!draft.allowedCreamIds.length}
-                onChange={(e) => patch("defaultCreamId", e.target.value || undefined)}
-              >
-                <option value="">—</option>
-                {creams.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          {draft.allowedCreamIds.length > 0 ? (
-            <div className="mt-3">
-              <div className="mb-1 text-xs font-medium text-matcha-900/70">Allowed creams</div>
-              <div className="flex flex-wrap gap-1.5">
-                {creams.map((m) => {
-                  const on = draft.allowedCreamIds.includes(m.id);
-                  return (
-                    <Chip
-                      key={m.id}
-                      active={on}
-                      onClick={() =>
-                        patch(
-                          "allowedCreamIds",
-                          on
-                            ? draft.allowedCreamIds.filter((id) => id !== m.id)
-                            : [...draft.allowedCreamIds, m.id],
-                        )
-                      }
-                    >
-                      {m.name}
-                    </Chip>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <div className="grid grid-cols-3 gap-3 rounded-xl bg-cream-100 p-3">
@@ -741,7 +683,7 @@ function LineRow({
       >
         {ingredients.map((i) => (
           <option key={i.id} value={i.id}>
-            {i.pool ? `${i.name} (${i.pool}, swapped for the order choice)` : i.name}
+            {i.pool === "milk" ? `${i.name} (milk, swapped for the order choice)` : i.name}
           </option>
         ))}
       </Select>
@@ -850,8 +792,8 @@ function IngredientsList() {
   );
   const dragEnabled = sortMode === "manual";
 
-  /** Mark an ingredient as milk, cream or neither, with the menu item changes that keep costs the same. */
-  function setPool(ing: Ingredient, pool: "milk" | "cream" | null) {
+  /** Mark an ingredient as milk or not, with the menu item changes that keep costs the same. */
+  function setPool(ing: Ingredient, pool: "milk" | null) {
     const patches = poolChangePatches(state.menuItems, ing, pool);
     dispatch({ type: "UPDATE_INGREDIENT", id: ing.id, patch: { pool } });
     for (const p of patches) dispatch({ type: "UPDATE_MENU_ITEM", id: p.id, patch: p.patch });
@@ -934,7 +876,7 @@ function IngredientsList() {
           Drag-to-reorder is available in Manual mode.
         </p>
       ) : null}
-      {(["milk", "cream"] as const).map((kind) =>
+      {(["milk"] as const).map((kind) =>
         suggestions[kind].length > 0 ? (
           <div
             key={kind}
@@ -967,8 +909,8 @@ function IngredientsList() {
                   <th className="py-2 pr-3">Package amount</th>
                   <th className="py-2 pr-3">Unit</th>
                   <th className="py-2 pr-3 text-right">$/unit</th>
-                  <th className="py-2 pr-3" title="Milks and creams are chosen per drink: mark them here">
-                    Milk or cream
+                  <th className="py-2 pr-3" title="Milks are chosen per drink: mark them here">
+                    Milk
                   </th>
                   <th className="py-2 pr-3" title="How the custom drink builder uses this ingredient">
                     Custom drink
@@ -1064,7 +1006,7 @@ function IngredientRow({
   usedBy: Ingredient[];
   onEditRecipe: () => void;
   onChange: (patch: Partial<Ingredient>) => void;
-  onPoolChange: (pool: "milk" | "cream" | null) => void;
+  onPoolChange: (pool: "milk" | null) => void;
   onDelete: () => void;
 }) {
   const prepared = ing.kind === "prepared";
@@ -1152,13 +1094,15 @@ function IngredientRow({
         ) : (
           <Select
             className="h-8"
-            aria-label={`Milk or cream for ${ing.name}`}
+            aria-label={`Milk for ${ing.name}`}
             value={ing.pool ?? ""}
-            onChange={(e) => onPoolChange((e.target.value || null) as "milk" | "cream" | null)}
+            onChange={(e) => onPoolChange((e.target.value || null) as "milk" | null)}
           >
             <option value="">-</option>
             <option value="milk">Milk</option>
-            <option value="cream">Cream</option>
+            {/* Cream is no longer something to choose; an ingredient already marked as cream keeps it
+                (the custom drink builder still reads it) until it is set to something else. */}
+            {ing.pool === "cream" ? <option value="cream" disabled>Cream (legacy)</option> : null}
           </Select>
         )}
       </td>
@@ -1246,7 +1190,7 @@ function NewIngredientForm({
   const [packageAmount, setPackageAmount] = useState(0);
   const [unit, setUnit] = useState<Unit>("g");
   const [role, setRole] = useState<CustomRole | "">("");
-  const [pool, setPool] = useState<"" | "milk" | "cream">("");
+  const [pool, setPool] = useState<"" | "milk">("");
   const [prepared, setPrepared] = useState(false);
   return (
     <div className="space-y-3">
@@ -1291,11 +1235,10 @@ function NewIngredientForm({
         </Field>
       </div>
       {prepared ? null : (
-        <Field label="Milk or cream" hint="Mark milks and creams so menu items can offer them as a choice.">
-          <Select value={pool} onChange={(e) => setPool(e.target.value as "" | "milk" | "cream")}>
-            <option value="">Neither</option>
+        <Field label="Milk" hint="Mark milks so menu items can offer them as a choice. Creams are just recipe ingredients.">
+          <Select value={pool} onChange={(e) => setPool(e.target.value as "" | "milk")}>
+            <option value="">Not a milk</option>
             <option value="milk">Milk</option>
-            <option value="cream">Cream</option>
           </Select>
         </Field>
       )}

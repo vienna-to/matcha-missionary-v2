@@ -25,7 +25,7 @@ async function itemsTab(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Items", exact: true }).click();
 }
 
-test("hand-made milk and cream: designate them, then Uses milk? / Uses cream? work and persist", async ({ page }) => {
+test("hand-made milks: designate them, then Uses milk? works and persists; cream is only a recipe ingredient", async ({ page }) => {
   acceptDialogs(page);
   const { workspaceId: ws } = await pairNewWorkspace(page);
   await seedMenu(page, ws);
@@ -53,12 +53,11 @@ test("hand-made milk and cream: designate them, then Uses milk? / Uses cream? wo
   const milkBanner = page.getByTestId("suggest-milk");
   await expect(milkBanner).toContainText("Lactose-free milk");
   await milkBanner.getByRole("button", { name: "Mark as milk" }).click();
-  const creamBanner = page.getByTestId("suggest-cream");
-  await expect(creamBanner).toContainText("Heavy cream");
-  await creamBanner.getByRole("button", { name: "Mark as cream" }).click();
+  // cream is not offered for designation: no banner, no selector value
+  await expect(page.getByTestId("suggest-cream")).toHaveCount(0);
   await expect.poll(() => ing(ws, "Lactose-free milk").pool).toBe("milk");
   await expect.poll(() => ing(ws, "Whole milk").pool).toBe("milk");
-  await expect.poll(() => ing(ws, "Heavy cream").pool).toBe("cream");
+  expect(ing(ws, "Heavy cream").pool).toBeNull();
 
   // a recipe that already used Whole milk keeps costing the same: it became that item's default milk
   await expect.poll(() => menu(ws, "Classic Matcha").default_milk_id).toBe(ing(ws, "Whole milk").id);
@@ -72,14 +71,14 @@ test("hand-made milk and cream: designate them, then Uses milk? / Uses cream? wo
     expect.arrayContaining(["Whole milk", "Lactose-free milk"]),
   );
   await select(dlg, "Default milk").selectOption({ label: "Lactose-free milk" });
-  await box(dlg, "Uses cream?").click();
-  await expect(box(dlg, "Uses cream?")).toBeChecked();
-  await select(dlg, "Default cream").selectOption({ label: "Heavy cream" });
+  // the pastry has no milk line, so the editor warns that milk would cost $0 (the milk-line warning)
+  await expect(dlg.getByTestId("milk-line-warning")).toBeVisible();
+  for (const t of ["Uses cream?", "Default cream"]) await expect(dlg.getByText(t)).toHaveCount(0);
   await dlg.getByRole("button", { name: "Save" }).click();
   await expect(dlg).toBeHidden();
 
   await expect.poll(() => menu(ws, "Matcha Cheesecake").default_milk_id).toBe(ing(ws, "Lactose-free milk").id);
-  expect(menu(ws, "Matcha Cheesecake").default_cream_id).toBe(ing(ws, "Heavy cream").id);
+  expect(menu(ws, "Matcha Cheesecake").default_cream_id).toBeNull();
   expect(menu(ws, "Matcha Cheesecake").allowed_milk_ids).toContain(ing(ws, "Whole milk").id);
 
   await page.reload();
@@ -87,6 +86,4 @@ test("hand-made milk and cream: designate them, then Uses milk? / Uses cream? wo
   dlg = await openMenuEditor(page, "Matcha Cheesecake");
   await expect(box(dlg, "Uses milk?")).toBeChecked();
   await expect(select(dlg, "Default milk")).toHaveValue(ing(ws, "Lactose-free milk").id);
-  await expect(box(dlg, "Uses cream?")).toBeChecked();
-  await expect(select(dlg, "Default cream")).toHaveValue(ing(ws, "Heavy cream").id);
 });

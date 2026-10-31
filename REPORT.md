@@ -550,3 +550,28 @@ Branch `fix/milk-cream-pool-oct29`, final code (HEAD `3747b45`). Sequenced for a
 - **Supabase-mode suite against local Supabase, in four small batches:** 13 + 7 + 10 + 5 = **35 passed**, which is every test in the suite (35 tests in 14 files, confirmed with `--list`); local Supabase stopped afterwards.
 - **The earlier failures were starvation, not real:** free memory had dropped to about 80 MB with Windows memory compression at 2.8 GB; the same specs pass cleanly now with nothing else changed. (Even now the owner's own Chrome, about 80 processes, was still holding the memory, so tests are slower than at the start of the week; they pass regardless.)
 - Production Supabase and the production deployment were never touched; no migration.
+
+
+## Remove the cream choice, and the milk-line warning (branch `fix/remove-cream-milk-warning`, off main; not pushed)
+
+Two items, each its own commit. **No migration** (no column is dropped or added). Production Supabase was never touched.
+
+### Item 1: the cream choice is removed (cream is a plain recipe ingredient)
+- **Removed:** "Uses cream?" / default cream / allowed creams in the menu item editor; the cream chips and "No cream" in Edit Order; the cream field and label in the order flow; the cream swap in cost calculation; the cream option in the ingredient selector, the new-ingredient form and the name-suggestion banner (now "Milk" only).
+- **Cost:** a recipe line that points at a cream ingredient costs exactly the cream it names. Previously such a line was *swapped* for the item's default cream, and with no default it cost $0. For the seed drinks the default was the recipe's own cream, so nothing moves there. A user drink with a cream line and no default cream used to undercount, and now counts the cream, so its Menu Manager margin will drop; stamped order costs do not change.
+- **Does the `cream` designation have any remaining use? Yes, so it was kept, not removed.** The custom drink builder reads `pool === "cream"` to treat an ingredient with no custom role as a topping, to borrow a topping's usual amount from another cream line, and to keep it out of packaging. Topping logic is mostly the base/topping role, but not only. The stored value stays; no screen sets it any more, and an ingredient already marked as cream shows "Cream (legacy)" in the selector.
+- **Historical data:** order lines keep `creamChoiceId`, `creamNameSnap` and their stamped `costSnap`; they still read, still show on the barista card and in the Edit Order summary, and survive an edit that leaves the line alone (REPLACE_ORDER_ITEMS carries the recorded cream over and the "same line" test no longer includes cream). New lines never record one. Menu item `default_cream_id` / `allowed_cream_ids` and the order-item columns are left as data and no longer written or offered (new and duplicated items write none). The demo seed keeps its two recorded choices and original stamped costs, so the demo event's totals are unchanged ($757.10 revenue / $586.49 pinned by a spec).
+- **Milk is unchanged.**
+- **Tests:** `cream-retired.test.ts` (new), `pools.test.ts`, `barista-card.test.ts`, updated `100-menu-milk-cream.spec.ts` (no cream controls in the editor, Adjust step or Edit Order; new order records none), Supabase `150-legacy-cream-choice.spec.ts` (an order with a recorded cream choice still reads, shows, and keeps cream and cost through a quantity edit), `120` and `140` updated.
+
+### Item 2: warning when milk is offered but no recipe line is milk
+When "Uses milk?" is on (a default milk or allowed milks) and no recipe line points at a milk-marked ingredient, the editor shows "costs $0 for milk" (`data-testid="milk-line-warning"`). Detection is `milkLineMissing(item, ingredients)` in `src/lib/pools.ts`; it clears when a milk line is added or milk is switched off. Unit tests (the reported case, allowed-only, not-offered, an unmarked ingredient does not count), local e2e, and a check in the Supabase-mode `140` spec.
+
+### Gates
+(see the next section, filled in when the full runs finish)
+
+**Gates (final code, run sequentially, Supabase stopped for the first group):**
+- Typecheck, `next lint`, `next build`: clean. Unit suite: 312 passed (25 files).
+- **Full local Playwright, clean rebuild, single worker:** 81 of 82 passed. The one failure, `two devices submitting at the same moment`, is the multi-tab spec that times out under memory pressure (30 s limit; it ran 18 to 24 s against its usual ~10 s with the owner's Chrome still open). Rerun alone it passed 3 of 3, nothing changed, so a starvation timeout, not a code failure. An earlier full run on a previous state had found one REAL failure: removing the demo orders' recorded cream choices shifted the demo event totals (`All events view includes the contract payout as revenue`); fixed by keeping those recorded choices and their original stamped costs in the seed (that spec then passed).
+- **Supabase-mode, local database, in three batches (15 + 7 + 14):** 36 of 36 passed (`150-legacy-cream-choice` needed two fixes to its own test code first: a nonexistent `created_at` in its SQL and a locator that matched only the card header; the app behaved correctly). Local Supabase and Docker Desktop stopped afterwards.
+- Not run: nothing outstanding. Production Supabase and the production deployment were never touched; no migration.

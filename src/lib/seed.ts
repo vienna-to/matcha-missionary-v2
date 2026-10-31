@@ -1,4 +1,4 @@
-import { computeItemCost } from "./calc";
+import { computeItemCost, lineCost } from "./calc";
 import type {
   AppState,
   Event,
@@ -42,7 +42,6 @@ const ingredients: Ingredient[] = [
 ];
 
 const ALL_MILKS = ["ing_milk_whole", "ing_milk_oat", "ing_milk_lactose", "ing_milk_almond"];
-const ALL_CREAMS = ["ing_cream_ube", "ing_cream_sesame", "ing_cream_banana", "ing_cream_strawberry", "ing_cream_plain"];
 
 const menuItems: MenuItem[] = [
   {
@@ -112,9 +111,8 @@ const menuItems: MenuItem[] = [
       { ingredientId: "ing_straw", amount: 1, unit: "piece" },
     ],
     defaultMilkId: "ing_milk_whole",
-    defaultCreamId: "ing_cream_ube",
     allowedMilkIds: ALL_MILKS,
-    allowedCreamIds: ALL_CREAMS,
+    allowedCreamIds: [],
     createdAt: T0, updatedAt: T0,
   },
   {
@@ -148,9 +146,8 @@ const menuItems: MenuItem[] = [
       { ingredientId: "ing_straw", amount: 1, unit: "piece" },
     ],
     defaultMilkId: "ing_milk_whole",
-    defaultCreamId: "ing_cream_sesame",
     allowedMilkIds: ALL_MILKS,
-    allowedCreamIds: ALL_CREAMS,
+    allowedCreamIds: [],
     createdAt: T0, updatedAt: T0,
   },
   {
@@ -167,9 +164,8 @@ const menuItems: MenuItem[] = [
       { ingredientId: "ing_straw", amount: 1, unit: "piece" },
     ],
     defaultMilkId: "ing_milk_whole",
-    defaultCreamId: "ing_cream_banana",
     allowedMilkIds: ALL_MILKS,
-    allowedCreamIds: ALL_CREAMS,
+    allowedCreamIds: [],
     createdAt: T0, updatedAt: T0,
   },
   {
@@ -250,6 +246,7 @@ type OrderSpec = {
     menuItemId: string;
     quantity: number;
     milkChoiceId?: string;
+    /** Demo history: an order placed back when cream was a choice (retired). Kept so the stamped cost and name do not change. */
     creamChoiceId?: string;
     sugarAdjustment?: "less" | "normal" | "extra" | "no_agave";
     iceAdjustment?: "light" | "normal" | "extra";
@@ -294,7 +291,15 @@ function buildOrder(spec: OrderSpec): Order {
   const status = spec.status ?? "completed";
   const items: OrderItem[] = spec.items.map((raw, idx) => {
     const mi = snapshot.menuItems.find((m) => m.id === raw.menuItemId);
-    const cost = mi ? computeItemCost(mi, snapshot.ingredients, { milkChoiceId: raw.milkChoiceId, creamChoiceId: raw.creamChoiceId }) : 0;
+    // A recorded (retired) cream choice swapped the recipe's cream line; stamp the cost it had then.
+    const creamSwap = (() => {
+      if (!mi || !raw.creamChoiceId) return 0;
+      const line = mi.ingredientLines.find((l) => snapshot.ingredients.find((i) => i.id === l.ingredientId)?.pool === "cream");
+      const own = line && snapshot.ingredients.find((i) => i.id === line.ingredientId);
+      const chosen = snapshot.ingredients.find((i) => i.id === raw.creamChoiceId);
+      return line && own && chosen ? lineCost(line, chosen, snapshot.ingredients) - lineCost(line, own, snapshot.ingredients) : 0;
+    })();
+    const cost = mi ? computeItemCost(mi, snapshot.ingredients, { milkChoiceId: raw.milkChoiceId }) + creamSwap : 0;
     return {
       id: `oi_${spec.num}_${idx}`,
       orderId: `ord_${spec.num}`,
@@ -307,6 +312,7 @@ function buildOrder(spec: OrderSpec): Order {
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,
       creamChoiceId: raw.creamChoiceId,
+      creamNameSnap: raw.creamChoiceId ? snapshot.ingredients.find((i) => i.id === raw.creamChoiceId)?.name : undefined,
       sugarAdjustment: raw.sugarAdjustment,
       iceAdjustment: raw.iceAdjustment,
       specialRequests: raw.specialRequests,

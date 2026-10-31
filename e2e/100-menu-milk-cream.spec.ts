@@ -1,8 +1,8 @@
 import type { Locator } from "@playwright/test";
-import { autoAcceptDialogs, expect, goTab, openApp, readState, test } from "./support";
-import { modal, openMenuEditor as openEditorOnCurrentTab } from "./extra";
+import { autoAcceptDialogs, createEvent, expect, goTab, openApp, placeOrder, readState, test } from "./support";
+import { baristaCard, modal, openMenuEditor as openEditorOnCurrentTab } from "./extra";
 
-/** The "Uses milk?" / "Uses cream?" checkboxes and their default / allowed choices in the menu item editor. */
+/** The "Uses milk?" checkbox and its default / allowed choices in the menu item editor (cream is no longer a choice). */
 const box = (dlg: Locator, label: string) =>
   dlg.locator("div.space-y-1\\.5", { hasText: label }).locator("input[type=checkbox]");
 const select = (dlg: Locator, label: string) =>
@@ -18,7 +18,7 @@ async function openMenuEditor(page: import("@playwright/test").Page, name: strin
 const item = async (page: import("@playwright/test").Page, name: string) =>
   (await readState(page)).menuItems.find((m: any) => m.name === name);
 
-test.describe("menu item editor: Uses milk? / Uses cream?", () => {
+test.describe("menu item editor: Uses milk?", () => {
   test("an existing drink: toggle off and on, choices follow, and it saves", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
@@ -47,7 +47,7 @@ test.describe("menu item editor: Uses milk? / Uses cream?", () => {
     expect(saved.allowedMilkIds).toEqual([]);
   });
 
-  test("a new item: both boxes can be ticked, a default is chosen, and it saves", async ({ page }) => {
+  test("a new item: the box can be ticked, a default is chosen, and it saves", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
     await goTab(page, "Menu Manager");
@@ -55,14 +55,10 @@ test.describe("menu item editor: Uses milk? / Uses cream?", () => {
     const dlg = modal(page, /New menu item/);
     await dlg.locator("input").first().fill("Fresh drink");
     await expect(box(dlg, "Uses milk?")).not.toBeChecked();
-    await expect(box(dlg, "Uses cream?")).not.toBeChecked();
 
     await box(dlg, "Uses milk?").click();
     await expect(box(dlg, "Uses milk?")).toBeChecked();
     await expect(select(dlg, "Default milk")).toBeEnabled();
-    await box(dlg, "Uses cream?").click();
-    await expect(box(dlg, "Uses cream?")).toBeChecked();
-    await expect(select(dlg, "Default cream")).toBeEnabled();
 
     // the default can be changed; the choice sticks
     const milkOptions = await select(dlg, "Default milk").locator("option").allTextContents();
@@ -73,8 +69,8 @@ test.describe("menu item editor: Uses milk? / Uses cream?", () => {
     const saved = await item(page, "Fresh drink");
     expect(saved.defaultMilkId).toBeTruthy();
     expect(saved.allowedMilkIds.length).toBeGreaterThan(0);
-    expect(saved.defaultCreamId).toBeTruthy();
-    expect(saved.allowedCreamIds.length).toBeGreaterThan(0);
+    expect(saved.defaultCreamId).toBeUndefined();
+    expect(saved.allowedCreamIds).toEqual([]);
 
     // survives a reload
     await page.reload();
@@ -82,7 +78,7 @@ test.describe("menu item editor: Uses milk? / Uses cream?", () => {
     expect(again.defaultMilkId).toBe(saved.defaultMilkId);
   });
 
-  test("a pastry (no milk / cream) can have them switched on", async ({ page }) => {
+  test("a pastry (no milk) can have it switched on", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
     const dlg = await openMenuEditor(page, "Matcha Cheesecake");
@@ -92,19 +88,19 @@ test.describe("menu item editor: Uses milk? / Uses cream?", () => {
   });
 });
 
-test.describe("milks and creams must be designated before menu items can offer them", () => {
+test.describe("milks must be designated before menu items can offer them", () => {
   async function openIngredients(page: import("@playwright/test").Page) {
     await goTab(page, "Menu Manager");
     await page.getByRole("button", { name: /Ingredients/ }).first().click();
   }
 
-  test("hand-made milk and cream (no pool): the boxes offer nothing; mark them (suggestion banner) and they work", async ({ page }) => {
+  test("hand-made milks (no pool): the box offers nothing; mark them (suggestion banner) and it works", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
     await openIngredients(page);
 
-    // the user's situation: ingredients exist but none is marked as milk or cream
-    const pools = page.getByLabel(/^Milk or cream for /);
+    // the user's situation: ingredients exist but none is marked as milk
+    const pools = page.getByLabel(/^Milk for /);
     const n = await pools.count();
     expect(n).toBeGreaterThan(5);
     for (let i = 0; i < n; i++) {
@@ -127,12 +123,10 @@ test.describe("milks and creams must be designated before menu items can offer t
     await expect(banner).toContainText("Whole milk");
     await banner.getByRole("button", { name: "Mark as milk" }).click();
     await expect(page.getByTestId("suggest-milk")).toHaveCount(0);
-    const cream = page.getByTestId("suggest-cream");
-    await expect(cream).toContainText("Plain cream");
-    await cream.getByRole("button", { name: "Mark as cream" }).click();
+    // cream is never suggested or offered: it is just a recipe ingredient
     await expect(page.getByTestId("suggest-cream")).toHaveCount(0);
-    await expect(page.getByLabel("Milk or cream for Whole milk")).toHaveValue("milk");
-    await expect(page.getByLabel("Milk or cream for Plain cream")).toHaveValue("cream");
+    await expect(page.getByLabel("Milk for Whole milk")).toHaveValue("milk");
+    await expect(page.getByLabel("Milk for Plain cream").locator("option")).toHaveText(["-", "Milk"]);
     const marked = (await readState(page)).ingredients;
     expect(marked.find((i: any) => i.name === "Lactose-free milk").pool).toBe("milk");
 
@@ -143,9 +137,6 @@ test.describe("milks and creams must be designated before menu items can offer t
     const milkChoices = await select(dlg, "Default milk").locator("option").allTextContents();
     expect(milkChoices).toEqual(expect.arrayContaining(["Whole milk", "Lactose-free milk", "Oat milk"]));
     await select(dlg, "Default milk").selectOption({ label: "Lactose-free milk" });
-    await box(dlg, "Uses cream?").click();
-    await expect(box(dlg, "Uses cream?")).toBeChecked();
-    expect(await select(dlg, "Default cream").locator("option").allTextContents()).toContain("Plain cream");
     await dlg.getByRole("button", { name: "Save" }).click();
     await expect(dlg).toBeHidden();
     await page.reload();
@@ -153,13 +144,12 @@ test.describe("milks and creams must be designated before menu items can offer t
     const lactose = (await readState(page)).ingredients.find((i: any) => i.name === "Lactose-free milk");
     expect(saved.defaultMilkId).toBe(lactose.id);
     expect(saved.allowedMilkIds.length).toBeGreaterThan(1);
-    expect(saved.defaultCreamId).toBeTruthy();
     dlg = await openMenuEditor(page, "Matcha Cheesecake");
     await expect(box(dlg, "Uses milk?")).toBeChecked();
     await expect(select(dlg, "Default milk")).toHaveValue(lactose.id);
   });
 
-  test("a new ingredient can be created already marked as milk or cream", async ({ page }) => {
+  test("a new ingredient can be created already marked as milk", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
     await openIngredients(page);
@@ -168,10 +158,10 @@ test.describe("milks and creams must be designated before menu items can offer t
     await form.getByRole("textbox").first().fill("Soy drink");
     await form.locator("input[type=number]").nth(0).fill("4");
     await form.locator("input[type=number]").nth(1).fill("1000");
-    await form.getByLabel("Milk or cream").selectOption("milk");
+    await form.getByLabel("Milk", { exact: true }).selectOption("milk");
     await form.getByRole("button", { name: "Add" }).click();
     await expect(form).toBeHidden();
-    await expect(page.getByLabel("Milk or cream for Soy drink")).toHaveValue("milk");
+    await expect(page.getByLabel("Milk for Soy drink")).toHaveValue("milk");
     expect((await readState(page)).ingredients.find((i: any) => i.name === "Soy drink").pool).toBe("milk");
   });
 
@@ -179,7 +169,7 @@ test.describe("milks and creams must be designated before menu items can offer t
     autoAcceptDialogs(page);
     await openApp(page);
     await openIngredients(page);
-    const pools = page.getByLabel(/^Milk or cream for /);
+    const pools = page.getByLabel(/^Milk for /);
     for (let i = 0; i < (await pools.count()); i++) if ((await pools.nth(i).inputValue()) !== "") await pools.nth(i).selectOption("");
     const costOf = async () => {
       await goTab(page, "Menu Manager");
@@ -191,7 +181,7 @@ test.describe("milks and creams must be designated before menu items can offer t
     const before = await costOf();
     // the recipe's milk line (180 ml of whole milk) is a plain line right now: mark whole milk as milk
     await openIngredients(page);
-    await page.getByLabel("Milk or cream for Whole milk").selectOption("milk");
+    await page.getByLabel("Milk for Whole milk").selectOption("milk");
     const after = await costOf();
     expect(after.m.defaultMilkId).toBe(after.ing.find((i: any) => i.name === "Whole milk").id);
     expect(after.m.allowedMilkIds).toContain(after.m.defaultMilkId);
@@ -200,3 +190,99 @@ test.describe("milks and creams must be designated before menu items can offer t
   });
 });
 
+
+test.describe("cream is a plain recipe ingredient, not a choice", () => {
+  test("the menu item editor has no cream controls, and a cream line still costs", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    const dlg = await openMenuEditor(page, "Ube Cream Matcha");
+    await expect(dlg).toContainText("Uses milk?");
+    for (const t of ["Uses cream?", "Default cream", "Allowed creams"]) await expect(dlg.getByText(t)).toHaveCount(0);
+    // the cream line is still in the recipe, and the derived cost includes it (more than the same recipe without it)
+    const st = await readState(page);
+    const ube = st.menuItems.find((m: any) => m.name === "Ube Cream Matcha");
+    const cream = st.ingredients.find((i: any) => i.id === ube.ingredientLines.find((l: any) => st.ingredients.find((x: any) => x.id === l.ingredientId)?.pool === "cream").ingredientId);
+    await expect(dlg.locator("select").filter({ has: page.locator(`option[value="${cream.id}"]:checked`) })).toHaveCount(1);
+    await dlg.getByRole("button", { name: "Cancel" }).click();
+  });
+
+  test("the Adjust step offers milk but no cream", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    await createEvent(page, { name: "NoCreamChoice" });
+    await page.locator("main").getByRole("button", { name: /^Ube Cream Matcha/ }).first().click();
+    await page.locator("aside ol").getByRole("button", { name: /Adjust/ }).click();
+    const panel = page.locator("aside").last();
+    await expect(panel.getByText("Milk", { exact: true })).toBeVisible();
+    await expect(panel.getByText("Cream", { exact: true })).toHaveCount(0);
+    await expect(panel.getByText(/no cream/i)).toHaveCount(0);
+  });
+
+  test("Edit Order offers milk but no cream, and a new order records no cream", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    await createEvent(page, { name: "EditNoCream" });
+    await placeOrder(page, { items: [{ name: "Ube Cream Matcha" }], pay: "Cash" });
+    const st = await readState(page);
+    const o = st.orders.find((x: any) => x.items.some((i: any) => i.menuItemNameSnap === "Ube Cream Matcha"));
+    expect(o.items[0].creamChoiceId).toBeUndefined();
+    expect(o.items[0].creamNameSnap).toBeUndefined();
+    expect(o.items[0].costSnap).toBeGreaterThan(0);
+    await goTab(page, "Barista Queue");
+    await baristaCard(page, 1).getByTitle("Edit").click();
+    const dlg = modal(page, /Edit order #1/);
+    // the line summary shows the milk and nothing about cream
+    await expect(dlg).toContainText("Whole milk");
+    await expect(dlg.getByText(/no cream/i)).toHaveCount(0);
+    // the customize panel (the sliders button on the line) has a Milk row and no Cream row
+    await dlg.locator("button").filter({ has: page.locator("svg[class*=lucide-sliders]") }).first().click();
+    const custom = page.locator("div.fixed.inset-0").last();
+    await expect(custom.getByText("Milk", { exact: true }).first()).toBeVisible();
+    await expect(custom.getByText("Cream", { exact: true })).toHaveCount(0);
+    await expect(custom.getByRole("button", { name: /no cream/i })).toHaveCount(0);
+  });
+});
+
+test.describe("warning: the drink offers milk but no recipe line is milk", () => {
+  const warning = (dlg: Locator) => dlg.getByTestId("milk-line-warning");
+
+  test("shows for a drink set up for milk with no milk line, and clears when a milk line is added", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    const dlg = await openMenuEditor(page, "Classic Matcha");
+    // a normal drink: uses milk and has a milk line, so no warning
+    await expect(box(dlg, "Uses milk?")).toBeChecked();
+    await expect(warning(dlg)).toHaveCount(0);
+
+    // remove the recipe's milk line: milk is still offered (default + allowed) but nothing costs it
+    const st = await readState(page);
+    const milkIds = st.ingredients.filter((i: any) => i.pool === "milk").map((i: any) => i.id);
+    const item = st.menuItems.find((m: any) => m.name === "Classic Matcha");
+    const milkLine = item.ingredientLines.find((l: any) => milkIds.includes(l.ingredientId));
+    const row = dlg.locator("select").filter({ has: page.locator(`option[value="${milkLine.ingredientId}"]:checked`) }).locator("xpath=..");
+    await row.getByRole("button").click();
+    await expect(warning(dlg)).toBeVisible();
+    await expect(warning(dlg)).toContainText("costs $0 for milk");
+
+    // add a recipe line, and point it at a milk: the warning goes away
+    await dlg.getByRole("button", { name: /Add line/i }).click();
+    const lineSelect = dlg.locator("select").filter({ has: page.locator("option", { hasText: "swapped for the order choice" }) }).last();
+    await lineSelect.selectOption(milkIds[0]);
+    await expect(warning(dlg)).toHaveCount(0);
+    await dlg.getByRole("button", { name: "Cancel" }).click();
+  });
+
+  test("no warning once milk is switched off, and none for a drink that never offered milk", async ({ page }) => {
+    autoAcceptDialogs(page);
+    await openApp(page);
+    const dlg = await openMenuEditor(page, "Matcha Cheesecake");
+    await expect(box(dlg, "Uses milk?")).not.toBeChecked();
+    await expect(warning(dlg)).toHaveCount(0);
+    // ticking milk on a pastry whose recipe has no milk line shows the warning straight away
+    await box(dlg, "Uses milk?").click();
+    await expect(warning(dlg)).toBeVisible();
+    await box(dlg, "Uses milk?").click();
+    await expect(warning(dlg)).toHaveCount(0);
+    await dlg.getByRole("button", { name: "Cancel" }).click();
+  });
+});

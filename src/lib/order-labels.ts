@@ -30,16 +30,25 @@ export function resolveMilkName(
   return ingredients.find((i) => i.id === id)?.name ?? milkLabelForId(id);
 }
 
-/** Name of the cream ("no cream" for the explicit none choice), or undefined. */
+/**
+ * LEGACY, display only: the cream an old order recorded ("no cream" for the explicit none choice), or
+ * undefined. Cream is no longer chosen, so nothing new is ever stamped; past orders keep reading.
+ */
 export function resolveCreamName(
   creamChoiceId: string | undefined,
-  drink: Pick<MenuItem, "defaultCreamId"> | undefined,
   ingredients: Ingredient[],
 ): string | undefined {
   if (creamChoiceId === "none") return "no cream";
-  const id = creamChoiceId ?? drink?.defaultCreamId;
-  if (!id) return undefined;
-  return ingredients.find((i) => i.id === id)?.name;
+  if (!creamChoiceId) return undefined;
+  return ingredients.find((i) => i.id === creamChoiceId)?.name;
+}
+
+/** LEGACY, display only: the cream recorded on a past order line (its name snapshot wins), if any. */
+export function legacyCreamName(
+  item: Pick<OrderItem, "creamNameSnap" | "creamChoiceId">,
+  ingredients: Ingredient[],
+): string | undefined {
+  return item.creamNameSnap ?? resolveCreamName(item.creamChoiceId, ingredients);
 }
 
 const PLACEHOLDER_NAMES = new Set(["", "unknown item", "unknown drink", "unknown"]);
@@ -82,7 +91,7 @@ export function isPastry(item: Pick<MenuItem, "category" | "size"> | undefined):
 }
 
 /**
- * Whether an item takes drink adjustments (milk / cream / sugar / ice).
+ * Whether an item takes drink adjustments (milk / sugar / ice).
  * Pastries get only a special-requests box. Unknown items default to "yes" so
  * a lookup miss never silently hides drink options.
  */

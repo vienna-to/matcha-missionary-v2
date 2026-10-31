@@ -43,15 +43,16 @@ describe("blank barista card (reproduction)", () => {
 });
 
 describe("snapshot at order time", () => {
-  it("stores drink + milk + cream names on the line item", () => {
+  it("stores drink + milk names on the line item, and never a cream (retired choice)", () => {
     const item = deriveOrderItem(
-      { menuItemId: MATCHA_LATTE.id, quantity: 1, creamChoiceId: "none" },
+      { menuItemId: MATCHA_LATTE.id, quantity: 1 },
       "ord-1",
       SNAPSHOT,
     );
     expect(item.menuItemNameSnap).toBe("Matcha Latte");
     expect(item.milkNameSnap).toBe("Whole milk"); // from the drink's default
-    expect(item.creamNameSnap).toBe("no cream");
+    expect(item.creamNameSnap).toBeUndefined();
+    expect(item.creamChoiceId).toBeUndefined();
   });
 
   it("keeps the milk name even if the ingredient is later deleted", () => {

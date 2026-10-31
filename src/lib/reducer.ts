@@ -5,7 +5,7 @@ import { normalizeIngredientPatch, normalizeNewIngredient } from "./prepared";
 import { newId, nowIso } from "./id";
 import { menuForOrderEdit } from "./edit-menu";
 import { chargedUnitFromPct, normalizeItemPatch } from "./pricing";
-import { hasDrinkAdjustments, resolveCreamName, resolveMilkName } from "./order-labels";
+import { hasDrinkAdjustments, resolveMilkName } from "./order-labels";
 import {
   type AppState,
   type Event,
@@ -154,31 +154,25 @@ export function deriveOrderItem(
   cupSizeOz?: number,
 ): OrderItem {
   const mi = findMenuItem(snapshot, raw.menuItemId);
-  // A custom drink has an automatic milk (the milk choice swaps it, like a
-  // menu drink) but no cream choice: its creams are the selected toppings.
-  if (isCustomItemId(raw.menuItemId)) {
-    raw = { ...raw, creamChoiceId: undefined };
-  }
-  // Pastries take no milk / cream / sugar / ice: drop them (and skip the
+  // Cream is no longer a choice: a new line never records one, so cream costs as the recipe line says.
+  // (Past orders keep theirs; see REPLACE_ORDER_ITEMS, where an unchanged line keeps its stamped fields.)
+  raw = { ...raw, creamChoiceId: undefined, creamNameSnap: undefined };
+  // Pastries take no milk / sugar / ice: drop them (and skip the
   // default-milk snapshot) so nothing drink-related is ever saved on them.
   // Special requests are kept.
   if (!hasDrinkAdjustments(mi)) {
     raw = {
       ...raw,
       milkChoiceId: undefined,
-      creamChoiceId: undefined,
       sugarAdjustment: undefined,
       iceAdjustment: undefined,
     };
   }
   const drinkOptions = hasDrinkAdjustments(mi);
-  // Snapshot the human-readable milk / cream now, so the barista card doesn't
+  // Snapshot the human-readable milk now, so the barista card doesn't
   // depend on an ingredient lookup that can miss later.
   const milkNameSnap = drinkOptions
     ? resolveMilkName(raw.milkChoiceId, mi, snapshot.ingredients)
-    : undefined;
-  const creamNameSnap = drinkOptions
-    ? resolveCreamName(raw.creamChoiceId, mi, snapshot.ingredients)
     : undefined;
   const customSpec = parseCustomItemId(raw.menuItemId);
   const drinkCost = customSpec
@@ -186,7 +180,6 @@ export function deriveOrderItem(
     : mi
     ? computeItemCost(mi, snapshot.ingredients, {
         milkChoiceId: raw.milkChoiceId,
-        creamChoiceId: raw.creamChoiceId,
         cupSizeOz,
       })
     : 0;
@@ -210,9 +203,7 @@ export function deriveOrderItem(
       costSnap: drinkCost + pastryCost,
       quantity: raw.quantity,
       milkChoiceId: raw.milkChoiceId,
-      creamChoiceId: raw.creamChoiceId,
       milkNameSnap,
-      creamNameSnap,
       sugarAdjustment: raw.sugarAdjustment,
       iceAdjustment: raw.iceAdjustment,
       specialRequests: raw.specialRequests,
@@ -235,9 +226,7 @@ export function deriveOrderItem(
     costSnap: drinkCost,
     quantity: raw.quantity,
     milkChoiceId: raw.milkChoiceId,
-    creamChoiceId: raw.creamChoiceId,
     milkNameSnap,
-    creamNameSnap,
     sugarAdjustment: raw.sugarAdjustment,
     iceAdjustment: raw.iceAdjustment,
     specialRequests: raw.specialRequests,
@@ -526,11 +515,13 @@ export function reducer(state: AppState, action: Action): AppState {
           prev.menuItemId === derived.menuItemId &&
           Boolean(prev.isCombo) === Boolean(derived.isCombo) &&
           prev.comboPastryId === derived.comboPastryId &&
-          prev.milkChoiceId === derived.milkChoiceId &&
-          prev.creamChoiceId === derived.creamChoiceId;
+          prev.milkChoiceId === derived.milkChoiceId;
         if (!same) return derived;
         return {
           ...derived,
+          // A past cream choice (retired) stays on the line as recorded, with its stamped cost.
+          creamChoiceId: prev.creamChoiceId,
+          creamNameSnap: prev.creamNameSnap,
           menuItemNameSnap: prev.menuItemNameSnap,
           priceSnap: prev.priceSnap,
           costSnap: prev.costSnap,

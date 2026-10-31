@@ -17,7 +17,6 @@ export type CartLine = {
   menuItemId: string;
   quantity: number;
   milkChoiceId?: string;
-  creamChoiceId?: string; // "none" means no cream; undefined means use default
   sugarAdjustment?: SugarAdjustment;
   iceAdjustment?: IceAdjustment;
   specialRequests?: string;
@@ -104,10 +103,9 @@ export function stepChecks(d: OrderDraft): Record<Step, boolean> {
     if (!hasDrinkAdjustments(item)) return false;
     // "Changed from default": choosing the default again is not a change.
     const milkChanged = l.milkChoiceId !== undefined && l.milkChoiceId !== item?.defaultMilkId;
-    const creamChanged = l.creamChoiceId !== undefined && l.creamChoiceId !== item?.defaultCreamId;
     const sugarChanged = l.sugarAdjustment !== undefined && l.sugarAdjustment !== "normal";
     const iceChanged = l.iceAdjustment !== undefined && l.iceAdjustment !== "normal";
-    return milkChanged || creamChanged || sugarChanged || iceChanged;
+    return milkChanged || sugarChanged || iceChanged;
   });
   const free = d.cart.length > 0 && isFreeTotal(cartTotal(d.cart, d.snapshot));
   return {
@@ -178,7 +176,6 @@ export function buildOrder(
         menuItemId: l.menuItemId,
         quantity: l.quantity,
         milkChoiceId: l.milkChoiceId,
-        creamChoiceId: l.creamChoiceId,
         sugarAdjustment: l.sugarAdjustment,
         iceAdjustment: l.iceAdjustment,
         specialRequests: l.specialRequests,

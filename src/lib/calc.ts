@@ -56,9 +56,10 @@ export function lineCost(line: IngredientLine, ing: Ingredient, ingredients: Ing
 }
 
 /**
- * Compute the cost of one unit of a menu item, with optional modifier swaps
- * for milk and cream pools. If a line points to a pool ingredient, the
- * provided choice (or the item's default) is substituted at calc time.
+ * Compute the cost of one unit of a menu item, with an optional milk swap. If a
+ * line points to a milk ingredient, the provided choice (or the item's default
+ * milk) is substituted at calc time. Every other line, cream included, costs
+ * the ingredient it names.
  *
  * `cupSizeOz` scales every ingredient line by cupSizeOz / REFERENCE_CUP_OZ,
  * on the assumption that recipes are authored at the reference size. Pastries
@@ -71,7 +72,6 @@ export function computeItemCost(
   ingredients: Ingredient[],
   opts: {
     milkChoiceId?: string;
-    creamChoiceId?: string | "none";
     cupSizeOz?: number;
   } = {},
 ): number {
@@ -87,11 +87,6 @@ export function computeItemCost(
     let use: Ingredient | undefined = base;
     if (base.pool === "milk") {
       const id = opts.milkChoiceId ?? item.defaultMilkId;
-      use = id ? map.get(id) : undefined;
-      if (!use) continue;
-    } else if (base.pool === "cream") {
-      if (opts.creamChoiceId === "none") continue;
-      const id = opts.creamChoiceId ?? item.defaultCreamId;
       use = id ? map.get(id) : undefined;
       if (!use) continue;
     }
@@ -489,7 +484,7 @@ export function expandCombosInByItem(
 }
 
 /**
- * For Menu Manager display: derived cost using the item's default milk/cream.
+ * For Menu Manager display: derived cost using the item's default milk.
  */
 export function defaultItemCost(item: MenuItem, ingredients: Ingredient[]): number {
   return computeItemCost(item, ingredients, {});

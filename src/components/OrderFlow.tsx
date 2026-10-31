@@ -6,7 +6,6 @@ import { Button, Field, Input, Textarea } from "@/components/ui";
 import { DiscountRow } from "@/components/DiscountRow";
 import ExtraPicker from "@/components/ExtraPicker";
 import {
-  COMBO_PRICE,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   type IceAdjustment,
@@ -63,8 +62,6 @@ type Props = {
   onUpdateLine: (cid: string, patch: Partial<CartLine>) => void;
   onRemoveLine: (cid: string) => void;
   onIncrement: (cid: string, delta: number) => void;
-  onOpenCombo: () => void;
-  onOpenCustom: () => void;
   onSubmit: () => void;
   helperMode: boolean;
   className?: string;
@@ -345,12 +342,6 @@ function ItemsStep(p: Props) {
           />
         ))
       )}
-      <Button variant="outline" className="h-12 w-full" onClick={p.onOpenCombo}>
-        + Combo deal · {formatMoney(COMBO_PRICE)}
-      </Button>
-      <Button variant="outline" className="h-12 w-full" onClick={p.onOpenCustom}>
-        + Custom drink
-      </Button>
     </div>
   );
 }

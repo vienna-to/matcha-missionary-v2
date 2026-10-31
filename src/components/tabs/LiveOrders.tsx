@@ -272,8 +272,6 @@ export default function LiveOrders() {
       onUpdateLine={updateLine}
       onRemoveLine={removeLine}
       onIncrement={incrementLine}
-      onOpenCombo={() => setComboPickerOpen(true)}
-      onOpenCustom={() => setCustomOpen(true)}
       onSubmit={submit}
       helperMode={helperMode}
     />

@@ -13,6 +13,20 @@ const optionTexts = async (sel: Locator) => (await sel.locator("option").allText
 const openCustom = (page: Page) => page.locator("main header").getByRole("button", { name: "+ Custom drink" }).click();
 
 test.describe("custom drink", () => {
+  test("the Custom drink and Combo deal buttons are in the top row only, not in the cart panel", async ({ page }) => {
+    await openApp(page);
+    await createEvent(page, { name: "Buttons once" });
+    const top = page.locator("main header");
+    await expect(top.getByRole("button", { name: "+ Custom drink" })).toHaveCount(1);
+    await expect(top.getByRole("button", { name: /\+ Combo deal/ })).toHaveCount(1);
+    // empty cart, then with an item: the side panel never offers them
+    for (let step = 0; step < 2; step++) {
+      await expect(page.locator("aside").getByRole("button", { name: /Custom drink|Combo deal/ })).toHaveCount(0);
+      if (step === 0) await page.locator("main").getByRole("button", { name: /^Classic Matcha/ }).first().click();
+    }
+    await expect(page.getByRole("button", { name: /Custom drink|Combo deal/ })).toHaveCount(2);
+  });
+
   test("entry flow: dropdowns, price preview, cost preview, order, totals", async ({ page }) => {
     autoAcceptDialogs(page);
     await openApp(page);
